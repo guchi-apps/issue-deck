@@ -66,6 +66,11 @@ type PullRequestRepairButtonsProps = {
   className?: string;
   /** ボタン本体の高さ・文字サイズ。隣のボタンと高さをそろえたいとき（#5388）に指定する。既定は`h-7` */
   buttonClassName?: string;
+  /**
+   * 自動修復の系列の状態が分かった・変わったとき（#5493）。PR詳細が、停止したら
+   * 「Issueのセッションで直す」を主ボタンへ上げるのに使う。系列が無ければnull
+   */
+  onLoopStatusChange?: (status: AutoRepairLoop["status"] | null) => void;
 };
 
 /**
@@ -92,6 +97,7 @@ export function PullRequestRepairButtons({
   guidance = false,
   className,
   buttonClassName,
+  onLoopStatusChange,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -118,6 +124,10 @@ export function PullRequestRepairButtons({
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [owner, repo, pullRequestNumber, kinds.length, loop?.status]);
+  const loopStatus = loop?.status ?? null;
+  useEffect(() => {
+    onLoopStatusChange?.(loopStatus);
+  }, [loopStatus, onLoopStatusChange]);
   useEffect(() => {
     if (!justStarted) return;
     const timer = window.setTimeout(() => setJustStarted(false), 5_000);

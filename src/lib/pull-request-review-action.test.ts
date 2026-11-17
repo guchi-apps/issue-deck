@@ -170,38 +170,41 @@ describe("deriveReviewAction", () => {
     expect(lookupFailed).toMatchObject({ kind: "respond", requestLookupFailed: true });
   });
 
-  it("依頼を渡すIssueが無い・ローカル対応中は、理由と代わりの操作を返す", () => {
+  it("元Issueのセッションの送り先が分かれば「Issueのセッションで直す」を出す（#5493）", () => {
+    for (const reviewFixRoute of [
+      { kind: "session", host: "subpc" },
+      { kind: "resume", host: "subpc", agent: "codex" },
+      { kind: "launch" },
+    ] as const) {
+      expect(
+        deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ reviewFixRoute }) }),
+      ).toMatchObject({ kind: "respond", request: { available: true, issueNumber: 4421, route: reviewFixRoute } });
+    }
+    // 11.localの有無は問わない（ローカルセッションへ渡す経路のため）
+    expect(
+      deriveReviewAction({
+        pullRequest: pr(),
+        review: review(),
+        context: context({ linkedIssueLocal: true, reviewFixRoute: { kind: "session", host: "subpc" } }),
+      }),
+    ).toMatchObject({ kind: "respond", request: { available: true } });
+  });
+
+  it("依頼を渡すIssueが無い・クローズ済み・送り先を確かめられないときは、理由と代わりの操作を返す", () => {
     expect(
       deriveReviewAction({ pullRequest: pr({ headRef: "chore/foo" }), review: review(), context: null }),
     ).toMatchObject({ kind: "respond", request: { available: false, alternative: "draft-fix-issue" } });
     expect(
-      deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ linkedIssueLocal: true }) }),
-    ).toMatchObject({ kind: "respond", request: { available: false, alternative: "open-issue" } });
-    // 生きているセッションが無い11.localは外し忘れとして外す案内を出す（#5160）
-    const leftover = deriveReviewAction({
-      pullRequest: pr(),
-      review: review(),
-      context: context({ linkedIssueLocal: true, linkedIssueSessionAlive: false }),
-    });
-    expect(leftover).toMatchObject({ kind: "respond", request: { available: false, alternative: "open-issue" } });
-    if (leftover.kind !== "respond") throw new Error("unreachable");
-    expect(leftover.request.reason).toContain("11.localを外し");
-    expect(leftover.request.reason).not.toContain("実行されません");
-    // セッションが動いている・確かめられなかったときは「対応中」の案内のまま
-    for (const linkedIssueSessionAlive of [true, null, undefined]) {
-      const active = deriveReviewAction({
+      deriveReviewAction({
         pullRequest: pr(),
         review: review(),
-        context: context({ linkedIssueLocal: true, linkedIssueSessionAlive }),
-      });
-      if (active.kind !== "respond") throw new Error("unreachable");
-      expect(active.request.reason).toContain("対応中");
-      expect(active.request.reason).not.toContain("11.localを外し");
-    }
-    // closedのIssueへの@claudeはdispatchがskipする（計画レビューの指摘）
-    expect(
-      deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ linkedIssueClosed: true }) }),
+        context: context({ linkedIssueClosed: true, reviewFixRoute: { kind: "launch" } }),
+      }),
     ).toMatchObject({ kind: "respond", request: { available: false, alternative: "draft-fix-issue" } });
+    const unknown = deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ reviewFixRoute: null }) });
+    expect(unknown).toMatchObject({ kind: "respond", request: { available: false, alternative: "open-issue" } });
+    if (unknown.kind !== "respond" || unknown.request.available) throw new Error("unreachable");
+    expect(unknown.request.reason).toContain("確かめられませんでした");
   });
 
   it("LGTM・閉じたPR・ドラフトは対象外", () => {

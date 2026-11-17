@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
@@ -176,7 +179,7 @@ export function ReleasePullRequestOverview({
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const { repositoryFullName, number, headRef } = pullRequest;
-  const { verification, error } = useReleaseVerification(repositoryFullName, number, true, reloadToken);
+  const { verification, error, settledToken: verificationSettled } = useReleaseVerification(repositoryFullName, number, true, reloadToken);
   const changes = useReleaseChanges(repositoryFullName, true, number, reloadToken, false);
   // リリース候補（#4495）。新方式は候補ID・revision、旧方式は識別と移行の導線を出す
   const rc = useReleaseRc(repositoryFullName, number, true, reloadToken);
@@ -227,6 +230,30 @@ export function ReleasePullRequestOverview({
       <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} variant="outline" label="承認せずに本番公開へ進む" />
     ) : null;
   const reload = () => setReloadToken((n) => n + 1);
+  // 「状態を取り直す」の反応と結果（#5478）。押した回の取得（候補・検証・反映内容）がそろって終わるまで「取得中」にする
+  const [refresh, setRefresh] = useState<{ token: number; before: string } | null>(null);
+  const [refreshResult, setRefreshResult] = useState<{ kind: "changed" | "same" | "failed"; at: string; message?: string } | null>(null);
+  const snapshot = JSON.stringify([rc.overview, verification]);
+  const refreshError = rc.error ?? error ?? changes.error;
+  useEffect(() => {
+    if (!refresh) return;
+    if (rc.settledToken < refresh.token || verificationSettled < refresh.token || changes.isLoading) return;
+    // 完了の知らせは取得側の状態（トークン・読み込み中）から届くので、ここで結果へ確定する
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRefresh(null);
+    setRefreshResult(
+      refreshError
+        ? { kind: "failed", at: new Date().toISOString(), message: refreshError }
+        : { kind: snapshot === refresh.before ? "same" : "changed", at: new Date().toISOString() },
+    );
+  }, [refresh, snapshot, rc.settledToken, verificationSettled, changes.isLoading, refreshError]);
+  const refreshing = refresh !== null;
+  const startRefresh = () => {
+    if (refreshing) return;
+    setRefreshResult(null);
+    setRefresh({ token: reloadToken + 1, before: snapshot });
+    reload();
+  };
   // 新方式の候補では、修正の自動継続の入口を「おまかせで公開承認まで進める」1つにする（#5138・#5369）。
   // 自動修正で解消できない要確認（指摘0件）のときは、ボタンでなく再実行・判断への案内を出す
   const autoProceedMode =
@@ -275,9 +302,25 @@ export function ReleasePullRequestOverview({
             <ReleaseJourneyNow
               journey={journey}
               action={
-                <button type="button" className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={reload}>
-                  状態を取り直す
-                </button>
+                <>
+                  <Button type="button" variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={startRefresh} data-testid="release-journey-refresh">
+                    {refreshing ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+                    {refreshing ? "取得中…" : refreshResult?.kind === "failed" ? "もう一度取り直す" : "状態を取り直す"}
+                  </Button>
+                  {refreshResult && (
+                    <span
+                      role="status"
+                      className={cn("basis-full break-words text-[11px]", refreshResult.kind === "failed" ? "text-destructive" : "text-muted-foreground")}
+                      data-testid="release-journey-refresh-result"
+                    >
+                      {refreshResult.kind === "failed"
+                        ? `取得に失敗しました: ${refreshResult.message}。表示は前回の取得のままです`
+                        : refreshResult.kind === "same"
+                          ? `変更はありません${journey.updatedAt ? `（記録の更新 ${formatMonthDayTime(journey.updatedAt)}）` : ""}`
+                          : `最新の状態を取得しました（${formatTimeOfDay(refreshResult.at)}）`}
+                    </span>
+                  )}
+                </>
               }
               link={
                 journey.headline?.key === "approve" && journey.owner === "user" && rc.overview?.finalization ? (

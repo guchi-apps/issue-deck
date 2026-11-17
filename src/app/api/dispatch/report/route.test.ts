@@ -34,6 +34,7 @@ vi.mock("@/lib/manual-step-verification-patrol", () => ({
 }));
 
 const { POST } = await import("./route");
+const { REVIEW_FIX_SESSION_INSTRUCTION } = await import("@/lib/dispatch/review-fix-session");
 
 function job(overrides: Record<string, unknown> = {}) {
   return {
@@ -92,6 +93,18 @@ describe("POST /api/dispatch/report の確認待ち解除", () => {
     await POST(postRequest(succeeded));
     expect(resolveFixedInstructionCheckUser).toHaveBeenCalledWith(
       expect.objectContaining({ allowMergeReason: false }),
+    );
+  });
+
+  it("PRのレビュー指摘の修正依頼（#5493）が届いたら01.check-mergeまで外す", async () => {
+    reportDispatchJob.mockResolvedValue({
+      ok: true,
+      applied: true,
+      job: job({ instruction: REVIEW_FIX_SESSION_INSTRUCTION }),
+    });
+    await POST(postRequest(succeeded));
+    expect(resolveFixedInstructionCheckUser).toHaveBeenCalledWith(
+      expect.objectContaining({ allowMergeReason: true }),
     );
   });
 

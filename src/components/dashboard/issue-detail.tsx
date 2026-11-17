@@ -122,6 +122,7 @@ import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisite
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
+import { IssueReviewFixBand } from "@/components/dashboard/issue-review-fix-band";
 import {
   approveCommentBody,
   canCompleteManualStep,
@@ -1124,6 +1125,17 @@ export function IssueDetail({
                   質問も計画も進まないので、このIssueで最初に片付ける必要がある操作になる。
                   停滞していなければ`SessionStallPanel`自身が何も描かない */}
               <SessionStallPanel session={issueSession} dispatch={dispatch} />
+
+              {/* PRのレビュー指摘をこのIssueのセッションで直す（#5493）。「セッションを復旧」は指摘を
+                  渡さない再開なので、指摘が残っているPRがあるときだけ、指摘と結びついた入口を別に出す */}
+              <IssueReviewFixBand
+                repositoryFullName={issue.repositoryFullName}
+                issueNumber={issue.number}
+                pullRequests={pullRequests}
+                session={issueSession}
+                comments={comments}
+                onRequested={() => void refreshComments()}
+              />
 
               {/* 通常Issueの作業サマリー（#4524）。目的・完了条件が本文にあるときだけ出す。
                   手作業Issueは`ManualStepPanel`が同じ部品を状態カードの中に持つ */}

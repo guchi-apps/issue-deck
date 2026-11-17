@@ -1299,6 +1299,43 @@ export function splitLanesByReleaseCandidate(
   return { included, waiting: afterFreeze };
 }
 
+/** 未リリース件数を「候補に入っていない／入っている」に分けたもの（#5489） */
+export type UnreleasedCandidateSplit = {
+  /** 候補ができた後に増えるなどして、次の本番候補に入っていない件数。候補が無ければ0 */
+  outsideCount: number;
+  /** 本番候補に入っている件数。候補が無ければ0（分けずに総数だけを出す） */
+  insideCount: number;
+  /** 候補（リリースPR・本番反映中の候補）が1つでもあるか。falseなら分けて出さない */
+  hasCandidate: boolean;
+};
+
+/**
+ * 未リリースの件数（`repositoryUnreleasedSummary`）を、本番候補に入っている分と入っていない分へ分ける（#5489）。
+ *
+ * 振り分けは「リリース候補」の見出しへ入れるレーンと同じ規則（`splitLanesByReleaseCandidate`）で、
+ * 画面の他の部分と食い違わせない。**候補が無い（リリースPR・本番反映中の候補が無い）ときは分けない**
+ * ——全てが「入っていない」側になり、2つの数字を並べる意味が無いため`hasCandidate=false`で返す。
+ *
+ * 総数はコミット単位の既存の数、候補外はレーン数で数えるため、**候補外は総数を超えないよう上限を掛け**、
+ * 候補入りは「総数−候補外」とする。
+ */
+export function splitUnreleasedByReleaseCandidate(repository: {
+  release: { comparison: BranchComparison | null };
+  productionSuspension: string | null;
+  releaseGroups: BranchFlowReleaseGroup[];
+}): UnreleasedCandidateSplit {
+  const total = repositoryUnreleasedSummary(repository).count;
+  const group = repository.releaseGroups.find(
+    (candidate) => candidate.mergedAt === null && candidate.key !== MERGED_TO_MAIN_GROUP_KEY,
+  );
+  const hasCandidate = !!group && (group.pullRequest !== null || !!group.deployingCandidate);
+  if (total === 0 || !group || !hasCandidate) {
+    return { outsideCount: 0, insideCount: total, hasCandidate: false };
+  }
+  const outsideCount = Math.min(total, splitLanesByReleaseCandidate(group).waiting.length);
+  return { outsideCount, insideCount: total - outsideCount, hasCandidate: true };
+}
+
 /** リリースPRの版に対応する、マージ済みバンプPR（`release/v<版>`）の作成時刻。無ければundefined */
 function mergedBumpPullRequestCreatedAt(
   pullRequests: PullRequestSummary[],

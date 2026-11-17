@@ -122,6 +122,7 @@ import {
   countOpenManualSteps,
   hasChangesAfterReleaseFreeze,
   splitLanesByReleaseCandidate,
+  splitUnreleasedByReleaseCandidate,
   splitLanesByReleaseFreeze,
   isClosedLane,
   repositoryUnreleasedSummary,
@@ -1182,29 +1183,6 @@ function ReleaseStagePills({ stages, fallback }: { stages: ReleaseStageBadge[]; 
  */
 const BranchFlowRefreshContext = createContext<(() => void) | null>(null);
 
-/**
- * 画面を開いた時・手動更新で最新の情報を取りに行っている間だけ真（#5467）。
- * 画面は前回取得した内容を先に出すため、取得が終わるまでの間は古い可能性があることを行・カードへ伝える。
- * 自動更新（バックグラウンド）では`isLoading`が立たないので、周期ごとに点滅することはない（#1767）。
- */
-const BranchFlowFetchingContext = createContext(false);
-
-/** 古い可能性がある内容に添える「取得中」の印（#5467） */
-function FetchingBadge({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/50 px-2 text-[11px] font-semibold text-primary",
-        className,
-      )}
-      data-testid="fetching-badge"
-    >
-      <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      取得中
-    </span>
-  );
-}
-
 /** 「過去のリリース」の追加取得（#4844）。束の描画の途中に何段もあるため、propsではなくContextで届ける */
 const BranchFlowHistoryContext = createContext<BranchFlowReleaseHistory | null>(null);
 
@@ -1684,7 +1662,6 @@ function NextReleaseCard({
 }) {
   const navigation = useGithubReferenceNavigation();
   const refreshFlow = useContext(BranchFlowRefreshContext);
-  const isFetching = useContext(BranchFlowFetchingContext);
   const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
 
   // カード全体を押すと本番PRへ移動する（#4721）。内側の操作（公開ボタン・リンク・検証の開閉）や
@@ -1744,18 +1721,13 @@ function NextReleaseCard({
       className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
       data-testid="next-release-card"
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
-        {isFetching && <FetchingBadge />}
-      </div>
+      <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
 
       {/* 1. 現在のリリース候補・工程・いま・担当・次（#4635・#5076）。本番版・履歴より先に出す */}
       <div
         className={cn(
           "flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2",
           pullRequest && "cursor-pointer hover:bg-muted/40",
-          // 取得が終わるまでは古い可能性がある内容として薄く出す（#5467）
-          isFetching && "opacity-60",
         )}
         data-testid="next-release-candidate"
         onClick={openPullRequestFromCard}
@@ -1979,6 +1951,7 @@ function ReleaseFlowGraph({
   // コミットを数えず（#2316）、残りもマージコミット単位＝PR単位の「件」で数える（#2333）
   // ための判定を、3か所で共有する。
   const unreleased = repositoryUnreleasedSummary(repository);
+  const legendSplit = splitUnreleasedByReleaseCandidate(repository);
   // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
@@ -2117,7 +2090,10 @@ function ReleaseFlowGraph({
           {DEVELOP_BRANCH}
         </span>
         {unreleased.count > 0 && (
-          <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
+          <span>
+            未リリース {formatUnreleasedSummary(unreleased)}
+            {legendSplit.hasCandidate && `（候補外 ${legendSplit.outsideCount}・候補 ${legendSplit.insideCount}）`}
+          </span>
         )}
         {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
             従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
@@ -2493,6 +2469,7 @@ function RepositorySummaryRow({
 }) {
   const { summary } = repository;
   const unreleased = repositoryUnreleasedSummary(repository);
+  const candidateSplit = splitUnreleasedByReleaseCandidate(repository);
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -2535,7 +2512,6 @@ function RepositorySummaryRow({
   const guidance = describeBranchFlow(repository, {
     branchesFailed, releaseLaunching, verification, unreleasedCount: unreleased.count,
   });
-  const isFetching = useContext(BranchFlowFetchingContext);
 
   return (
     <button
@@ -2548,8 +2524,6 @@ function RepositorySummaryRow({
         // 2行目が無い行でも押しやすい高さを保つ（#4848。スマホは指で押すので少し高く）
         "flex min-h-[52px] w-full flex-col justify-center gap-1 border-b px-4 py-2 text-left hover:bg-accent/50 md:min-h-12",
         isOpen && "bg-muted/60",
-        // 取得が終わるまでは古い可能性がある内容として薄く出す（#5467）
-        isFetching && "opacity-60",
         // 枠線のぶん左padding を詰めて、選択中でない行と文字の位置を揃える
         showSelectionMarker && "border-l-2 border-l-transparent pl-3.5",
         showSelectionMarker && isOpen && "border-l-primary",
@@ -2647,11 +2621,25 @@ function RepositorySummaryRow({
       {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886）。
           リリース候補・バンプPRが開いている間も出す（#4897）。新方式の候補は検証・公開承認待ちで
           長く開いたままになり、そのあいだ隠すと本番反映待ちの件数がほとんど見えなくなっていた */}
-      {unreleased.count > 0 && (
+      {/* 本番候補ができているときは、候補に入っていない件数（左・破線）と入っている件数（右）に分ける（#5489） */}
+      {unreleased.count > 0 && candidateSplit.hasCandidate && candidateSplit.outsideCount > 0 && (
+        <span
+          title={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
+          aria-label={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
+          className="flex shrink-0 items-center rounded-full border border-dashed border-purple-500 px-1.5 text-xs tabular-nums text-purple-600 dark:text-purple-400"
+        >
+          +{candidateSplit.outsideCount}
+        </span>
+      )}
+      {unreleased.count > 0 && (!candidateSplit.hasCandidate || candidateSplit.insideCount > 0) && (
         <SummaryCount
           icon={ArrowUpToLine}
-          label={`未リリース ${formatUnreleasedSummary(unreleased)}`}
-          count={unreleased.count}
+          label={
+            candidateSplit.hasCandidate
+              ? `本番候補に入っている ${candidateSplit.insideCount}件`
+              : `未リリース ${formatUnreleasedSummary(unreleased)}`
+          }
+          count={candidateSplit.hasCandidate ? candidateSplit.insideCount : unreleased.count}
           className="text-purple-600 dark:text-purple-400"
         />
       )}
@@ -2945,6 +2933,7 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  */
 function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
   const unreleased = repositoryUnreleasedSummary(repository);
+  const candidateSplit = splitUnreleasedByReleaseCandidate(repository);
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
@@ -2962,7 +2951,11 @@ function RepositoryDetailHeader({ repository }: { repository: BranchFlowReposito
             <span>リリース済みのバージョンなし</span>
           )}
           {unreleased.count > 0 && (
-            <span>{` ・ 未リリース ${formatUnreleasedSummary(unreleased)}`}</span>
+            <span>
+              {` ・ 未リリース ${formatUnreleasedSummary(unreleased)}`}
+              {candidateSplit.hasCandidate &&
+                `（候補外 ${candidateSplit.outsideCount}・候補 ${candidateSplit.insideCount}）`}
+            </span>
           )}
           {repository.summary.activeLaneCount > 0 && (
             <span>{` ・ 進行中 ${repository.summary.activeLaneCount}件`}</span>
@@ -3089,11 +3082,14 @@ export function BranchFlowView({
         ? "always"
         : (branchViewModes?.[repository.repositoryFullName] ?? "always"),
     hasActivity: hasBranchActivity,
-    isUnknown: (repository) =>
-      !rowsLoaded || failedRepositories.includes(repository.repositoryFullName),
+    // 取得に失敗したものだけ「動きの有無が不明」として並べる。読み込み中は並べない（#5494。
+    // 先に全件を出して読み込み後に消すと、行が現れては消えて見えた）
+    isUnknown: (repository) => failedRepositories.includes(repository.repositoryFullName),
+    isLoading: !rowsLoaded,
     showAll: false,
   });
-  const branchViewHiddenCount = branchViewSelection.hidden.length;
+  // 読み込み中は「設定で省略」と言い切らない（#5494。動きの有無が分かってから数える）
+  const branchViewHiddenCount = rowsLoaded ? branchViewSelection.hidden.length : 0;
   const shownRepositories = branchViewSelection.visible;
   // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
   const attentionRepositories = shownRepositories.filter(needsAttention);
@@ -3163,7 +3159,6 @@ export function BranchFlowView({
   return (
     <IosFixIssueDraftContext.Provider value={onDraftIosFixIssue}>
     <BranchFlowRefreshContext.Provider value={onRefresh}>
-    <BranchFlowFetchingContext.Provider value={isLoading}>
     <BranchFlowHistoryContext.Provider value={releaseHistory ?? null}>
     <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
@@ -3181,21 +3176,6 @@ export function BranchFlowView({
             >
               ブランチ
             </h1>
-            {/* 前回の内容が先に出ているあいだは、取得中であることを別の行で伝える（#5467）。
-                `<p>`は truncate で、スマホでは末尾が切れて見えなくなる */}
-            {isLoading && (
-              <p
-                role="status"
-                className="flex items-center gap-1 text-xs font-semibold text-primary"
-                data-testid="branch-flow-fetching"
-              >
-                <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                最新の情報を取得中…
-                {fetchedAt && (
-                  <span className="font-normal text-muted-foreground">{`（${formatTimeOfDay(fetchedAt)}時点の内容を表示中）`}</span>
-                )}
-              </p>
-            )}
             <p className="truncate text-xs text-muted-foreground">
               <span>{shownRepositories.length}リポジトリ</span>
               {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
@@ -3345,7 +3325,11 @@ export function BranchFlowView({
             </p>
           )}
 
-          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && (
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && !rowsLoaded && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">読み込み中...</p>
+          )}
+
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && rowsLoaded && (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               ブランチ画面に並べるリポジトリがありません（{branchViewHiddenCount}件は設定で省略しています）。
               「表示リポジトリを編集」から表示するものを変えられます。
@@ -3398,7 +3382,6 @@ export function BranchFlowView({
       </div>
     </div>
     </BranchFlowHistoryContext.Provider>
-    </BranchFlowFetchingContext.Provider>
     </BranchFlowRefreshContext.Provider>
     </IosFixIssueDraftContext.Provider>
   );

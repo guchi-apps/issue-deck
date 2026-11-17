@@ -570,7 +570,8 @@ describe("PullRequestDetail", () => {
     // 廃止済みの自由文修正依頼は、押すと必ず拒否されるため出さない（#5127）
     expect(panel.queryByRole("button", { name: "AIに修正を依頼" })).toBeNull();
     expect(panel.queryByRole("textbox", { name: "修正の方針（任意）" })).toBeNull();
-    expect(panel.getByText(/ホストセッションを開き/)).toBeTruthy();
+    // 送り先を確かめられないときは、理由と代わりの操作（Issueを開く）を出す（#5493）
+    expect(panel.getByText(/セッションを開いて指摘を伝えて/)).toBeTruthy();
     expect(panel.getByRole("button", { name: "マージ確認へ進む" })).toBeTruthy();
     // 要確認は不具合ではない（#5158）。赤い印・「対応を選んでください」を出さず、人の確認待ちとして出す
     expect(screen.queryByLabelText("対応が必要")).toBeNull();
@@ -579,6 +580,67 @@ describe("PullRequestDetail", () => {
     expect(panel.queryByText("この指摘への対応を選んでください")).toBeNull();
     // コードを変えずに前提を解消したときのため、現在のコミットのままAIレビューを再実行できる
     expect(panel.getByRole("button", { name: "AIレビューを再実行" })).toBeTruthy();
+  });
+
+  it("送り先が分かれば「Issueのセッションで直す」を出し、全文を確かめてから依頼する（#5493）", async () => {
+    const headSha = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
+    const pullRequest = makePullRequest({
+      mergeable: true,
+      headSha,
+      headRef: "issue-1087",
+      reviewVerdict: {
+        reviewKind: "needs-check",
+        reviewLabel: "要確認",
+        riskKind: "none",
+        riskLabel: "",
+        riskReasons: [],
+        confirmLabel: null,
+        reviewedSha: headSha,
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderDetail({
+      pullRequest,
+      detail: makeDetail({
+        summary: pullRequest,
+        events: [
+          makeEvent({
+            body: `## 気になった点\n1. Issueの要件が未達です\n\n<!-- issue-deck-review-verdict:needs-check sha=${headSha} -->`,
+          }),
+        ],
+        reviewResponse: {
+          issueNumber: 1087,
+          linkedIssueLocal: true,
+          currentFixRequest: null,
+          fetchFailed: false,
+          reviewFixRoute: { kind: "session", host: "subpc" },
+        },
+      }),
+    });
+
+    const primary = within(screen.getByTestId("pull-request-primary-action"));
+    const fix = primary.getByRole("button", { name: "Issue #1087 のセッションで直す" });
+    // 要確認では自動修正が無いので、こちらが主ボタン
+    expect(fix.getAttribute("data-variant")).toBe("default");
+    expect(primary.getByRole("button", { name: "指摘に対応する" }).getAttribute("data-variant")).toBe("outline");
+
+    fireEvent.click(fix);
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.getByText(/動いているセッションへ渡す（subpc）/)).toBeTruthy();
+    expect(dialog.getByText(/IssueにPRのレビュー指摘への修正依頼コメントを追加しました/)).toBeTruthy();
+    expect(dialog.getByText(/Issueの要件が未達です/)).toBeTruthy();
+    fireEvent.change(dialog.getByRole("textbox"), { target: { value: "方針A" } });
+    fireEvent.click(dialog.getByRole("button", { name: "セッションへ送る" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/pull-requests/review-fix-session",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const call = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([url]) => url === "/api/pull-requests/review-fix-session");
+    expect(JSON.parse(String(call?.[1].body))).toMatchObject({ number: pullRequest.number, note: "方針A" });
   });
 
   it("AIレビューを再実行すると、現在のHEADを添えて依頼し、依頼済みを出す（#5158）", async () => {

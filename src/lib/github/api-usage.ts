@@ -96,6 +96,7 @@ export const GITHUB_API_FEATURES = [
   // PR詳細の「AIレビューを再実行」（#5158）。押したときだけ消費する。
   { key: "pull_request_review_rerun", label: "PRのAIレビュー再実行" },
   { key: "pull_request_review_ack", label: "レビュー指摘の確認済み記録" },
+  { key: "pull_request_review_fix_session", label: "レビュー指摘をIssueのセッションで直す" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   // PR詳細の対応パネル（#4482）。レビュー指摘への修正を紐づくIssueへ依頼したときだけ消費する。
   { key: "pull_request_fix_request", label: "レビュー指摘の修正依頼" },

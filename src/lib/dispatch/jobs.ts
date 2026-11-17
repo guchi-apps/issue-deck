@@ -1237,8 +1237,8 @@ export async function enqueueSessionControlJob(params: {
    *
    * - `POST /api/dispatch/session-recovery`（#2886）: 停滞からの復旧。セッションが今も
    *   停滞していることを確かめる
-   * - `POST /api/dispatch/pr-fix-notify`（#2919）: マージ待ちの修正依頼をローカルセッションへ
-   *   知らせる。セッションが今も生きていることを確かめる
+   * - `POST /api/pull-requests/review-fix-session`（#5493）: PRのレビュー指摘の修正依頼を
+   *   Issueのセッションへ知らせる。PRのいまのHEADに指摘があり、セッションが生きていることを確かめる
    */
   recovery?: boolean;
   /**

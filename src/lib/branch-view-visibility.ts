@@ -33,8 +33,9 @@ export type BranchViewSelection<T> = {
  * ブランチ画面に並べるリポジトリを決める。
  *
  * - `always`（未設定を含む）は常に並べる
- * - `active`は`hasActivity`のとき並べる。**動きの有無を判断できないとき（`isUnknown`。取得失敗・
- *   読み込み中）は並べる**——「動きなし」と断定して重要な行を消さない
+ * - `active`は`hasActivity`のとき並べる。**読み込み中（`isLoading`）は並べない**（#5494。全件を先に出して
+ *   後から消すと行が現れては消える）。**取得に失敗したなど動きの有無を判断できないとき（`isUnknown`）は
+ *   並べる**——「動きなし」と断定して重要な行を消さない
  * - `never`は省く
  * - `showAll`（一時表示）のときは全件を並べる。設定は変えない
  */
@@ -44,6 +45,8 @@ export function selectBranchViewRepositories<T>(
     modeOf: (repository: T) => BranchViewMode;
     hasActivity: (repository: T) => boolean;
     isUnknown: (repository: T) => boolean;
+    /** 動きの有無がまだ分からない読み込み中か（#5494）。真の間、`active`は動きがあっても並べない */
+    isLoading?: boolean;
     showAll: boolean;
   },
 ): BranchViewSelection<T> {
@@ -54,7 +57,8 @@ export function selectBranchViewRepositories<T>(
     const show =
       options.showAll ||
       mode === "always" ||
-      (mode === "active" && (options.isUnknown(repository) || options.hasActivity(repository)));
+      (mode === "active" &&
+        (options.isUnknown(repository) || (!options.isLoading && options.hasActivity(repository))));
     (show ? visible : hidden).push(repository);
   }
   return { visible, hidden };
