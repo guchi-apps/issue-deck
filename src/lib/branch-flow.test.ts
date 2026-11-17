@@ -11,6 +11,7 @@ import {
   hasChangesAfterReleaseFreeze,
   splitLanesByReleaseFreeze,
   splitLanesByReleaseCandidate,
+  splitUnreleasedByReleaseCandidate,
   isClosedLane,
   isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
@@ -2722,6 +2723,42 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
     const released = splitLanesByReleaseCandidate({ ...group, mergedAt: "2026-08-16T00:00:00Z" });
     expect(released.waiting).toEqual([]);
     expect(released.included).toHaveLength(2);
+  });
+
+  it("splitUnreleasedByReleaseCandidate: 候補に入っていない件数と入っている件数に分ける（#5489）", () => {
+    const comparison = (count: number): BranchComparison => ({
+      aheadBy: count,
+      behindBy: 0,
+      sameContent: false,
+      units: null,
+    });
+    const group = unreleasedGroup(["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"]);
+    const repo = (g: typeof group | null, count: number) => ({
+      release: { comparison: comparison(count) },
+      productionSuspension: null,
+      releaseGroups: g ? [g] : [],
+    });
+
+    // 候補あり: 凍結後の1件が候補外、残りが候補入り
+    expect(splitUnreleasedByReleaseCandidate(repo(group, 9))).toEqual({
+      outsideCount: 1,
+      insideCount: 8,
+      hasCandidate: true,
+    });
+    // 候補なし: 分けず、総数だけ
+    expect(splitUnreleasedByReleaseCandidate(repo({ ...group, pullRequest: null }, 9))).toEqual({
+      outsideCount: 0,
+      insideCount: 9,
+      hasCandidate: false,
+    });
+    // 候補外は総数を超えない
+    expect(splitUnreleasedByReleaseCandidate(repo(group, 0)).outsideCount).toBe(0);
+    // 未リリースの束が無い
+    expect(splitUnreleasedByReleaseCandidate(repo(null, 3))).toEqual({
+      outsideCount: 0,
+      insideCount: 3,
+      hasCandidate: false,
+    });
   });
 
   describe("RCへ後から取り込んだ修正PR（#5103。AIDE#719/#721）", () => {
