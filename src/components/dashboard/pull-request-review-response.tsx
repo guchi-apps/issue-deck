@@ -7,7 +7,9 @@ import { GithubReferenceLink } from "@/components/dashboard/github-reference-lin
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
+import { ReviewFixSessionButton } from "@/components/dashboard/review-fix-session-button";
 import { Button } from "@/components/ui/button";
+import { describeReviewFixSessionRoute } from "@/lib/dispatch/review-fix-session";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   isReviewExecutorFailure,
@@ -28,8 +30,8 @@ export const REVIEW_RESPONSE_ANCHOR_ID = "pull-request-review-response";
  * 上部の「指摘に対応する」はここへ移動する。表示は`deriveReviewAction`の結果だけから決める。
  *
  * - 要修正で自動修正が使えれば、既存の「PRを自動修正」（#4318の系列）を先頭に置く
- * - 自由文の修正依頼（Actions経由）は#4680で廃止済み。実行できないボタンは出さず、Issue詳細の
- *   ホストセッション・修正Issueの起案といった実際に使える操作だけを案内する
+ * - 自由文の修正依頼（Actions経由）は#4680で廃止済み。代わりに「Issueのセッションで直す」（#5493）で
+ *   元Issueのセッションへ指摘を渡す。使えないときは修正Issueの起案など実際に使える操作だけを案内する
  * - 「修正せずにマージ」は既存のマージ確認（#4377）を必ず通る
  * - 要確認（人の確認待ち）は要修正（不具合）と色・文言・並びを分ける（#5158）。要確認ではマージ確認を先頭に置く
  * - 指摘の前提をコード以外で解消したときのため、現在のコミットのままAIレビューを再実行できる（#5158）
@@ -277,7 +279,7 @@ export function PullRequestReviewResponse({
             />
           ) : (
             <p className="text-xs text-amber-800 dark:text-amber-300">
-              {action.autoRepairUnavailable ?? "このPRでは自動修正を起動できません。下の案内から、Issue詳細のホストセッションで修正を依頼してください。"}
+              {action.autoRepairUnavailable ?? "このPRでは自動修正を起動できません。下の「Issueのセッションで直す」から修正を依頼してください。"}
             </p>
           )}
         </Option>
@@ -290,42 +292,95 @@ export function PullRequestReviewResponse({
         <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
       </Option>
 
-      <Option title={needsCheck ? "確認の結果、修正が必要なら" : "指摘をAIに直してもらう"}>
-        <p className="text-xs text-muted-foreground">
-          このPRへ直接修正を依頼する操作は廃止しました。関連Issueの詳細からホストセッションを開いて指摘を伝えると、同じPRのブランチで修正できます。仕様の選択や実機での確認が要る点は、推測で直さずIssueで確かめてください。
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 basis-56 text-xs text-muted-foreground">{action.request.reason}</p>
-          {action.request.alternative === "draft-fix-issue" && onDraftFixIssue && (
-            <Button size="sm" variant="outline" className="h-9 text-xs" onClick={() => onDraftFixIssue(pullRequest)}>
-              <Wrench className="size-3.5" />
-              修正Issueを起案
-            </Button>
-          )}
-          {action.request.alternative === "open-issue" && pullRequest.linkedIssueNumber !== null && (
-            <GithubReferenceLink
-              href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
-              reference={{
-                repositoryFullName: pullRequest.repositoryFullName,
-                number: pullRequest.linkedIssueNumber,
-                kind: "issue",
-              }}
-              className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted"
-            >
-              Issue #{pullRequest.linkedIssueNumber} を開く
-            </GithubReferenceLink>
-          )}
-          {/* 起案の導線を渡さない画面でも、代わりの操作を必ず1つ残す */}
-          <a
-            href={pullRequest.htmlUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-9 items-center gap-1 text-xs text-foreground hover:underline"
-          >
-            PRをGitHubで開く
-            <ExternalLink aria-hidden className="size-3" />
-          </a>
-        </div>
+      <Option
+        title={
+          action.request.available
+            ? `Issue #${action.request.issueNumber} のセッションで直す`
+            : needsCheck
+              ? "確認の結果、修正が必要なら"
+              : "指摘をAIに直してもらう"
+        }
+      >
+        {action.request.available ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {action.verdict === "changes-requested"
+                ? "自動修正で直らなかったとき・方針を添えて直したいとき。"
+                : "確認の結果、修正が必要なとき。"}
+              指摘をIssueコメントにまとめ、元のIssueのセッションへ渡します。新しいIssue・PRは作らず、同じブランチ（{pullRequest.headRef}）を直してpushします。仕様の選択や実機での確認が要る点は、推測で直さずIssueで確かめさせます。
+            </p>
+            <p className="text-xs text-muted-foreground">送り先: {describeReviewFixSessionRoute(action.request.route)}</p>
+            {action.interrupted && (
+              <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+                前回の依頼はセッションへ届いていません（{action.interrupted.reason}）。もう一度依頼できます。
+                {action.interrupted.requestUrl && (
+                  <a
+                    href={action.interrupted.requestUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1 inline-flex items-center gap-1 text-foreground hover:underline"
+                  >
+                    前回の依頼を開く
+                    <ExternalLink aria-hidden className="size-3" />
+                  </a>
+                )}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <ReviewFixSessionButton
+                repositoryFullName={pullRequest.repositoryFullName}
+                pullRequestNumber={pullRequest.number}
+                headSha={pullRequest.headSha}
+                headRef={pullRequest.headRef}
+                issueNumber={action.request.issueNumber}
+                route={action.request.route}
+                verdictLabel={needsCheck ? "要確認" : "要修正"}
+                concerns={action.concerns}
+                reviewUrl={reviewUrl}
+                variant={action.autoRepair ? "outline" : "default"}
+                onRequested={onRefresh}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              このPRを元のIssueのセッションで直す操作は、いまは使えません。理由と代わりの操作:
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1 basis-56 text-xs text-muted-foreground">{action.request.reason}</p>
+              {action.request.alternative === "draft-fix-issue" && onDraftFixIssue && (
+                <Button size="sm" variant="outline" className="h-9 text-xs" onClick={() => onDraftFixIssue(pullRequest)}>
+                  <Wrench className="size-3.5" />
+                  修正Issueを起案
+                </Button>
+              )}
+              {action.request.alternative === "open-issue" && pullRequest.linkedIssueNumber !== null && (
+                <GithubReferenceLink
+                  href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
+                  reference={{
+                    repositoryFullName: pullRequest.repositoryFullName,
+                    number: pullRequest.linkedIssueNumber,
+                    kind: "issue",
+                  }}
+                  className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted"
+                >
+                  Issue #{pullRequest.linkedIssueNumber} を開く
+                </GithubReferenceLink>
+              )}
+              {/* 起案の導線を渡さない画面でも、代わりの操作を必ず1つ残す */}
+              <a
+                href={pullRequest.htmlUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-9 items-center gap-1 text-xs text-foreground hover:underline"
+              >
+                PRをGitHubで開く
+                <ExternalLink aria-hidden className="size-3" />
+              </a>
+            </div>
+          </>
+        )}
       </Option>
 
       {!needsCheck && mergeOption}

@@ -5,6 +5,7 @@ import {
   parseCodexPairingCode,
 } from "@/lib/dispatch/codex-pairing";
 import { isAgentResumeBody } from "@/lib/dispatch/agent-resume";
+import { isReviewFixSessionBody } from "@/lib/dispatch/review-fix-session";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
@@ -228,7 +229,7 @@ export async function POST(request: NextRequest) {
 
   // 固定文面の追加指示が**実際に届いた**ら、`00.check-user`を理由ラベルごと外す（#2886・#2919）。
   // 対象は`recovery`を立てて積まれた2つの経路——停滞からの復旧（引き上げで付いた札）と、
-  // マージ待ちの修正依頼をローカルセッションへ知らせるもの（マージ待ちで付いた札）。
+  // PRのレビュー指摘の修正依頼をIssueのセッションへ知らせるもの（#5493。マージ待ちで付いた札）。
   // **積んだ時点では外さない**——送出は非同期で、承認プロンプトの表示中・
   // 作業中・入力欄に打ちかけがある場合はpollerが見送るため、押した時点で外すと「何も届いて
   // いないのに札だけ消える」。押したこと自体は「人が続け方を決めた」合図だが、**その指示が
@@ -243,10 +244,13 @@ export async function POST(request: NextRequest) {
   ) {
     // **失敗しても報告そのものは受け付ける**（自動実行を進める処理と同じ扱い）。
     // `resolveFixedInstructionCheckUser`は内部で握り潰して真偽値を返す
+    // **レビュー指摘の修正依頼（#5493）だけは`01.check-merge`まで外す。** 押したことが
+    // 「マージせずに直させる」と決めた合図で、マージ待ちの札が残ると押した人自身が片付けられない。
+    // 停滞からの復旧（#2886）は広げない——同じIssueのマージ待ちの札を落とすと、人がマージの合図を失う
     await resolveFixedInstructionCheckUser({
       repositoryFullName: result.job.repositoryFullName,
       issueNumber: result.job.issueNumber,
-      allowMergeReason: false,
+      allowMergeReason: isReviewFixSessionBody(result.job.instruction ?? ""),
     });
   }
 

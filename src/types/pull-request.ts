@@ -588,7 +588,23 @@ export type PullRequestReviewResponseContext = {
   } | null;
   /** Issueのコメントを読めず、依頼済みかを確かめられなかった */
   fetchFailed: boolean;
+  /**
+   * 「Issueのセッションで直す」の送り先（#5493）。そのIssueのセッションの記録から決める。
+   * 確かめられなかった・古い応答ではnullまたは省略（ボタンを出さず従来の案内にする）
+   */
+  reviewFixRoute?: ReviewFixSessionRoute | null;
 };
+
+/**
+ * 「Issueのセッションで直す」の送り先（#5493。判定は`src/lib/dispatch/review-fix-session.ts`）。
+ * - `session` … 動いているセッションへ固定の1行を送る
+ * - `resume` … 終了したセッションを同じホスト・エージェントで再開する
+ * - `launch` … 記録が無いので、対応できるホストで新しく起動する
+ */
+export type ReviewFixSessionRoute =
+  | { kind: "session"; host: string }
+  | { kind: "resume"; host: string; agent: "claude" | "codex" }
+  | { kind: "launch" };
 
 /**
  * 変更ファイルの種別（#1987）。GitHubの`status`（`added`・`modified`ほか）を、画面に出す

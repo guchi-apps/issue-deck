@@ -2556,15 +2556,16 @@ export function POST(request: NextRequest) {
   **リリース前の「修正をIssueにする」（#2838）とは行き先が違う**。あちらの対応PRは
   developへマージ済みで`issue-<番号>`ブランチも消えているため新規Issueへ切り出すしかないが、
   こちらはPRがまだopenなので同じPRへ修正コミットを積める。
-  **「修正を依頼する」の送り先はIssueの担当先で変わる**（#2919。
-  [`lib/dispatch/pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）。`@claude`コメントで
-  起こせるのは`11.local`が付いていないIssueだけで、付いている間は
-  `reusable-issue-dispatch.yml`が`mode=skip`へ倒し案内コメントを返して終わる。生きている
-  セッションがあればそこへ固定の1行を流し（`POST /api/dispatch/pr-fix-notify`。本文とセッションの
-  生死をサーバー側で確かめ、`00.check-user`は`succeeded`が届いてから外す）、終わっていれば
-  起動ジョブで呼び戻し、記録も無ければ`11.local`を外して無人実行へ渡す。判定に
-  `resolveIssueExecutionTarget`を使わない理由と4通りの内訳は
-  [multi-agent/labels.md](multi-agent/labels.md)「マージ待ちの「修正を依頼する」は送り先を切り替える」。
+  **「Issueのセッションで直す」（#5493。
+  [`lib/dispatch/review-fix-session.ts`](../src/lib/dispatch/review-fix-session.ts)・
+  [`review-fix-session-button.tsx`](../src/components/dashboard/review-fix-session-button.tsx)）は、
+  指摘を元Issueのセッションへ渡す。** 旧`pr-fix-notify`（#2919）は#3965で削除済み。受け口
+  `POST /api/pull-requests/review-fix-session`が依頼をIssueコメントとして投稿してから、動いている
+  セッションへは固定の1行、終わっていれば同じホスト・エージェントの起動ジョブ、記録が無ければ
+  1台に決まるホストでの起動へ振り分ける。PR詳細APIの`reviewResponse.reviewFixRoute`が送り先、
+  依頼より後のジョブが届かずに終わったら`interruptedFixRequest`になる。Issue詳細の入口は
+  [`issue-review-fix-band.tsx`](../src/components/dashboard/issue-review-fix-band.tsx)。内訳は
+  [multi-agent/labels.md](multi-agent/labels.md)「PRのレビュー指摘は「Issueのセッションで直す」で元Issueのセッションへ渡す」。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、
@@ -4026,7 +4027,7 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
 
 **`open`が変わったときに`useState`の値を作り直したくて`useEffect(() => { if (open) setState(...) }, [open, ...])`
 と書くと、ESLintの`react-hooks/set-state-in-effect`に引っかかる。** エフェクト内での同期的な
-`setState`はカスケードするレンダーを招くため非推奨（[`pull-request-fix-session-dialog.tsx`](../src/components/dashboard/pull-request-fix-session-dialog.tsx)で実際に発生）。
+`setState`はカスケードするレンダーを招くため非推奨（旧`pull-request-fix-session-dialog.tsx`〈#3965で削除〉で実際に発生）。
 
 - **直し方はダイアログの中身を条件付きレンダリング（`open && <Dialog.../>`）にし、
   `useState(initialProp)`をマウント時の初期値としてだけ使う。** 開くたびに新しいコンポーネント
@@ -4036,17 +4037,13 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
 
 ## 「修正をセッションへ送る」の送り先判定は、画面ごとに前段の絞り込みを足して再利用する（#3009）
 
-**マージ承認待ち（旧Issue詳細の修正依頼欄・#2919。#3333でPR詳細へ一本化）専用に見えて、実際は
-`resolvePrFixRequestRoute`（[`pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）が
-持つ判定材料は「対象Issueのラベル」と「セッション状態」の2つだけ。** マージ承認待ちかどうか・
-PRがマージ済みかどうかは、この関数の外側で先に判定してから渡す設計になっている。
-
-PR詳細の「修正Issueを起案」（`PullRequestFixIssueBar`・#2961）へ同じ「セッションへ送る」を
-足すとき（[`pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)の
-`resolvePullRequestFixRoute`）も、`resolvePrFixRequestRoute`自体は変更せず、前段に
-「PRがマージ済みなら常に新規Issue作成」「元Issueが1件に絞れないなら常に新規Issue作成」という
-判定を足しただけで済んだ。**送り先判定を増やすときは、既存の判定関数を複製・改造せず、
-呼び出し側で前段の絞り込みを足せないかを先に検討する。**
+**送り先の判定関数は「セッションの記録」だけを材料にし、画面ごとの条件（PRがopenか・要修正か・
+元Issueが1件に絞れるか）は呼び出し側の前段で絞る。** #3009では旧`resolvePrFixRequestRoute`
+（#3965で削除）を、#5493では`resolveReviewFixSessionRoute`
+（[`review-fix-session.ts`](../src/lib/dispatch/review-fix-session.ts)）をこの形にしてあり、
+PR詳細（`deriveReviewAction`が前段）とIssue詳細（`selectReviewFixPullRequest`が前段）が同じ関数を使う。
+**送り先判定を増やすときは、既存の判定関数を複製・改造せず、呼び出し側で前段の絞り込みを足せないかを
+先に検討する。**
 
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
