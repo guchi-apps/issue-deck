@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 /** 必須検査ではない（CIの合否に影響させない）ことが分かっているジョブ */
-export const INFORMATIONAL_JOBS = ["workflow-drift-notice", "notify"];
+export const INFORMATIONAL_JOBS = ["workflow-drift-notice", "ui-design-notice", "notify"];
 
 /** `jobs:`直下（インデント2）のジョブ名と、その本文を取り出す */
 export function extractJobs(yaml) {
