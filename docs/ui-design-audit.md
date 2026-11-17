@@ -9,6 +9,9 @@
 `notification-settings-section.tsx`の左線は状態の一件を示す通知で意味ありに寄るが、
 全件を装飾か意味ありかに決めるのは是正Issueで行う。
 
+#5508で`dashboard`配下の左端の色付き・グラデーション8件を仕分けた（下の一覧の仕分け列）。装飾は是正済みで、
+意味ありは`design-ok`で検出から外した。件数は#5508の前の走査時点のもので、是正した行は現在の検出には出ない。
+
 `emoji-icon`は#5507で対象を画面を描くコード（`.tsx`・`.jsx`・`.css`・`.html`）に絞った。
 最初の走査の73件のうち71件は`src/lib/**/*.ts`のGitHubコメント・Slack返信の文面と判定マーカーで、
 画面の問題ではないため外れ、画面にある2件だけが残っている。
@@ -17,30 +20,30 @@
 
 | ルール | 件数 |
 |---|---|
-| side-border | 10 |
-| gradient | 4 |
+| side-border | 10（是正・除外後は6） |
+| gradient | 4（是正・除外後は0） |
 | emoji-icon | 2 |
 | heavy-shadow | 10 |
-| 除外済み（design-ok） | 0 |
+| 除外済み（design-ok） | 0（#5508の後は4） |
 
 ## 一覧
 
 | ファイル:行 | ルール | 該当行 | 仕分け（装飾／意味あり） |
 |---|---|---|---|
-| `src/app/globals.css:263` | gradient | `background-image: linear-gradient(` | |
+| `src/app/globals.css:263` | gradient | `background-image: linear-gradient(` | 意味あり（いま進行中の区間を流れる動きで示す）。`design-ok`で除外（#5508） |
 | `src/components/app-update-checker.tsx:84` | heavy-shadow | `<div className="fixed inset-x-4 bottom-4 z-50 flex items-center justify-between gap-3 rounded-lg border bg-foreground px` | |
 | `src/components/dashboard/dependency-wait-panel.tsx:141` | emoji-icon | `<span aria-hidden>{r.satisfied === true ? "✅" : r.satisfied === false ? "⏳" : "❓"}</span>` | |
-| `src/components/dashboard/fleet-repository-row.tsx:59` | side-border | `<p className="basis-full border-l-2 border-destructive/40 pl-1.5 break-words text-destructive">` | |
+| `src/components/dashboard/fleet-repository-row.tsx:59` | side-border | `<p className="basis-full border-l-2 border-destructive/40 pl-1.5 break-words text-destructive">` | 装飾。失敗文は赤文字で伝わるため左線を外した（#5508） |
 | `src/components/dashboard/image-annotation-dialog.tsx:842` | heavy-shadow | `className="absolute inset-x-3 top-16 mx-auto flex max-w-md flex-col gap-3 rounded-xl border border-white/15 bg-neutral-9` | |
-| `src/components/dashboard/mention-textarea.tsx:562` | gradient | `<span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-` | |
+| `src/components/dashboard/mention-textarea.tsx:562` | gradient | `<span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-` | 意味あり（画像上のファイル名の可読性）。`design-ok`で除外（#5508） |
 | `src/components/dashboard/mobile/mobile-screen-fab.tsx:29` | heavy-shadow | `className="relative flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"` | |
 | `src/components/dashboard/mobile/mobile-screen-fab.tsx:42` | heavy-shadow | `className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"` | |
-| `src/components/dashboard/nightly-run-panel.tsx:311` | side-border | `className="inline-block h-2 w-3.5 shrink-0 border-l-2 border-amber-500"` | |
-| `src/components/dashboard/nightly-run-panel.tsx:427` | side-border | `className="absolute inset-y-0 right-0 border-l-2 border-amber-500"` | |
-| `src/components/dashboard/plan-approval-panel.tsx:290` | gradient | `<div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">` | |
+| `src/components/dashboard/nightly-run-panel.tsx:311` | side-border | `className="inline-block h-2 w-3.5 shrink-0 border-l-2 border-amber-500"` | 意味あり（下限の境界線の凡例）。`design-ok`で除外（#5508） |
+| `src/components/dashboard/nightly-run-panel.tsx:427` | side-border | `className="absolute inset-y-0 right-0 border-l-2 border-amber-500"` | 意味あり（下限の位置を示す境界線）。`design-ok`で除外（#5508） |
+| `src/components/dashboard/plan-approval-panel.tsx:290` | gradient | `<div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">` | 装飾。グラデーションを単色＋上罫線へ（#5508） |
 | `src/components/dashboard/pull-request-merge-review.tsx:92` | emoji-icon | `✅ 記録済み{acknowledgement.recordedBy ? '（記録: ${acknowledgement.recordedBy}）' : ""}` | |
-| `src/components/dashboard/question-answer-panel.tsx:339` | gradient | `<div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">` | |
-| `src/components/dashboard/release-history-panel.tsx:938` | side-border | `<section className="mt-2 rounded border-l-2 border-red-500/40 pl-2">` | |
+| `src/components/dashboard/question-answer-panel.tsx:339` | gradient | `<div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">` | 装飾。グラデーションを単色＋上罫線へ（#5508） |
+| `src/components/dashboard/release-history-panel.tsx:938` | side-border | `<section className="mt-2 rounded border-l-2 border-red-500/40 pl-2">` | 装飾。赤い左線を上罫線へ（#5508） |
 | `src/components/dashboard/scroll-to-latest-comment-button.tsx:67` | heavy-shadow | `className={cn("absolute z-10 rounded-full shadow-lg", className)}` | |
 | `src/components/dashboard/settings/notification-settings-section.tsx:125` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |
 | `src/components/dashboard/settings/notification-settings-section.tsx:145` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |

@@ -308,6 +308,7 @@ function ClaudeWindowMeter({
       />
       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <span
+          /* design-ok: 下限（しきい値）の境界線の凡例。バー側の境界線と同じ形で位置を示す */
           className="inline-block h-2 w-3.5 shrink-0 border-l-2 border-amber-500"
           style={FLOOR_ZONE_STYLE}
           aria-hidden
@@ -424,6 +425,7 @@ function QuotaMeterRow({
           />
           {floorPercent > 0 && (
             <div
+              /* design-ok: 下限（しきい値）の位置を示す境界線。外すと下限の位置が読めない */
               className="absolute inset-y-0 right-0 border-l-2 border-amber-500"
               style={{ ...FLOOR_ZONE_STYLE, width: `${floorPercent}%` }}
               aria-hidden
