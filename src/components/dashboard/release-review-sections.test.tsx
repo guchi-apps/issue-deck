@@ -283,6 +283,46 @@ describe("ReleaseReviewSections", () => {
     expect(readyButton.textContent).toContain("証跡を更新");
   });
 
+  it("開始待ちのまま進まない全体レビュー（#5480）に再実行を出し、「自動で再評価中」と見せない", () => {
+    const aiReview = section({
+      state: "waiting",
+      updatedAt: "2000-01-01T00:00:00.000Z",
+      stage: { kind: "reevaluating" },
+      progress: {
+        jobStatus: "timeout",
+        host: "subpc",
+        hostOnline: true,
+        requestedAt: "2000-01-01T00:00:00.000Z",
+        claimedAt: "2000-01-01T00:00:10.000Z",
+        startedAt: "2000-01-01T00:00:20.000Z",
+        lastReportAt: "2000-01-01T00:05:00.000Z",
+        finishedAt: "2000-01-01T00:15:00.000Z",
+        message: null,
+        steps: [],
+        currentIndex: null,
+        commandPosition: null,
+        command: null,
+        files: null,
+        agent: null,
+        stalledAfterMs: 600_000,
+      },
+    });
+    render(
+      <ReleaseReviewSections
+        repositoryFullName="guchi-apps/issue-deck"
+        headRef={HEAD}
+        pullRequestNumber={1028}
+        verification={summary({ aiReview, integration: section({ kind: "integration", state: "passed" }) })}
+        verificationError={null}
+        changes={loadedChanges([])}
+      />,
+    );
+    const button = within(screen.getByTestId("review-rerun-panel")).getByRole("button") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(screen.getByText(/待っても自動では始まらない/)).toBeTruthy();
+    expect(screen.queryByText("統合検証の結果に依存する項目だけを自動で再評価しています")).toBeNull();
+  });
+
   it("再実行の受付は合格ではないと示し、連打しても1回しか依頼しない（#4632）", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, outcome: "queued" }) });
     vi.stubGlobal("fetch", fetchMock);
