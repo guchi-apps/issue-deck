@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { RcCandidateView, RcLegacyCandidate, RcOverview, RcRevisionView } from "@/lib/release-rc-run";
-import type { RcStatus } from "@/lib/release-rc";
+import { isRcRevisionFailureWithoutImpact, type RcStatus } from "@/lib/release-rc";
 import { formatMonthDayTime } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +89,8 @@ export function ReleaseRcRevisionHistory({ candidate }: { candidate: RcCandidate
         {[...candidate.revisions].reverse().map((revision) => {
           const tone = REVISION_STATUS[revision.status];
           const isCurrent = revision.revision === candidate.currentRevision && revision.status === "applied";
+          // 候補を変えずに終わった失敗は、現在の候補に影響しないので赤で出さない（#5473）
+          const noImpact = isRcRevisionFailureWithoutImpact(revision, candidate.currentRevision);
           return (
             <li
               key={revision.revision}
@@ -109,11 +111,24 @@ export function ReleaseRcRevisionHistory({ candidate }: { candidate: RcCandidate
                   )}
                 </p>
                 {revision.failureReason && revision.status !== "applied" && (
-                  <p className="break-words text-[11.5px] text-destructive">{revision.failureReason}</p>
+                  <p className={cn("break-words text-[11.5px] whitespace-pre-line", noImpact ? "text-muted-foreground" : "text-destructive")}>
+                    {noImpact ? `理由: ${revision.failureReason}` : revision.failureReason}
+                  </p>
+                )}
+                {noImpact && (
+                  <p className="text-[11.5px] text-muted-foreground" data-testid="rc-revision-no-impact">
+                    現在の候補（r{candidate.currentRevision}）には影響しません
+                  </p>
                 )}
               </div>
-              <span className={cn(CHIP, "col-start-2 justify-self-start sm:col-start-auto", isCurrent ? STATUS_TONE[candidate.status.status] : tone.tone)}>
-                {isCurrent ? `現在: ${candidate.status.label}` : tone.label}
+              <span
+                className={cn(
+                  CHIP,
+                  "col-start-2 justify-self-start sm:col-start-auto",
+                  isCurrent ? STATUS_TONE[candidate.status.status] : noImpact ? "bg-muted text-muted-foreground" : tone.tone,
+                )}
+              >
+                {isCurrent ? `現在: ${candidate.status.label}` : noImpact ? "未適用" : tone.label}
               </span>
             </li>
           );

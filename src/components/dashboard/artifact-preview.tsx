@@ -7,6 +7,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useHistoryDismiss } from "@/hooks/use-history-dismiss";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
+import { markArtifactSeen } from "@/lib/artifact-seen";
 import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
 import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 
@@ -48,7 +49,11 @@ export function ArtifactPreviewProvider({
 
   const value = useMemo<ArtifactPreview>(
     () => ({
-      open: (artifact) => setTarget(artifact),
+      open: (artifact) => {
+        // 開いた版を「見た」と記録する（更新の強調を外す。#5483）。本文中のリンクもここを通る
+        markArtifactSeen(artifact);
+        setTarget(artifact);
+      },
       findByClaudeId: (claudeArtifactId) =>
         artifacts.find((artifact) => artifact.claudeArtifactId === claudeArtifactId) ?? null,
     }),

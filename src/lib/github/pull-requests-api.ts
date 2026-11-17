@@ -324,6 +324,8 @@ export async function fetchPullRequestFiles(
 export type GithubApiPullRequestCommit = {
   sha: string;
   commit: { message: string };
+  /** GitHubの応答は常に返す。cherry-pickされたマージ（親1つ）と元のマージ（親2つ）の区別に使う（#5469） */
+  parents?: { sha: string }[];
 };
 
 /**

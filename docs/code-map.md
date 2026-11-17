@@ -13,6 +13,7 @@
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)。**アプリ内の画面は#4743で廃止**し、処理部分はSlack起案が使う
 - アプリ内AI（要約・検索・文章整理など）をGPT系選択時にサブPCのCodex CLIで動かす経路と、機能ごとのClaude停止時の可否: [app-ai-codex.md](app-ai-codex.md)
+- UIの不適切なデザイン（左端の色付き帯・グラデーション・絵文字アイコン・大きな影）の静的検出（`scripts/check-ui-design.mjs`、CIの`ui-design-notice`は警告のみ）: [ui-design-lint.md](ui-design-lint.md)（#5465）
 - リポジトリだけを指定してサブPCにClaude Codeのセッションを立て、Claude Codeアプリへ移動する「リモートセッション」（`src/lib/dispatch/remote-session*.ts`・`src/app/api/remote-sessions/`・`scripts/start-remote-session.sh`）: [remote-session.md](remote-session.md)（#4743）
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
 - 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）
@@ -2635,6 +2636,9 @@ export function POST(request: NextRequest) {
   走るのは画面を開いたときと更新ボタンのとき、そして**ユーザーが自動更新の間隔を選んでいれば
   その周期**（#1767。既定は自動更新しない。`hooks/use-branch-flow.ts`。一度取った内容は
   画面を離れても保持する）。
+  **保持した前回の内容が先に出るため、画面を開いた時・手動更新の取得中（`isLoading`）は、ヘッダーに「最新の情報を取得中…」、
+  リポジトリ行と「次のリリース」カードに薄表示と「取得中」バッジを出す**（#5467。`BranchFlowFetchingContext`。
+  自動更新では`isLoading`が立たないため点滅しない）。
   この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
   「どのバージョンで本番へ出たか」を出せないため。組み立ては
   [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、

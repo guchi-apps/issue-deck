@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { fetchMainPickedPullRequestNumbers } from "@/lib/github/main-inclusion";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import {
   fetchClosedPullRequestsForBase,
@@ -19,6 +20,7 @@ import {
   withFixedBy,
   withMergeChecks,
   withReleaseReviews,
+  withoutReleasedByPick,
   type ReleaseFixSeriesRow,
 } from "@/lib/release-changes";
 import type {
@@ -176,8 +178,15 @@ async function handleGET(request: NextRequest) {
 
     const truncated =
       totalCommits > commits.length || commits.length >= PULL_REQUEST_COMMITS_PER_PAGE;
-    const { pullRequests, unknownCommits } = toReleaseChanges(
+    const folded = toReleaseChanges(
       commits.map((commit) => ({ sha: commit.sha, message: commit.commit.message })),
+    );
+    const { unknownCommits } = folded;
+    // 前のリリースでmainへcherry-pickで取り込み済みのPR（developの元のマージだけが範囲に残る）を外す（#5469）
+    const { pullRequests, releasedByPick } = withoutReleasedByPick(
+      folded.pullRequests,
+      commits.map((commit) => ({ message: commit.commit.message, parentCount: commit.parents ? commit.parents.length : null })),
+      await fetchMainPickedPullRequestNumbers(owner, repo, token),
     );
     const bodies = await fetchPullRequestBodies(
       owner,
@@ -201,6 +210,7 @@ async function handleGET(request: NextRequest) {
       // 打ち切ったときは末尾が終端とは限らないので出さない
       headSha: !truncated && commits.length > 0 ? commits[commits.length - 1].sha.slice(0, 7) : null,
       truncated,
+      releasedByPick,
     };
     return NextResponse.json(response);
   } catch (error) {

@@ -697,3 +697,40 @@ export function classifyRcBlock(input: {
 function prNumberFact(prNumber: number | null): string {
   return prNumber === null ? "候補のPRはまだありません" : `関連PR: #${prNumber}`;
 }
+
+// ---------------------------------------------------------------------------
+// 改訂履歴の表示（#5473）
+
+/**
+ * 未適用に終わった改訂が、現在の候補に影響していないか。失敗・期限切れの改訂は候補ブランチを変えずに終わった
+ * 試みなので、適用済みのrevisionがある限り、現在の候補の合否にも中身にも影響しない。画面はこれを赤い失敗でなく
+ * 控えめな記録として出す。適用済みのrevisionが無い（最初の作成が失敗した）候補は、候補そのものが無いので対象外
+ */
+export function isRcRevisionFailureWithoutImpact(
+  revision: { revision: number; status: string },
+  currentRevision: number,
+): boolean {
+  if (revision.status !== "failed" && revision.status !== "expired") return false;
+  return currentRevision > 0 && revision.revision !== currentRevision;
+}
+
+/**
+ * 候補モードのworkflowが失敗を報告するときの汎用の理由（`reusable-release-develop-to-main.yml`）。workflowは
+ * 自分のジョブのログを読めないので、具体的な理由（`::error::`の行）はissue-deckが実行ログから取り直す（#5473）
+ */
+export const RC_WORKFLOW_FAILED_REASON_PREFIX = "リリースworkflowが候補の作成・更新に失敗しました";
+
+/** ログを読んでもエラー行が無かったときの理由。これに置き換えて、同じrunへ問い合わせ直さない */
+export const RC_WORKFLOW_FAILED_NO_DETAIL_REASON = `${RC_WORKFLOW_FAILED_REASON_PREFIX}（実行ログからエラー行を取り出せませんでした）`;
+
+/**
+ * 実行ログから理由を取り直す対象のrun番号。workflowの汎用の理由のまま残っている失敗だけを対象にし、
+ * 取り直し済み（汎用の文言でない・取り出せなかった印がある）ものは対象にしない。対象外ならnull
+ */
+export function rcFailureReasonRefreshRunId(revision: { status: string; failureReason: string | null; runUrl: string | null }): number | null {
+  if (revision.status !== "failed" || revision.runUrl === null || revision.failureReason === null) return null;
+  if (!revision.failureReason.startsWith(RC_WORKFLOW_FAILED_REASON_PREFIX)) return null;
+  if (revision.failureReason === RC_WORKFLOW_FAILED_NO_DETAIL_REASON) return null;
+  const match = /\/actions\/runs\/(\d+)\/?$/.exec(revision.runUrl);
+  return match ? Number(match[1]) : null;
+}

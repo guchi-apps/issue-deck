@@ -439,6 +439,7 @@ export function useReleaseFixOverview({
   reloadToken,
   publishBlock,
   headRef,
+  importedPrs,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -450,6 +451,8 @@ export function useReleaseFixOverview({
   reloadToken?: number;
   /** 新方式の候補が公開へ進めない理由（#4635）。旧方式・進めるときはnullか省略 */
   publishBlock?: { next: RcPublishNext; message: string } | null;
+  /** 新方式の候補の適用済みrevisionで取り込んだPR（#5469）。「今回リリースする変更」で取り込みの区分に分ける */
+  importedPrs?: readonly { number: number; revision: number }[];
 }): ReleaseFixOverviewState {
   const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
   const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
@@ -535,6 +538,7 @@ export function useReleaseFixOverview({
     error: changes.error,
     addedPrNumbers: episode?.selectedPrs.map((p) => p.number) ?? [],
     excludedPrNumbers: episode?.excludedPrs ?? [],
+    importedPrs,
   });
   return {
     repositoryFullName,
@@ -654,7 +658,7 @@ function InternalControls({
   const [direction, setDirection] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const send = async (action: "resume_internal" | "handover_internal") => {
+  const resume = async () => {
     const [owner, repo] = repositoryFullName.split("/");
     setBusy(true);
     setMessage(null);
@@ -663,17 +667,18 @@ function InternalControls({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action,
+          action: "resume_internal",
           owner,
           repo,
           issueNumber,
-          ...(action === "resume_internal" ? { addMinutes: pause?.resumeNeed === "budget" ? Number(addMinutes) : undefined, direction: direction || undefined } : {}),
+          addMinutes: pause?.resumeNeed === "budget" ? Number(addMinutes) : undefined,
+          direction: direction || undefined,
         }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) setMessage(body?.message ?? "操作できませんでした");
       else {
-        setMessage(action === "resume_internal" ? "再開しました" : "担当を解放しました。別のエージェントが引き継げます");
+        setMessage("再開しました");
         onChanged?.();
       }
     } catch {
@@ -699,13 +704,8 @@ function InternalControls({
       )}
       <div className="flex flex-wrap gap-1.5">
         {pause && (
-          <button type="button" disabled={busy} onClick={() => void send("resume_internal")} className="min-h-9 rounded bg-primary px-3 text-[13px] font-semibold text-primary-foreground disabled:opacity-60" data-testid="release-fix-internal-resume">
+          <button type="button" disabled={busy} onClick={() => void resume()} className="min-h-9 rounded bg-primary px-3 text-[13px] font-semibold text-primary-foreground disabled:opacity-60" data-testid="release-fix-internal-resume">
             {pause.autoResumable ? "再開する" : pause.resumeNeed === "budget" ? "予算を追加して再開" : "方針を入力して再開"}
-          </button>
-        )}
-        {internal.assignee.name && (
-          <button type="button" disabled={busy} onClick={() => void send("handover_internal")} className="min-h-9 rounded border px-3 text-[13px] disabled:opacity-60" data-testid="release-fix-internal-handover">
-            担当を解放（引き継ぎ）
           </button>
         )}
       </div>
@@ -938,7 +938,9 @@ export function ReleaseContentsList({
             ))}
             {contents.added.map((pr) => (
               <li key={pr.number} className="flex min-w-0 gap-1.5">
-                <span className="shrink-0 rounded bg-sky-100 px-1 text-[10.5px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">今回の修正で追加</span>
+                <span className="shrink-0 rounded bg-sky-100 px-1 text-[10.5px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">
+                  {pr.importedRevision !== undefined ? `取り込みで追加（revision ${pr.importedRevision}）` : "今回の修正で追加"}
+                </span>
                 <span className="min-w-0 break-words">
                   <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
                 </span>
@@ -950,6 +952,17 @@ export function ReleaseContentsList({
           )}
           {contents.unknownCommits.length > 0 && (
             <p className="text-muted-foreground">PRを特定できない変更が{contents.unknownCommits.length}件あります（PRに紐づかないコミット）</p>
+          )}
+          {contents.releasedByPick.length > 0 && (
+            <p className="break-words text-muted-foreground" data-testid="release-contents-released-by-pick">
+              前のリリースで取り込み済みのため除外:{" "}
+              {contents.releasedByPick.map((n) => (
+                <span key={n} className="mr-1">
+                  <ExtLink href={prUrl(n)}>#{n}</ExtLink>
+                </span>
+              ))}
+              （developの元のマージがこの範囲に残っていますが、変更はすでに本番に入っています）
+            </p>
           )}
           {contents.truncated && (
             <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
