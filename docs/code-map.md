@@ -2635,6 +2635,9 @@ export function POST(request: NextRequest) {
   走るのは画面を開いたときと更新ボタンのとき、そして**ユーザーが自動更新の間隔を選んでいれば
   その周期**（#1767。既定は自動更新しない。`hooks/use-branch-flow.ts`。一度取った内容は
   画面を離れても保持する）。
+  **保持した前回の内容が先に出るため、画面を開いた時・手動更新の取得中（`isLoading`）は、ヘッダーに「最新の情報を取得中…」、
+  リポジトリ行と「次のリリース」カードに薄表示と「取得中」バッジを出す**（#5467。`BranchFlowFetchingContext`。
+  自動更新では`isLoading`が立たないため点滅しない）。
   この画面を開いている間はPR一覧の母集団を`all`にする——マージ済みのPRまで見ないと
   「どのバージョンで本番へ出たか」を出せないため。組み立ては
   [`lib/branch-flow.ts`](../src/lib/branch-flow.ts)の`buildBranchFlow`で、
