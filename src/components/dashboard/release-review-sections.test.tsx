@@ -201,6 +201,74 @@ describe("ReleaseReviewSections", () => {
     expect(within(row("全体レビュー")).getByText("待機理由: 未取得")).toBeTruthy();
   });
 
+  it("待機へ戻った後の新しいジョブが無いときは、前回の中断を現在の状態にせず履歴として出す（#5473）", () => {
+    const waitingSince = new Date(Date.now() - 4 * 60_000).toISOString();
+    renderSections(
+      summary({
+        aiReview: section({
+          state: "waiting",
+          updatedAt: waitingSince,
+          progress: progress({ jobStatus: "failed", finishedAt: new Date(Date.now() - 3 * 3600_000).toISOString() }),
+        }),
+      }),
+    );
+    const review = row("全体レビュー");
+    expect(within(review).getByText("待機中")).toBeTruthy();
+    expect(within(review).getByText("新しい実行の依頼を待っています")).toBeTruthy();
+    expect(within(review).getByText(/から 4分0[01]秒/)).toBeTruthy();
+    expect(within(review).getByTestId("section-previous-job").textContent).toMatch(/^前回の実行（履歴・現在の結果ではありません）: 失敗 \d+:\d\d$/);
+    expect(review.textContent).not.toContain("結果が記録されないまま終了しました");
+  });
+
+  it("ジョブが記録の更新より後に終わった（結果が届かなかった）ときは中断を現在の状態として出す", () => {
+    renderSections(
+      summary({
+        aiReview: section({
+          state: "waiting",
+          updatedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+          progress: progress({ jobStatus: "succeeded", finishedAt: new Date(Date.now() - 60_000).toISOString() }),
+        }),
+      }),
+    );
+    const review = row("全体レビュー");
+    expect(within(review).getByText("中断")).toBeTruthy();
+    expect(within(review).getByText("結果が記録されないまま終了しました")).toBeTruthy();
+    expect(within(review).queryByTestId("section-previous-job")).toBeNull();
+  });
+
+  it("待機が10分を超えたら長い待機として警告し、止まっている可能性を添える（#5473）", () => {
+    renderSections(
+      summary({
+        integration: section({
+          kind: "integration",
+          state: "waiting",
+          progress: progress({
+            jobStatus: "queued",
+            requestedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+            startedAt: null,
+            claimedAt: null,
+            currentIndex: null,
+          }),
+        }),
+      }),
+    );
+    const integration = row("統合検証");
+    expect(within(integration).getByText("待機中（長い）")).toBeTruthy();
+    expect(within(integration).getByText("順番待ち（subpc の受け取り待ち）")).toBeTruthy();
+    expect(within(integration).getByText(/通常より長く待っています。止まっている可能性があります/)).toBeTruthy();
+  });
+
+  it("実行中の札には回転アイコンを付け、待機中には付けない", () => {
+    renderSections(
+      summary({
+        integration: section({ kind: "integration", state: "running", progress: progress() }),
+        aiReview: section({ state: "waiting" }),
+      }),
+    );
+    expect(within(row("統合検証")).getByTestId("section-spinner")).toBeTruthy();
+    expect(within(row("全体レビュー")).queryByTestId("section-spinner")).toBeNull();
+  });
+
   it("全体レビューの指摘の数と、いちばん重い指摘の題を閉じたまま出す。担当は記録どおり", () => {
     renderSections(
       summary({

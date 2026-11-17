@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   ensureSync: vi.fn(),
   closePr: vi.fn(),
   comment: vi.fn(),
+  runJobs: vi.fn(),
+  jobLogs: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -81,7 +83,11 @@ vi.mock("@/lib/github/release-api", () => ({
 }));
 vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensureSync }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: mocks.closePr }));
+vi.mock("@/lib/github/actions-api", () => ({
+  closePullRequest: mocks.closePr,
+  fetchWorkflowRunJobs: mocks.runJobs,
+  fetchWorkflowJobLogs: mocks.jobLogs,
+}));
 vi.mock("@/lib/github/issues-api", () => ({ createComment: mocks.comment }));
 vi.mock("@/lib/release-finalize", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/release-finalize")>()),
@@ -96,8 +102,17 @@ vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: 
 vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 
 vi.mock("@/lib/release-fix-series-run", () => ({ closeFixSeriesForCancelledCandidate: (...a: unknown[]) => (mocks.closeSeries as (...x: unknown[]) => unknown)(...a) }));
-import { cancelReleaseRc, createReleaseRc, loadRcImportOptions, reconcileRcCandidate, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
-import { RC_NOT_UPDATED_REASON } from "@/lib/release-rc";
+import {
+  cancelReleaseRc,
+  createReleaseRc,
+  loadRcImportOptions,
+  reconcileRcCandidate,
+  recordRcReport,
+  refreshRcFailureReasons,
+  requestRcImport,
+} from "@/lib/release-rc-run";
+import { RC_NOT_UPDATED_REASON, RC_WORKFLOW_FAILED_NO_DETAIL_REASON } from "@/lib/release-rc";
+import { GithubApiError } from "@/lib/github/github-api-error";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
 const FROZEN = "f".repeat(40);
@@ -633,5 +648,79 @@ describe("cancelReleaseRc", () => {
       error: "candidate_changed",
     });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshRcFailureReasons（#5473）", () => {
+  const GENERIC = "リリースworkflowが候補の作成・更新に失敗しました。理由は実行ログを確認してください";
+  const failed = (overrides: Record<string, unknown> = {}) => ({
+    id: "r3",
+    revision: 3,
+    reason: "fix_import",
+    status: "failed",
+    failureReason: GENERIC,
+    runUrl: "https://github.com/o/r/actions/runs/44063664996",
+    expectedHeadSha: null,
+    prNumber: null,
+    baseSha: null,
+    headSha: null,
+    importedPrs: [],
+    createdAt: new Date(),
+    ...overrides,
+  });
+  const row = (revision = failed()) =>
+    candidateRow({ currentRevision: 2, revisions: [...candidateRow().revisions, revision] }) as never;
+  const jobs = [{ id: 9, name: "release / release", status: "completed", conclusion: "failure", steps: [{ name: "候補", conclusion: "failure" }] }];
+
+  it("汎用の理由を、実行ログの::error::行に置き換える", async () => {
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockResolvedValue(
+      "2026 ##[error]#1031 は元の候補 RC-50 に内容も履歴も既に含まれています。選択から外してください\n2026 ##[error]Process completed with exit code 1.",
+    );
+    expect(await refreshRcFailureReasons(ctx, row())).toBe(true);
+    expect(mocks.runJobs).toHaveBeenCalledWith("o", "r", 44063664996, "t");
+    expect(mocks.jobLogs).toHaveBeenCalledWith("o", "r", 9, "t");
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith({
+      where: { id: "r3", status: "failed", failureReason: GENERIC },
+      data: { failureReason: "#1031 は元の候補 RC-50 に内容も履歴も既に含まれています。選択から外してください" },
+    });
+  });
+
+  it("runが終わっていなければ触らない（次の読み込みで取る）", async () => {
+    mocks.runJobs.mockResolvedValue([{ ...jobs[0], status: "in_progress", conclusion: null }]);
+    expect(await refreshRcFailureReasons(ctx, row())).toBe(false);
+    expect(mocks.jobLogs).not.toHaveBeenCalled();
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("エラー行が無ければ取り出せなかった印に置き換え、問い合わせ直さない", async () => {
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockResolvedValue("ok");
+    await refreshRcFailureReasons(ctx, row());
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON } }));
+    vi.clearAllMocks();
+    expect(await refreshRcFailureReasons(ctx, row(failed({ failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON })))).toBe(false);
+    expect(mocks.runJobs).not.toHaveBeenCalled();
+  });
+
+  it("ログの保持期限切れ（404）は取り出せなかった印で確定し、一時的な失敗（5xx）は汎用の理由を残す", async () => {
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockRejectedValue(new GithubApiError(404, "gone"));
+    await refreshRcFailureReasons(ctx, row());
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON } }));
+    vi.clearAllMocks();
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockRejectedValue(new GithubApiError(502, "bad gateway"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await refreshRcFailureReasons(ctx, row())).toBe(false);
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("取得に失敗しても読み込みを止めない", async () => {
+    mocks.runJobs.mockRejectedValue(new Error("boom"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await refreshRcFailureReasons(ctx, row())).toBe(false);
+    spy.mockRestore();
   });
 });

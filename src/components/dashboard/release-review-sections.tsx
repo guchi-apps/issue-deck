@@ -10,7 +10,7 @@ import {
 } from "@/lib/release-review-contract-view";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
-import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
+import { ChevronRight, ExternalLink, Loader2, RotateCcw } from "lucide-react";
 
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
@@ -36,8 +36,11 @@ import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-
 import { checkItemLabel } from "@/lib/release-review-checklist";
 import { describeReviewStageLabel, REVIEW_OPEN_ITEM_LABEL } from "@/lib/release-review-reevaluation";
 import {
+  describeEndedReleaseJob,
   formatReleaseElapsed,
   formatReleaseReviewAgent,
+  isLongReleaseWait,
+  isSupersededReleaseProgress,
   viewReleaseProgress,
   type ReleaseVerificationProgress,
 } from "@/lib/release-verification-progress";
@@ -92,7 +95,7 @@ const TEXT_TONE: Record<Tone, string> = {
 };
 
 /** 記号でも区別する（色だけに頼らない）。並びは`review-verdict.tsx`の● ▲ ■ –に揃える */
-function Pill({ tone, mark, children }: { tone: Tone; mark: string; children: ReactNode }) {
+function Pill({ tone, mark, children }: { tone: Tone; mark: ReactNode; children: ReactNode }) {
   return (
     <span
       className={cn(
@@ -245,7 +248,36 @@ export type SectionHead = {
   steps: { tone: Tone; animate: boolean } | null;
   /** 1秒ごとの再描画が要るか */
   ticking: boolean;
+  /** 札に回転アイコンを付けるか（実行中で報告が届いているときだけ。#5473） */
+  spinning?: boolean;
+  /**
+   * 前回の実行の終わり方（#5473）。新しい実行を待っている間、前回の中断・失敗を現在の状態に見せず、
+   * 履歴として薄く1行で出す。無ければnull
+   */
+  history?: string | null;
 };
+
+const LONG_WAIT_REASON = "通常より長く待っています。止まっている可能性があります（実行先の状態を確かめてください）";
+
+/** 待機の札。一定時間を超えたら橙にして、止まっている可能性を添える（#5473） */
+function waitingHead(
+  base: Pick<SectionHead, "meta" | "reason" | "reasonTone" | "steps" | "ticking">,
+  input: { detail: string; meta: string[]; elapsedMs: number | null; reason?: string | null; reasonTone?: Tone; history?: string | null },
+): SectionHead {
+  const long = isLongReleaseWait(input.elapsedMs);
+  return {
+    ...base,
+    tone: long ? "warn" : "muted",
+    mark: long ? "▲" : "◷",
+    label: long ? "待機中（長い）" : "待機中",
+    detail: input.detail,
+    meta: input.meta,
+    reason: long ? LONG_WAIT_REASON : (input.reason ?? base.reason),
+    reasonTone: long ? "warn" : (input.reasonTone ?? base.reasonTone),
+    ticking: true,
+    history: input.history ?? null,
+  };
+}
 
 /**
  * 統合検証・全体レビューの区分の「閉じた1行」を、記録の状態と進捗から決める。
@@ -261,24 +293,40 @@ export function describeSection(
   const base = { meta: [] as string[], reason: section.reason, reasonTone: "muted" as Tone, steps: null, ticking: false };
 
   if (section.state === "waiting" || section.state === "running") {
+    const since = (iso: string | null, elapsedMs: number | null) =>
+      [clock(iso) && elapsedMs !== null ? `${clock(iso)}から ${formatReleaseElapsed(elapsedMs)}` : null].filter(
+        (v): v is string => Boolean(v),
+      );
+    // 記録が待機へ戻った後のジョブがまだ無い（前回の実行が最新のジョブ）。前回の終わり方は履歴へ回す（#5473）
+    if (progress && view && isSupersededReleaseProgress(progress, section.updatedAt)) {
+      const waitedMs = section.updatedAt ? Math.max(0, nowMs - new Date(section.updatedAt).getTime()) : null;
+      const finishedAt = clock(progress.finishedAt);
+      return waitingHead(base, {
+        detail: "新しい実行の依頼を待っています",
+        meta: since(section.updatedAt, waitedMs),
+        elapsedMs: waitedMs,
+        history: `前回の実行（履歴・現在の結果ではありません）: ${describeEndedReleaseJob(progress)}${finishedAt ? ` ${finishedAt}` : ""}`,
+      });
+    }
     if (!view || !progress) {
-      return { ...base, tone: "muted", mark: "◷", label: "待機中", detail: "待機理由: 未取得" };
+      const waitedMs = section.updatedAt ? Math.max(0, nowMs - new Date(section.updatedAt).getTime()) : null;
+      return waitingHead(base, {
+        detail: "待機理由: 未取得",
+        meta: since(section.updatedAt, waitedMs),
+        elapsedMs: waitedMs,
+      });
     }
     const lastReport =
       view.sinceLastReportMs !== null ? `最終報告 ${formatReleaseElapsed(view.sinceLastReportMs)}前` : null;
     switch (view.phase) {
       case "queued":
-        return {
-          ...base,
-          tone: "muted",
-          mark: "◷",
-          label: "待機中",
+        return waitingHead(base, {
           detail: view.waitingReason ?? "待機理由: 未取得",
-          meta: view.elapsedMs !== null ? [`依頼から ${formatReleaseElapsed(view.elapsedMs)}`] : [],
+          meta: since(progress.requestedAt, view.elapsedMs),
+          elapsedMs: view.elapsedMs,
           reason: progress.hostOnline === false ? "実行先が復帰すると自動で始まります" : base.reason,
           reasonTone: progress.hostOnline === false ? "warn" : "muted",
-          ticking: true,
-        };
+        });
       case "starting":
         return {
           ...base,
@@ -286,7 +334,7 @@ export function describeSection(
           mark: "◷",
           label: "待機中",
           detail: view.waitingReason,
-          meta: view.elapsedMs !== null ? [`依頼から ${formatReleaseElapsed(view.elapsedMs)}`] : [],
+          meta: since(progress.requestedAt, view.elapsedMs),
           steps: { tone: "run", animate: true },
           ticking: true,
         };
@@ -305,6 +353,7 @@ export function describeSection(
           ].filter((v): v is string => Boolean(v)),
           steps: { tone: "run", animate: true },
           ticking: true,
+          spinning: true,
         };
       case "stalled":
         return {
@@ -376,13 +425,30 @@ export function describeSection(
 function HeadLine({ head, extra }: { head: SectionHead; extra?: ReactNode }) {
   return (
     <>
-      <Pill tone={head.tone} mark={head.mark}>
+      <Pill
+        tone={head.tone}
+        mark={
+          head.spinning ? (
+            <Loader2 aria-hidden="true" className="size-2.5 animate-spin motion-reduce:animate-none" data-testid="section-spinner" />
+          ) : (
+            head.mark
+          )
+        }
+      >
         {head.label}
       </Pill>
       {head.detail && <span className="min-w-0">{head.detail}</span>}
       {extra}
       {head.meta.length > 0 && (
         <span className="text-[11px] text-muted-foreground tabular-nums">{head.meta.join(" ・ ")}</span>
+      )}
+      {head.history && (
+        <span
+          className="basis-full border-l-2 pl-2 text-[11px] text-muted-foreground opacity-80"
+          data-testid="section-previous-job"
+        >
+          {head.history}
+        </span>
       )}
     </>
   );
