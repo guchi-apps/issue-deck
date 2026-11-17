@@ -85,6 +85,11 @@ type FrozenPr = { number: number; title: string; mergeSha: string };
 type ImportedPr = { number: number; title: string; mergeSha: string; related: boolean };
 type ApprovedExtra = { number: number; mergeSha: string; approvedByUserId: string | null; approvedAt: string; reason: string | null };
 
+/** この候補の適用済みrevisionで取り込み済みのPR番号（#5476。祖先判定では取り込み済みを検出できない） */
+function appliedImportedNumbers(revisions: readonly { status: string; importedPrs: unknown }[]): Set<number> {
+  return new Set(revisions.filter((r) => r.status === "applied").flatMap((r) => jsonArray<ImportedPr>(r.importedPrs).map((p) => p.number)));
+}
+
 function jsonArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -816,9 +821,10 @@ export async function requestRcImport(
 
   const numbers = [...new Map(input.selected.map((item) => [item.number, item])).values()];
   if (numbers.length === 0) return { ok: false, error: "empty_selection" };
+  const importedNumbers = appliedImportedNumbers(row.revisions);
   const checked = await Promise.all(
     numbers.map(async ({ number, expectedMergeSha }) => {
-      const fetched = await fetchPullRequestForRebuild(ctx.owner, ctx.repo, number, ctx.token);
+      const fetched =await fetchPullRequestForRebuild(ctx.owner, ctx.repo, number, ctx.token);
       const includedInOrigin = fetched?.merge_commit_sha
         ? await isAncestorCommit(ctx.owner, ctx.repo, fetched.merge_commit_sha, current.headSha!, ctx.token)
         : false;
@@ -829,6 +835,7 @@ export async function requestRcImport(
             ? { title: fetched.title, mergedAt: fetched.merged_at, mergeSha: fetched.merge_commit_sha, baseRef: fetched.base.ref, headRef: fetched.head.ref }
             : null,
           includedInOrigin,
+          importedInOrigin: importedNumbers.has(number),
         },
         expectedMergeSha,
       );
@@ -964,6 +971,7 @@ export async function loadRcImportOptions(ctx: Context, candidateId: string): Pr
           ? "候補ブランチが記録と一致しません。「再取り込み・再確認」で記録を照合し直してください"
           : null;
 
+  const importedNumbers = appliedImportedNumbers(row.revisions);
   const prNumbers = [...new Set(row.revisions.flatMap((r) => (r.prNumber === null ? [] : [r.prNumber])))];
   const fix = await relatedFixPrNumbers(row.repositoryFullName, prNumbers);
   const approved = jsonArray<ApprovedExtra>(row.approvedExtraPrs).map((a) => a.number);
@@ -982,7 +990,14 @@ export async function loadRcImportOptions(ctx: Context, candidateId: string): Pr
 
   const ahead = await fetchReleaseRebuildCandidate(ctx.owner, ctx.repo, current.headSha, ctx.token);
   const options = ahead.pullRequests.map((pr) =>
-    toOption({ number: pr.number, title: pr.title, issueNumber: pr.issueNumber, mergeSha: pr.mergeSha ?? null, merged: true, problem: pr.mergeSha ? null : "not_merged" }),
+    toOption({
+      number: pr.number,
+      title: pr.title,
+      issueNumber: pr.issueNumber,
+      mergeSha: pr.mergeSha ?? null,
+      merged: true,
+      problem: !pr.mergeSha ? "not_merged" : importedNumbers.has(pr.number) ? "already_included" : null,
+    }),
   );
   // 修正系列の修正PRのうち、まだdevelopへ入っていない・既に候補に入っているものは理由付きで並べる（選べない）
   for (const number of fix.fixPrs) {
@@ -993,7 +1008,7 @@ export async function loadRcImportOptions(ctx: Context, candidateId: string): Pr
       pr === undefined
         ? ({ ok: false, problem: "lookup_failed" } as const)
         : checkRebuildPullRequest(
-            { number, pr: pr ? { title: pr.title, mergedAt: pr.merged_at, mergeSha: pr.merge_commit_sha, baseRef: pr.base.ref, headRef: pr.head.ref } : null, includedInOrigin },
+            { number, pr: pr ? { title: pr.title, mergedAt: pr.merged_at, mergeSha: pr.merge_commit_sha, baseRef: pr.base.ref, headRef: pr.head.ref } : null, includedInOrigin, importedInOrigin: importedNumbers.has(number) },
             null,
           );
     options.push(
