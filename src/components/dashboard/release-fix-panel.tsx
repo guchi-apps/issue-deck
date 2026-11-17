@@ -654,7 +654,7 @@ function InternalControls({
   const [direction, setDirection] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const send = async (action: "resume_internal" | "handover_internal") => {
+  const resume = async () => {
     const [owner, repo] = repositoryFullName.split("/");
     setBusy(true);
     setMessage(null);
@@ -663,17 +663,18 @@ function InternalControls({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action,
+          action: "resume_internal",
           owner,
           repo,
           issueNumber,
-          ...(action === "resume_internal" ? { addMinutes: pause?.resumeNeed === "budget" ? Number(addMinutes) : undefined, direction: direction || undefined } : {}),
+          addMinutes: pause?.resumeNeed === "budget" ? Number(addMinutes) : undefined,
+          direction: direction || undefined,
         }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) setMessage(body?.message ?? "操作できませんでした");
       else {
-        setMessage(action === "resume_internal" ? "再開しました" : "担当を解放しました。別のエージェントが引き継げます");
+        setMessage("再開しました");
         onChanged?.();
       }
     } catch {
@@ -699,13 +700,8 @@ function InternalControls({
       )}
       <div className="flex flex-wrap gap-1.5">
         {pause && (
-          <button type="button" disabled={busy} onClick={() => void send("resume_internal")} className="min-h-9 rounded bg-primary px-3 text-[13px] font-semibold text-primary-foreground disabled:opacity-60" data-testid="release-fix-internal-resume">
+          <button type="button" disabled={busy} onClick={() => void resume()} className="min-h-9 rounded bg-primary px-3 text-[13px] font-semibold text-primary-foreground disabled:opacity-60" data-testid="release-fix-internal-resume">
             {pause.autoResumable ? "再開する" : pause.resumeNeed === "budget" ? "予算を追加して再開" : "方針を入力して再開"}
-          </button>
-        )}
-        {internal.assignee.name && (
-          <button type="button" disabled={busy} onClick={() => void send("handover_internal")} className="min-h-9 rounded border px-3 text-[13px] disabled:opacity-60" data-testid="release-fix-internal-handover">
-            担当を解放（引き継ぎ）
           </button>
         )}
       </div>
