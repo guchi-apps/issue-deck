@@ -59,6 +59,11 @@ SUPPLEMENT_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECON
 # `src/lib/release-review-result.ts`の`normalizeReviewPath`と同じ規則（作業ディレクトリの除去はランナーだけ）
 JQ_NPATH='def npath($wt): tostring | gsub("\\\\"; "/") | (if $wt != "" and startswith($wt + "/") then .[($wt | length) + 1:] else . end) | gsub("/(\\./)+"; "/") | gsub("/+"; "/") | sub("^(\\./|/)+"; "");'
 
+# 完了報告の再送（#5475）。回数・間隔は合計がポーリング間隔を食い潰さない範囲に収める
+REPORT_ATTEMPTS="${ISSUE_DECK_RELEASE_REVIEW_REPORT_ATTEMPTS:-3}"
+REPORT_INTERVAL="${ISSUE_DECK_RELEASE_REVIEW_REPORT_INTERVAL:-3}"
+# 再送しても届かなかった完了報告の保存先
+PENDING_DIR="$WORK_ROOT/pending-reports"
 JOB_ID=""
 JOB_REPORTED=0
 RUNNING_MESSAGE="全体レビューを準備しています"
@@ -153,11 +158,45 @@ review_report() {
       + (if $progress == null then {} else {progress: $progress} end)
       + (if $session == "" then {} else {tmuxSessionName: $session} end)
       + (if $result == "" then {} else {releaseReview: ($result | fromjson)} end)')" || return 0
+  if [[ "$status" == "running" ]]; then
+    # 実行中の報告は1回の失敗で構わない（次の周期で届く）
+    review_post "$app_base_url" "$dispatch_secret" "$body" >/dev/null || true
+    return 0
+  fi
+  # 完了の報告（#5475）: 1回の通信失敗で失われないよう再送する。4xxは何度送っても同じなので打ち切る
+  local attempt code=000
+  for ((attempt = 1; attempt <= REPORT_ATTEMPTS; attempt++)); do
+    code="$(review_post "$app_base_url" "$dispatch_secret" "$body" || true)"
+    [[ "$code" =~ ^2 ]] && { review_flush_pending; return 0; }
+    [[ "$code" =~ ^4 ]] && return 0
+    ((attempt < REPORT_ATTEMPTS)) && sleep "$REPORT_INTERVAL"
+  done
+  # 再送しても届かなかった: 結果を保存し、次の全体レビューの起動時に再報告する
+  mkdir -p "$PENDING_DIR" 2>/dev/null && printf '%s' "$body" >"$PENDING_DIR/${JOB_ID}.json" 2>/dev/null || true
+  return 0
+}
+
+# review_post <URL> <秘密> <本文>: 報告を1回送り、HTTPステータス（通信失敗は000）を標準出力へ出す
+review_post() {
   # シークレットはコマンドライン引数に置かない（`ps`で見えるため）
-  printf 'Authorization: Bearer %s\n' "$dispatch_secret" |
-    curl --silent --max-time 15 --request POST --header @- \
-      --header 'Content-Type: application/json' --data-binary "$body" \
-      --output /dev/null "${app_base_url%/}/api/dispatch/report" 2>/dev/null || true
+  printf 'Authorization: Bearer %s\n' "$2" |
+    curl --silent --max-time 10 --request POST --header @- \
+      --header 'Content-Type: application/json' --data-binary "$3" \
+      --output /dev/null --write-out '%{http_code}' "${1%/}/api/dispatch/report" 2>/dev/null || true
+}
+
+# 届かなかった完了報告（保存済み）を再送する。2xxか4xxなら削除する（4xxは再送しても変わらない）
+review_flush_pending() {
+  local f code app_base_url dispatch_secret
+  [[ -d "$PENDING_DIR" ]] || return 0
+  app_base_url="$(_review_usage_env_value APP_BASE_URL)"
+  dispatch_secret="$(_review_usage_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
+  for f in "$PENDING_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    code="$(review_post "$app_base_url" "$dispatch_secret" "$(cat "$f")" || true)"
+    [[ "$code" =~ ^[24] ]] && rm -f "$f"
+  done
   return 0
 }
 
@@ -919,6 +958,8 @@ main() {
   local batch_dir="" batch_count=0 input_files=0 codex_command="" evidence_fp="" host_fp="" reuse_note=""
 
   trap cleanup EXIT
+  # 前回届かなかった完了報告があれば再送する（#5475）
+  review_flush_pending
   # 想定外の失敗でstderrの末尾を診断へ載せるため、写しを取る（端末への出力はそのまま残る）
   ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-err.XXXXXX")"
   exec 2> >(tee -a "$ERR_FILE" >&2)

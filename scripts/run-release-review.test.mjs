@@ -713,3 +713,58 @@ batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
     });
   });
 });
+
+// 完了報告の再送と保存（#5475）。偽のcurlが指定回数だけ失敗（000）または指定コードを返す
+describe("完了報告の再送", () => {
+  const callReport = (failTimes, failCode = "000") => {
+    const calls = path.join(dir, "curl-calls");
+    const fake = `#!/usr/bin/env bash
+n=$(( $(cat "${dir}/curl-count" 2>/dev/null || echo 0) + 1 )); echo $n >"${dir}/curl-count"
+cat >/dev/null
+echo "$@" >>"${calls}"
+if (( n <= ${failTimes} )); then printf '${failCode}'; exit 28; fi
+printf 200
+`;
+    writeFileSync(path.join(dir, "bin", "curl"), fake);
+    chmodSync(path.join(dir, "bin", "curl"), 0o755);
+    const script = `
+set -euo pipefail
+source "${repoRoot}/scripts/run-release-review.sh"
+JOB_ID=job1
+review_report succeeded "ok" '{"state":"passed"}'
+`;
+    spawnSync("bash", ["-c", script], {
+      env: {
+        ...process.env,
+        PATH: `${dir}/bin:${process.env.PATH}`,
+        ISSUE_DECK_RELEASE_REVIEW_ROOT: path.join(dir, "work"),
+        ISSUE_DECK_RELEASE_REVIEW_REPORT_INTERVAL: "0",
+        APP_BASE_URL: "http://example.invalid",
+        DISPATCH_SECRET: "s",
+        RELEASE_PROGRESS_FILE: path.join(dir, "none"),
+      },
+      encoding: "utf8",
+    });
+    const count = Number(readFileSync(path.join(dir, "curl-count"), "utf8"));
+    const pending = path.join(dir, "work", "pending-reports", "job1.json");
+    return { count, pending };
+  };
+
+  it("1回失敗しても再送で届き、保存は残らない", () => {
+    const r = callReport(1);
+    expect(r.count).toBe(2);
+    expect(existsSync(r.pending)).toBe(false);
+  });
+
+  it("再送しても届かなければ結果を保存する", () => {
+    const r = callReport(99);
+    expect(r.count).toBe(3);
+    expect(JSON.parse(readFileSync(r.pending, "utf8")).releaseReview.state).toBe("passed");
+  });
+
+  it("4xxは再送も保存もしない", () => {
+    const r = callReport(99, "401");
+    expect(r.count).toBe(1);
+    expect(existsSync(r.pending)).toBe(false);
+  });
+});
