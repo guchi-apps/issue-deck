@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Rocket } from "lucide-react";
+import { Loader2, Rocket } from "lucide-react";
 
 import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseBumpKindSelect } from "@/components/dashboard/release-bump-kind-select";
@@ -243,9 +243,19 @@ export function RepositoryReleaseButton({
           )}
           <ReleaseChangeList repositoryFullName={repositoryFullName} enabled={confirmOpen} />
           {error && <p className="text-xs text-destructive">{error}</p>}
+          {isTriggering && (
+            <div className="flex flex-col gap-1.5 rounded-md border bg-muted/50 px-3 py-2 text-xs" role="status" data-testid="release-start-pending">
+              <p className="flex items-center gap-2">
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+                {candidateMode ? "候補の作成を送信しています…" : "起動を送信しています…"}
+              </p>
+              <p className="text-muted-foreground">閉じても処理は続きます。結果は画面のボタン付近に表示されます。</p>
+            </div>
+          )}
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
+            {/* 送信中でも閉じられる。処理は続き、結果は画面のボタン・エラー表示へ出る（公開承認モーダルと同じ） */}
+            <AlertDialogCancel>{isTriggering ? "閉じる" : "キャンセル"}</AlertDialogCancel>
             <AlertDialogAction
               disabled={isTriggering || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={(event) => {
