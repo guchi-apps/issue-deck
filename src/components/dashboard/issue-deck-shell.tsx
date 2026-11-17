@@ -49,6 +49,7 @@ import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
 import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nightly-run-screen";
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
+import { PreviewOpenProvider } from "@/components/dashboard/preview-open-button";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { RemoteSessionView } from "@/components/dashboard/remote-session-view";
@@ -2065,6 +2066,14 @@ export function IssueDeckShell({
   return (
     <DeployFailureFixIssueContext.Provider value={openIssueDraftDialog}>
     <ReleaseFixStartContext.Provider value={openReleaseFixStart}>
+    <PreviewOpenProvider
+      value={{
+        hosts: dispatch.hosts,
+        jobs: dispatch.jobs,
+        isLoaded: dispatch.isLoaded,
+        onRequestPreview: dispatch.requestPreview,
+      }}
+    >
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
           リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
@@ -3068,6 +3077,7 @@ export function IssueDeckShell({
       </div>
       </NotificationProvider>
     </GithubReferenceNavigationProvider>
+    </PreviewOpenProvider>
     </ReleaseFixStartContext.Provider>
     </DeployFailureFixIssueContext.Provider>
   );

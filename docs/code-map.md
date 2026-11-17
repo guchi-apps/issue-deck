@@ -4329,7 +4329,7 @@ pnpm test:unit   # vitestのみ
 積み上がった`develop`を見る場所が別に要るため
 （[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を確認環境で見る」）。
 
-- 押す口だった画面のサイドメニュー「確認環境」（スマホはホームのメニュー）は**#3647で非表示**にしている（戻すときは`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`をtrueにする）。組み立ては
+- 入口のサイドメニュー「確認環境」（スマホはホームのメニュー）は#3647で隠し、**#5495で復活**した（`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`）。あわせてブランチ画面のリポジトリの流れ図に、ワンタップの[`dashboard/preview-open-button.tsx`](../src/components/dashboard/preview-open-button.tsx)（シェルが1回だけ取得したディスパッチ状態をコンテキストで受け、起動→準備中→「developを開く」へ切り替わる）を置いた。起動時にはダミーデータも自動投入する（`db:seed:dev`・結果は`DispatchHost.previewSeed*`）。組み立ては
   [`lib/dispatch/preview-server.ts`](../src/lib/dispatch/preview-server.ts)、画面は
   [`dashboard/preview-panel.tsx`](../src/components/dashboard/preview-panel.tsx)（PC・スマホ共用）
 - 経路は**既存のディスパッチのまま**（`POST /api/dispatch`の`kind: preview` → `DispatchJob`の

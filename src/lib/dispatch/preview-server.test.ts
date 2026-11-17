@@ -8,7 +8,9 @@ import {
   describePreviewRejection,
   isHostWidePreviewRejection,
   parseDispatchHostPreview,
+  describePreviewSeed,
   parsePreviewUrl,
+  resolvePreviewOpenState,
   resolvePreviewRejection,
   selectHostWidePreviewRejection,
 } from "@/lib/dispatch/preview-server";
@@ -108,7 +110,15 @@ describe("parseDispatchHostPreview（#2444）", () => {
       subject: "v4.48.0をリリースする。",
       startedAt: "2026-08-29T11:48:00.000Z",
       idleMinutes: 60,
+      seed: null,
     });
+  });
+
+  it("ダミーデータ投入の結果を読む（#5495）。知らない状態は null", () => {
+    expect(
+      parseDispatchHostPreview({ ...RUNNING_STATE, seedStatus: "seeded", seedNote: " 投入しました " })?.seed,
+    ).toEqual({ status: "seeded", note: "投入しました" });
+    expect(parseDispatchHostPreview({ ...RUNNING_STATE, seedStatus: "weird" })?.seed).toBeNull();
   });
 
   // 直前まで動いていた記録を残すと、止まっているものが画面では動いているように見える
@@ -141,6 +151,7 @@ describe("parseDispatchHostPreview（#2444）", () => {
       subject: null,
       startedAt: null,
       idleMinutes: null,
+      seed: null,
     });
   });
 });
@@ -377,5 +388,79 @@ describe("describePreviewIdleStop（#2444）", () => {
     const preview = parseDispatchHostPreview(RUNNING_STATE)!;
     expect(describePreviewIdleStop(preview)).toBe("60分アクセスが無いと自動で停止します。");
     expect(describePreviewIdleStop({ ...preview, idleMinutes: null })).toBeNull();
+  });
+});
+
+describe("resolvePreviewOpenState（#5495）", () => {
+  const REPO = "guchi-apps/issue-deck";
+  const running = parseDispatchHostPreview(RUNNING_STATE);
+
+  it("このリポジトリが動いていれば open（URLつき）", () => {
+    expect(
+      resolvePreviewOpenState({
+        host: host({ preview: running }),
+        repositoryFullName: REPO,
+        job: null,
+        now: NOW,
+      }),
+    ).toEqual({ kind: "open", url: "http://subpc.tail5210f2.ts.net:4000/", commit: "ea52e5c4" });
+  });
+
+  it("停止中なら start。別リポジトリが動いていれば置き換え先を示す", () => {
+    expect(
+      resolvePreviewOpenState({ host: host(), repositoryFullName: REPO, job: null, now: NOW }),
+    ).toEqual({ kind: "start", replacing: null });
+    expect(
+      resolvePreviewOpenState({
+        host: host({ preview: { ...running!, repository: "guchi-apps/dayspan" } }),
+        repositoryFullName: REPO,
+        job: null,
+        now: NOW,
+      }),
+    ).toEqual({ kind: "start", replacing: "guchi-apps/dayspan" });
+  });
+
+  it("起動ジョブが順番待ち・実行中なら starting（準備できたら open へ切り替わる）", () => {
+    const state = resolvePreviewOpenState({
+      host: host(),
+      repositoryFullName: REPO,
+      job: job({ status: "RUNNING" }),
+      now: NOW,
+    });
+    expect(state.kind).toBe("starting");
+  });
+
+  it("サブPCが応答しない・開発サーバーが無いなら blocked", () => {
+    expect(
+      resolvePreviewOpenState({
+        host: host({ online: false }),
+        repositoryFullName: REPO,
+        job: null,
+        now: NOW,
+      }),
+    ).toEqual({ kind: "blocked", reason: "host_offline" });
+    expect(
+      resolvePreviewOpenState({
+        host: host({ previewRepositories: ["guchi-apps/dayspan"] }),
+        repositoryFullName: REPO,
+        job: null,
+        now: NOW,
+      }),
+    ).toEqual({ kind: "blocked", reason: "no_dev_server" });
+  });
+});
+
+describe("describePreviewSeed（#5495）", () => {
+  const base = parseDispatchHostPreview(RUNNING_STATE)!;
+
+  it("申告が無ければ何も出さない", () => {
+    expect(describePreviewSeed(base)).toBeNull();
+  });
+
+  it("skipped・failed は申告の文言をそのまま出す", () => {
+    expect(
+      describePreviewSeed({ ...base, seed: { status: "skipped", note: "db:seed:dev が無い" } }),
+    ).toBe("db:seed:dev が無い");
+    expect(describePreviewSeed({ ...base, seed: { status: "failed", note: null } })).toContain("失敗");
   });
 });

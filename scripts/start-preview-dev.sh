@@ -16,6 +16,7 @@
 #   scripts/start-preview-dev.sh --stop [<owner>/<repo>]   停止する（省略時は動いているものを止める）
 #   scripts/start-preview-dev.sh --no-update  今チェックアウトされている内容のまま再起動する
 #   scripts/start-preview-dev.sh --no-migrate マイグレーションの適用（prisma migrate deploy）を行わない
+#   scripts/start-preview-dev.sh --no-seed    ダミーデータの自動投入（package.jsonのdb:seed:dev）を行わない
 #   scripts/start-preview-dev.sh --foreground この端末で動かす（Ctrl-Cで停止・ログは端末に出る）
 #
 # リポジトリを省略すると `guchi-apps/issue-deck` を対象にする（#1289当時の呼び方をそのまま
@@ -87,12 +88,13 @@ STATE_FILE="${ISSUE_DECK_PREVIEW_STATE_FILE:-$HOME/.local/state/issue-deck/previ
 MODE=start
 UPDATE=1
 MIGRATE=1
+SEED=1
 FOREGROUND=0
 JSON=0
 TARGET=""
 
 usage() {
-  echo "Usage: scripts/start-preview-dev.sh [--status|--stop|--repos-json] [--json] [--no-update] [--no-migrate] [--foreground] [<owner>/<repo>]" >&2
+  echo "Usage: scripts/start-preview-dev.sh [--status|--stop|--repos-json] [--json] [--no-update] [--no-migrate] [--no-seed] [--foreground] [<owner>/<repo>]" >&2
   exit 1
 }
 
@@ -104,6 +106,7 @@ for arg in "$@"; do
     --json) JSON=1 ;;
     --no-update) UPDATE=0 ;;
     --no-migrate) MIGRATE=0 ;;
+    --no-seed) SEED=0 ;;
     --foreground) FOREGROUND=1 ;;
     -*) usage ;;
     */*)
@@ -131,11 +134,14 @@ PREVIEW_URL=""
 PREVIEW_STARTED_AT=""
 PREVIEW_LOG=""
 PREVIEW_PID_FILE=""
+# 起動時のダミーデータ投入の結果（#5495）。status は seeded / skipped / failed
+PREVIEW_SEED_STATUS=""
+PREVIEW_SEED_NOTE=""
 
 load_state() {
   PREVIEW_REPOSITORY=""; PREVIEW_WORKTREE=""; PREVIEW_PORT=""; PREVIEW_BRANCH=""
   PREVIEW_COMMIT=""; PREVIEW_SUBJECT=""; PREVIEW_URL=""; PREVIEW_STARTED_AT=""
-  PREVIEW_LOG=""; PREVIEW_PID_FILE=""
+  PREVIEW_LOG=""; PREVIEW_PID_FILE=""; PREVIEW_SEED_STATUS=""; PREVIEW_SEED_NOTE=""
   [[ -f "$STATE_FILE" ]] || return 0
   # shellcheck disable=SC1090
   source "$STATE_FILE" 2>/dev/null || true
@@ -155,6 +161,8 @@ save_state() {
     printf 'PREVIEW_STARTED_AT=%q\n' "$PREVIEW_STARTED_AT"
     printf 'PREVIEW_LOG=%q\n' "$PREVIEW_LOG"
     printf 'PREVIEW_PID_FILE=%q\n' "$PREVIEW_PID_FILE"
+    printf 'PREVIEW_SEED_STATUS=%q\n' "$PREVIEW_SEED_STATUS"
+    printf 'PREVIEW_SEED_NOTE=%q\n' "$PREVIEW_SEED_NOTE"
   } >"$STATE_FILE"
 }
 
@@ -368,7 +376,7 @@ if [[ "$MODE" == "status" ]]; then
     # **自動停止までの分数は回収側（scripts/reap-dev-servers.sh）と同じ既定を使う。**
     # ここだけ別の値を出すと、画面が案内する時間と実際に止まる時間がずれる。
     python3 -c 'import json,sys
-keys = ["repository","branch","port","url","commit","subject","startedAt","idleMinutes"]
+keys = ["repository","branch","port","url","commit","subject","startedAt","idleMinutes","seedStatus","seedNote"]
 values = sys.argv[1:]
 out = {"running": True}
 for key, value in zip(keys, values):
@@ -377,7 +385,8 @@ for key, value in zip(keys, values):
     out[key] = int(value) if key in ("port", "idleMinutes") else value
 print(json.dumps(out, ensure_ascii=False))' \
       "$PREVIEW_REPOSITORY" "$PREVIEW_BRANCH" "$PREVIEW_PORT" "$PREVIEW_URL" \
-      "$PREVIEW_COMMIT" "$PREVIEW_SUBJECT" "$PREVIEW_STARTED_AT" "${PREVIEW_IDLE_MINUTES:-60}"
+      "$PREVIEW_COMMIT" "$PREVIEW_SUBJECT" "$PREVIEW_STARTED_AT" "${PREVIEW_IDLE_MINUTES:-60}" \
+      "$PREVIEW_SEED_STATUS" "$PREVIEW_SEED_NOTE"
     exit 0
   fi
 
@@ -532,6 +541,63 @@ if [[ "$MIGRATE" -eq 1 && -d "$WORKTREE_DIR/prisma/migrations" ]]; then
     echo "      復旧の手順は docs/multi-agent/local-quick-start.md「developの状態を確認環境で見る」を参照してください。" >&2
   fi
 fi
+
+# --- ダミーデータの自動投入（#5495） -------------------------------------------------
+# 開発DBが空だと画面に何も出ないため、リポジトリが`db:seed:dev`を持つならマイグレーションの
+# 直後（開発サーバーを起こす前）に呼ぶ。**起こす前**にするのは、シードがログイン用の
+# `CI_LOGIN_BYPASS_SECRET`を`.env.local`へ書き足すことがあり、起動後だと開発サーバーの
+# 再起動が要るため（issue-deckの`scripts/seed-dev-db.sh`はこのworktreeの`.env.local`へ書く。
+# 本体チェックアウトの`.env.local`は触らない）。
+#
+# **実データのDBへダミーデータを流さない。** 呼ぶ前に、このworktreeの`.env.local` / `.env`の
+# `DATABASE_URL`の接続先がローカル（localhost・127.0.0.1・::1）であることを必ず確かめる。
+# 読めない・ローカルでない場合は投入しない（`seed-dev-db.sh`自身も同じ検査を持つが、
+# `db:seed:dev`を持つ他リポジトリの実装には依存しない）。
+# 結果は状態ファイルへ残し、画面の確認環境に出す。**失敗しても起動は止めない。**
+seed_dummy_data() {
+  PREVIEW_SEED_STATUS="skipped"
+  PREVIEW_SEED_NOTE=""
+  if [[ "$SEED" -ne 1 ]]; then
+    PREVIEW_SEED_NOTE="--no-seed のため、ダミーデータは投入していません。"
+    return 0
+  fi
+  if [[ ! -f "$WORKTREE_DIR/package.json" ]] ||
+    ! python3 -c 'import json,sys; sys.exit(0 if "db:seed:dev" in json.load(open(sys.argv[1])).get("scripts", {}) else 1)' "$WORKTREE_DIR/package.json" 2>/dev/null; then
+    PREVIEW_SEED_NOTE="このリポジトリには db:seed:dev が無いため、ダミーデータ無しで起動しています。"
+    return 0
+  fi
+
+  local db_url="" env_name
+  for env_name in .env.local .env; do
+    [[ -f "$WORKTREE_DIR/$env_name" ]] || continue
+    db_url="$(set -a; . "$WORKTREE_DIR/$env_name" >/dev/null 2>&1; printf '%s' "${DATABASE_URL:-}")"
+    [[ -n "$db_url" ]] && break
+  done
+  local db_host=""
+  if [[ -n "$db_url" ]]; then
+    db_host="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname or "")' "$db_url" 2>/dev/null || true)"
+  fi
+  case "$db_host" in
+    localhost | 127.0.0.1 | ::1) ;;
+    *)
+      PREVIEW_SEED_NOTE="DATABASE_URL の接続先がローカルと確認できないため、ダミーデータは投入していません。"
+      echo "ダミーデータの投入を見送りました（接続先: ${db_host:-不明}）。" >&2
+      return 0
+      ;;
+  esac
+
+  echo "ダミーデータを投入しています（$PACKAGE_MANAGER run db:seed:dev）..."
+  if (cd "$WORKTREE_DIR" && NODE_ENV=development "$PACKAGE_MANAGER" run db:seed:dev); then
+    PREVIEW_SEED_STATUS="seeded"
+    PREVIEW_SEED_NOTE="ダミーデータを投入しました（共有の開発用DBのダミーデータは初期値へ戻ります）。ログイン画面の「開発用ダミーユーザーでログイン」から入れます。"
+  else
+    PREVIEW_SEED_STATUS="failed"
+    PREVIEW_SEED_NOTE="ダミーデータの投入に失敗しました。画面にデータが出ない場合はログを確認してください。"
+    echo "警告: ダミーデータの投入に失敗しました。起動は続けます。" >&2
+  fi
+}
+
+seed_dummy_data
 
 # 待ち受けを`127.0.0.1`へ閉じる（#1329・#1526）。issue-deckの`scripts/dev.sh`はこの環境変数を
 # 見る。**見ない他リポジトリでは待ち受けはそのリポジトリの既定のまま**で、Issueごとの
