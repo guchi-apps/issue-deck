@@ -302,6 +302,8 @@ export type SessionPlanRequestView = {
   issueNumber: number;
   hostName: string | null;
   plan: string;
+  /** 同じIssueの直前の計画（#5504）。修正点の強調表示に使う。無ければ`null`・未設定 */
+  previousPlan?: string | null;
   status: SessionPlanRequestStatus;
   createdAt: string;
   expiresAt: string;

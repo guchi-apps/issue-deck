@@ -828,9 +828,13 @@ Issueごとの開発サーバーが映すのは**実装中のブランチ**だ�
 PIDファイル・ログにも載らないため、`develop`を見る用途には使えない。
 
 **#2444でissue-deckの画面から押せるようにし、全リポジトリへ広げた。** サイドメニューの
-「確認環境」（スマホはホームのメニュー）から起こせるようにしたが、**#3647で入口を非表示にした**
-（`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`をtrueにすると戻る）。当面の入口は下のCLI
-（`scripts/start-preview-dev.sh`）で、同じ実体を直接叩く。
+「確認環境」（スマホはホームのメニュー）から起こせるようにしたが、#3647で入口を非表示にした。
+**#5495で入口を復活**し（`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`）、ブランチ画面のリポジトリの
+流れ図に「developを確認環境で起動」ボタンを足した（`dashboard/preview-open-button.tsx`。PC・スマホ共通）。
+押すと`kind: preview`を積み、準備中の表示を経て、同じ場所が tailnetのURLへの「developを開く」
+（`<a href>`）に変わる。**起動は非同期なので`window.open`で自動では開かない**（スマホは
+ユーザー操作から外れたポップアップをブロックする）。同じリポジトリが既に動いていれば起動し直さず
+「開く」だけを出す。CLI（`scripts/start-preview-dev.sh`）も同じ実体を直接叩く。
 
 ```bash
 scripts/start-preview-dev.sh                          # issue-deckのdevelopで（再）起動する
@@ -840,6 +844,7 @@ scripts/start-preview-dev.sh --status --json          # 同じ内容をJSONで�
 scripts/start-preview-dev.sh --stop                   # 停止する
 scripts/start-preview-dev.sh --no-update              # 今チェックアウトされている内容のまま再起動する
 scripts/start-preview-dev.sh --no-migrate             # マイグレーションの適用を行わない
+scripts/start-preview-dev.sh --no-seed                # ダミーデータの自動投入を行わない
 scripts/start-preview-dev.sh --foreground             # この端末で動かす（Ctrl-Cで停止）
 ```
 
@@ -870,6 +875,25 @@ scripts/start-preview-dev.sh --foreground             # この端末で動かす
   （「開発サーバーにデータが出ないとき」を参照）
 - **塞ぎを外す運用は用意しない。** 外したい場面は「本番相当の書き込みを確かめたい」ときだが、
   それは確認環境の役割ではなく、developへマージしてからmainへ出す前のリリースPRで見る話になる
+
+### ダミーデータは起動時に自動で入る（#5495）
+
+`start-preview-dev.sh`は`migrate deploy`の直後・開発サーバーを起こす**前**に、リポジトリの
+`package.json`に`db:seed:dev`があれば呼ぶ（issue-deckは`scripts/seed-dev-db.sh`）。起こす前なのは、
+シードがログイン用の`CI_LOGIN_BYPASS_SECRET`を確認環境worktreeの`.env.local`へ書き足すことがあり、
+起動後だと開発サーバーの再起動が要るため（本体の`.env.local`は触らない）。
+
+- **実データのDBへは流さない。** 呼ぶ前に、worktreeの`.env.local` / `.env`の`DATABASE_URL`の
+  接続先がlocalhost・127.0.0.1・::1であることを必ず確かめ、違えば投入しない（`seed-dev-db.sh`自身の
+  検査とは別に、他リポジトリの実装に依存しないよう起動側でも持つ）
+- `db:seed:dev`が無いリポジトリは、ダミーデータ無しで起動し、その旨を画面に出す。失敗しても起動は止めない
+- 結果（seeded / skipped / failed と1行の説明）は状態ファイル→`--status --json`→申告
+  （`DispatchHost.previewSeedStatus`・`previewSeedNote`）で運び、確認環境の画面に出す
+- **開発DBは本体・各Issueのworktree・確認環境で共有のまま。** シードは冪等だが、`SEED_PROFILE=dev`の
+  後処理は投入済みのダミー行を初期値へ書き換える。確認環境を起こすたびに、実装中のIssueのworktreeが
+  見ているダミーデータも初期値へ戻る。また`migrate deploy`でdevelopの最新マイグレーションが共有DBへ
+  当たる。専用DB（`issue_deck_preview`など）への分離は見送った
+- 確認環境の自動停止（`PREVIEW_IDLE_MINUTES`・既定60分）は`scripts/reap-dev-servers.sh`が実際に停止する
 
 ### 同時に動かせるのは1つ（#2444）
 

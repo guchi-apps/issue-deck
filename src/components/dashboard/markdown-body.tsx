@@ -324,6 +324,12 @@ function InlineCodeChip({ node, className, children }: ComponentProps<"code"> & 
 }
 
 const components: Components = {
+  // 計画の修正点の強調（#5504）。色だけに頼らず、太字・下線も付ける
+  ins: ({ children }) => (
+    <ins className="rounded-sm bg-red-500/10 font-semibold text-red-600 underline decoration-dotted underline-offset-4 dark:text-red-400">
+      {children}
+    </ins>
+  ),
   a: (props) => <MarkdownLink {...props} />,
   // `node`を捨てているのは、react-markdownがhastのノードも渡してくるため。そのままDOMへ
   // 流すと`node="[object Object]"`という無効な属性になる（#1499）。MarkdownImageは残りの

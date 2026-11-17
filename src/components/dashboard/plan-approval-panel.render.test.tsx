@@ -841,4 +841,23 @@ describe("PlanApprovalPanel", () => {
       (screen.getByRole("button", { name: /承認して実装へ進む/ }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
+
+  it("前回の計画からの修正点を赤字で強調し、スイッチで戻せる（#5504）", () => {
+    const { container } = render(
+      <PlanApprovalPanel
+        request={request({ plan: "- a\n- b2", previousPlan: "- a\n- b" })}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+    expect(container.querySelectorAll("ins").length).toBeGreaterThan(0);
+    expect(screen.getByText("修正点を強調")).toBeTruthy();
+  });
+
+  it("前回の計画が無ければ強調しない（#5504）", () => {
+    render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle()} />,
+    );
+    expect(screen.queryByText("修正点を強調")).toBeNull();
+  });
 });

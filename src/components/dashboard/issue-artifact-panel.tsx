@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
-
 import {
   ExternalLink,
   Image as ImageIcon,
@@ -14,9 +12,8 @@ import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
 import {
-  isArtifactUpdated,
+  artifactFreshness,
   markArtifactSeen,
-  recordArtifactBaseline,
   useArtifactSeen,
 } from "@/lib/artifact-seen";
 import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
@@ -50,16 +47,18 @@ export function IssueArtifactPanel({
   isFailed?: boolean;
 }) {
   // **更新の強調は承認待ちの独立カードだけ**（#5483）。マージ済みなど承認待ちでない状態の
-  // `section`では出さない。基準の記録は`section`でも続けるので、承認待ちへ戻ったときに拾える。
-  // 取得に失敗したときは`artifacts`が空なので、基準は「取得成功かつ非空」のときだけ保存される
+  // `section`では出さない。初めて提示されたもの（記録に無い）も更新と同じく強調し、
+  // 開く操作で既読として記録する（#5503）
   const seen = useArtifactSeen();
-  useEffect(() => {
-    recordArtifactBaseline(artifacts);
-  }, [artifacts]);
   const highlight = variant === "standalone";
-  const updatedIds = new Set(
-    highlight ? artifacts.filter((a) => isArtifactUpdated(seen, a)).map((a) => a.id) : [],
+  const freshness = new Map(
+    highlight ? artifacts.map((a) => [a.id, artifactFreshness(seen, a)] as const) : [],
   );
+  const updatedIds = new Set(
+    artifacts.filter((a) => freshness.get(a.id) && freshness.get(a.id) !== "seen").map((a) => a.id),
+  );
+  const newCount = artifacts.filter((a) => freshness.get(a.id) === "new").length;
+  const badgeLabel = newCount === updatedIds.size ? "新規" : "更新あり";
 
   if (artifacts.length === 0) {
     if (!isFailed || variant === "section") return null;
@@ -83,6 +82,7 @@ export function IssueArtifactPanel({
           key={artifact.id}
           artifact={artifact}
           updated={updatedIds.has(artifact.id)}
+          isNew={freshness.get(artifact.id) === "new"}
           // **サムネイルは新しい方から数件だけ**。1件が数百KBのHTMLをiframeで実際に開くので、
           // 上限（20件）まで並べると、Issueを開いただけでその全部を取りに行くことになる
           withThumbnail={index < THUMBNAIL_LIMIT}
@@ -142,7 +142,7 @@ export function IssueArtifactPanel({
         </span>
         {hasUpdate && (
           <span className="rounded-md bg-amber-500 px-2 py-0.5 text-xs font-bold text-amber-950">
-            更新あり {updatedIds.size}
+            {badgeLabel} {updatedIds.size}
           </span>
         )}
         <span className="ml-auto">{reloadButton}</span>
@@ -160,11 +160,14 @@ function ArtifactCard({
   artifact,
   withThumbnail,
   updated,
+  isNew,
 }: {
   artifact: SessionArtifactView;
   withThumbnail: boolean;
   /** 前回見た版から更新されている（承認待ちの独立カードのときだけtrue。#5483） */
   updated: boolean;
+  /** 初めて提示された（記録に無い）。`updated`の内訳（#5503） */
+  isNew: boolean;
 }) {
   const preview = useArtifactPreview();
   const open = () => preview?.open(artifact);
@@ -191,8 +194,10 @@ function ArtifactCard({
             {artifact.title}
             {updated && (
               <span className="ml-1.5 inline-flex items-center rounded-md bg-amber-500 px-2 py-0 align-middle text-xs font-bold text-amber-950">
-                更新あり
-                <span className="sr-only">（前回確認から更新されています）</span>
+                {isNew ? "新規" : "更新あり"}
+                <span className="sr-only">
+                  {isNew ? "（まだ確認していません）" : "（前回確認から更新されています）"}
+                </span>
               </span>
             )}
           </p>
