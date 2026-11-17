@@ -115,3 +115,19 @@ describe("開始方式（#4604）", () => {
     expect(requestRelease).not.toHaveBeenCalled();
   });
 });
+
+describe("送信中でも閉じられる（#5514）", () => {
+  it("候補作成の送信中に「閉じる」でモーダルを閉じられ、処理は続く", async () => {
+    startMode = { mode: "candidate" };
+    requestRelease.mockImplementationOnce(() => new Promise(() => {}));
+    render(<RepositoryReleaseButton repositoryFullName="o/r" isPending={false} onTriggered={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
+    fireEvent.click(screen.getByRole("button", { name: "候補を作成する" }));
+    expect(await screen.findByTestId("release-start-pending")).toBeTruthy();
+    const close = screen.getByRole("button", { name: "閉じる" });
+    expect(close.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(close);
+    expect(screen.queryByTestId("release-start-pending")).toBeNull();
+    expect(screen.getByRole("button", { name: "起動中..." }).hasAttribute("disabled")).toBe(true);
+  });
+});
