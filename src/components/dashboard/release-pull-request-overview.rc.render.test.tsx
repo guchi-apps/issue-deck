@@ -26,16 +26,19 @@ function makeVerification(aiReview = section("passed"), integration = section("p
 
 let verification: ReleaseVerificationSummary | null = makeVerification();
 let rcOverview: RcOverviewWithFinalization | null = null;
+// 取得を終えた`reloadToken`と失敗（「状態を取り直す」の反応の確認用。#5478）
+let rcSettled = Number.POSITIVE_INFINITY;
+let rcError: string | null = null;
 
 vi.mock("@/hooks/use-release-rc", () => ({
-  useReleaseRc: () => ({ overview: rcOverview, error: null, reload: vi.fn() }),
+  useReleaseRc: () => ({ overview: rcOverview, error: rcError, reload: vi.fn(), settledToken: rcSettled }),
 }));
 
 vi.mock("@/hooks/use-reference-navigation", () => ({
   useReferenceNavigation: () => ({ openIssue: vi.fn(), openPullRequest: vi.fn() }),
 }));
 vi.mock("@/hooks/use-release-verification", () => ({
-  useReleaseVerification: () => ({ verification, error: null }),
+  useReleaseVerification: () => ({ verification, error: null, settledToken: Number.POSITIVE_INFINITY }),
 }));
 vi.mock("@/hooks/use-release-changes", () => ({
   useReleaseChanges: () => ({
@@ -131,12 +134,38 @@ function stubFetch() {
 
 describe("ReleasePullRequestOverview の新方式候補の工程（#4635）", () => {
   beforeEach(() => {
+    rcSettled = Number.POSITIVE_INFINITY;
+    rcError = null;
     verification = makeVerification();
     stubFetch();
   });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("「状態を取り直す」は取得中を示し、終わると結果を出す（失敗は変更なしと区別する。#5478）", async () => {
+    rcSettled = -1;
+    const view = render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-journey-refresh")).toBeTruthy());
+    expect(screen.queryByTestId("release-journey-refresh-result")).toBeNull();
+    fireEvent.click(screen.getByTestId("release-journey-refresh"));
+    const busy = screen.getByTestId("release-journey-refresh") as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    expect(busy.textContent).toContain("取得中…");
+    // 取得が終わり、記録が変わっていなければ「変更はありません」
+    rcSettled = 1;
+    view.rerender(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-journey-refresh-result").textContent).toContain("変更はありません"));
+    expect((screen.getByTestId("release-journey-refresh") as HTMLButtonElement).disabled).toBe(false);
+    // 失敗は「取得に失敗しました」で出す
+    rcSettled = -1;
+    rcError = "候補を取得できませんでした (502)";
+    view.rerender(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("release-journey-refresh"));
+    rcSettled = 2;
+    view.rerender(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-journey-refresh-result").textContent).toContain("取得に失敗しました: 候補を取得できませんでした (502)"));
   });
 
   it("合格してもドラフト・公開準備前は「本番公開へ進む」を出さず、公開準備へ案内する", async () => {

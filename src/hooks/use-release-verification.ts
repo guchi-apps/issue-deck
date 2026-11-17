@@ -20,10 +20,12 @@ export function useReleaseVerification(
   pullRequestNumber: number,
   enabled: boolean,
   reloadToken = 0,
-): { verification: ReleaseVerificationSummary | null; error: string | null } {
+): { verification: ReleaseVerificationSummary | null; error: string | null; settledToken: number } {
   const key = `${repositoryFullName}#${pullRequestNumber}`;
   const [loaded, setLoaded] = useState<{ key: string; verification: ReleaseVerificationSummary } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  // 取得を終えた（成功・失敗・対象外とも）最新の`reloadToken`（#5478）
+  const [settledToken, setSettledToken] = useState(-1);
 
   useEffect(() => {
     if (!enabled) return;
@@ -38,12 +40,17 @@ export function useReleaseVerification(
         const res = await fetch(`/api/repositories/release/verification?${params.toString()}`, {
           signal: controller.signal,
         });
-        if (res.status === 404) return; // リリースPRではない（旧世代など）。何も出さない
+        if (res.status === 404) {
+          setSettledToken(reloadToken);
+          return;
+        }
+        // リリースPRではない（旧世代など）。何も出さない
         if (!res.ok) throw new Error(`検証の状態を取得できませんでした (${res.status})`);
         const body: { verification?: ReleaseVerificationSummary } = await res.json();
         if (!body.verification) throw new Error("検証の状態の応答が不正です");
         setLoaded({ key, verification: body.verification });
         setFailure(null);
+        setSettledToken(reloadToken);
         const states = [body.verification.integration.state, body.verification.aiReview.state];
         // 統合検証の完了から自動再評価が積まれるまで（#4664）は両区分とも完了に見える。段階で追い続ける
         const stage = body.verification.aiReview.stage?.kind;
@@ -57,6 +64,7 @@ export function useReleaseVerification(
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setFailure({ key, message: clientErrorMessage(err) });
+        setSettledToken(reloadToken);
         delay = RETRY_POLL_MS;
       }
       if (delay !== null && !controller.signal.aborted) timer = setTimeout(load, delay);
@@ -71,5 +79,6 @@ export function useReleaseVerification(
   return {
     verification: loaded?.key === key ? loaded.verification : null,
     error: failure?.key === key ? failure.message : null,
+    settledToken,
   };
 }
