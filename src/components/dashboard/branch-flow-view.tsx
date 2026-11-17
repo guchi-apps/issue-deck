@@ -3082,11 +3082,14 @@ export function BranchFlowView({
         ? "always"
         : (branchViewModes?.[repository.repositoryFullName] ?? "always"),
     hasActivity: hasBranchActivity,
-    isUnknown: (repository) =>
-      !rowsLoaded || failedRepositories.includes(repository.repositoryFullName),
+    // 取得に失敗したものだけ「動きの有無が不明」として並べる。読み込み中は並べない（#5494。
+    // 先に全件を出して読み込み後に消すと、行が現れては消えて見えた）
+    isUnknown: (repository) => failedRepositories.includes(repository.repositoryFullName),
+    isLoading: !rowsLoaded,
     showAll: false,
   });
-  const branchViewHiddenCount = branchViewSelection.hidden.length;
+  // 読み込み中は「設定で省略」と言い切らない（#5494。動きの有無が分かってから数える）
+  const branchViewHiddenCount = rowsLoaded ? branchViewSelection.hidden.length : 0;
   const shownRepositories = branchViewSelection.visible;
   // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
   const attentionRepositories = shownRepositories.filter(needsAttention);
@@ -3322,7 +3325,11 @@ export function BranchFlowView({
             </p>
           )}
 
-          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && (
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && !rowsLoaded && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">読み込み中...</p>
+          )}
+
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && rowsLoaded && (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               ブランチ画面に並べるリポジトリがありません（{branchViewHiddenCount}件は設定で省略しています）。
               「表示リポジトリを編集」から表示するものを変えられます。
