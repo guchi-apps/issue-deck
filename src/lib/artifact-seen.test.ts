@@ -2,38 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   ARTIFACT_SEEN_LIMIT,
-  isArtifactUpdated,
-  withBaseline,
+  artifactFreshness,
   withSeen,
 } from "@/lib/artifact-seen";
 
 const a = (id: string, publishedAt = "t1") => ({ id, publishedAt });
 
-describe("isArtifactUpdated", () => {
-  it("記録が無い（初めて見る）ものは更新扱いにしない", () => {
-    expect(isArtifactUpdated({}, a("x"))).toBe(false);
+describe("artifactFreshness", () => {
+  it("記録が無い（初めて提示された）ものは新規として強調する", () => {
+    expect(artifactFreshness({}, a("x"))).toBe("new");
   });
-  it("記録と同じ版は更新なし、違う版は更新あり", () => {
-    expect(isArtifactUpdated({ x: "t1" }, a("x", "t1"))).toBe(false);
-    expect(isArtifactUpdated({ x: "t1" }, a("x", "t2"))).toBe(true);
-  });
-});
-
-describe("withBaseline", () => {
-  it("記録の無いものだけ足し、既にあるIDは上書きしない", () => {
-    const next = withBaseline({ x: "t1" }, [a("x", "t2"), a("y", "t2")]);
-    expect(next).toEqual({ x: "t1", y: "t2" });
-  });
-  it("変化が無ければ同じオブジェクトを返す", () => {
-    const seen = { x: "t1" };
-    expect(withBaseline(seen, [a("x", "t2")])).toBe(seen);
+  it("記録と同じ版は見た、違う版は更新あり", () => {
+    expect(artifactFreshness({ x: "t1" }, a("x", "t1"))).toBe("seen");
+    expect(artifactFreshness({ x: "t1" }, a("x", "t2"))).toBe("updated");
   });
 });
 
 describe("withSeen", () => {
   it("見た版へ更新して強調を外す", () => {
     const next = withSeen({ x: "t1" }, a("x", "t2"));
-    expect(isArtifactUpdated(next, a("x", "t2"))).toBe(false);
+    expect(artifactFreshness(next, a("x", "t2"))).toBe("seen");
   });
   it("上限を超えたら古いものから消す", () => {
     let seen = {};
