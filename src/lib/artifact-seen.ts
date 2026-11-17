@@ -1,7 +1,7 @@
 /**
  * アーティファクトを「どの版まで見たか」の記録（#5483）。
  *
- * 計画承認待ち・質問待ちのカードで、**前回見た版から更新されたものだけ**を強調するために、
+ * 計画承認待ち・質問待ちのカードで、**初めて提示されたもの・前回見た版から更新されたもの**を強調するために、
  * アーティファクトID → 見た版（`publishedAt`）をブラウザのlocalStorageへ持つ。
  * 閲覧者ごとの便宜なので端末をまたがず、保存できない環境では強調なしで動く。
  *
@@ -17,21 +17,16 @@ export type ArtifactSeenMap = Record<string, string>;
 
 type Versioned = { id: string; publishedAt: string };
 
-/** 記録に無い（初めて見る）ものは更新扱いにしない。記録と版が違うものだけが更新あり */
-export function isArtifactUpdated(seen: ArtifactSeenMap, artifact: Versioned): boolean {
-  const recorded = seen[artifact.id];
-  return recorded !== undefined && recorded !== artifact.publishedAt;
-}
+export type ArtifactFreshness = "new" | "updated" | "seen";
 
-/** 記録の無いものだけ、今の版を基準として足す。既にあるIDは上書きしない */
-export function withBaseline(seen: ArtifactSeenMap, artifacts: Versioned[]): ArtifactSeenMap {
-  let next = seen;
-  for (const artifact of artifacts) {
-    if (next[artifact.id] !== undefined) continue;
-    if (next === seen) next = { ...seen };
-    next[artifact.id] = artifact.publishedAt;
-  }
-  return next === seen ? seen : trim(next);
+/**
+ * 記録に無い（初めて提示された）ものは"new"、記録と版が違うものは"updated"、同じ版は"seen"。
+ * 初めてのものも更新と同じく強調する（#5503）
+ */
+export function artifactFreshness(seen: ArtifactSeenMap, artifact: Versioned): ArtifactFreshness {
+  const recorded = seen[artifact.id];
+  if (recorded === undefined) return "new";
+  return recorded === artifact.publishedAt ? "seen" : "updated";
 }
 
 /** 見た版として記録する（既に同じなら同じオブジェクトを返す） */
@@ -115,9 +110,4 @@ export function useArtifactSeen(): ArtifactSeenMap {
 
 export function markArtifactSeen(artifact: Versioned): void {
   update((seen) => withSeen(seen, artifact));
-}
-
-export function recordArtifactBaseline(artifacts: Versioned[]): void {
-  if (artifacts.length === 0) return;
-  update((seen) => withBaseline(seen, artifacts));
 }
