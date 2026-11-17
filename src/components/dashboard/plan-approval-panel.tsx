@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -32,6 +32,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { isNoteOnlyApprove, type PendingPlanReview, type PlanReviewNotice } from "@/lib/github/plan-review";
+import { markPlanChanges } from "@/lib/plan-diff";
 import { splitAttachments } from "@/lib/markdown-attachments";
 import { buildSessionOpenTarget, type SessionOpenTarget } from "@/lib/dispatch/session-open-target";
 
@@ -108,6 +109,12 @@ export function PlanApprovalPanel({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
+  // 前回の計画からの修正点を赤字にする（#5504）
+  const [highlightChanges, setHighlightChanges] = useState(true);
+  const marked = useMemo(
+    () => markPlanChanges(request.previousPlan, request.plan),
+    [request.previousPlan, request.plan],
+  );
   const [revision, setRevision] = useState("");
   // 計画レビューカードの「追加で修正したいこと」の下書き。承認では文章を運べないので、
   // 入っている間は承認を止めて黙って捨てない（#3852）
@@ -251,9 +258,33 @@ export function PlanApprovalPanel({
             計画レビューがサブPCの空きを待っていて、まだ起動していません。届くのを待たずに承認・修正することもできます。
           </p>
         )}
+        {marked.changedCount > 0 && (
+          <label className="flex flex-wrap items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={highlightChanges}
+              onChange={(e) => setHighlightChanges(e.target.checked)}
+            />
+            <span>修正点を強調</span>
+            <span className="text-muted-foreground">
+              {highlightChanges ? (
+                <>
+                  <ins className="font-semibold text-red-600 underline decoration-dotted underline-offset-4 dark:text-red-400">赤字</ins>
+                  ＝前回の計画からの追加・変更
+                </>
+              ) : (
+                "前回の計画からの追加・変更"
+              )}
+              （{marked.changedCount}行）
+            </span>
+          </label>
+        )}
         <div className="relative rounded-md border bg-muted/60 px-3 py-2">
           <div className={isExpanded ? undefined : COLLAPSED_PLAN_CLASS}>
-            <MarkdownBody content={request.plan} repositoryFullName={request.repositoryFullName} />
+            <MarkdownBody
+              content={highlightChanges ? marked.markdown : request.plan}
+              repositoryFullName={request.repositoryFullName}
+            />
           </div>
           {!isExpanded && (
             <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">

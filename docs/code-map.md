@@ -3571,6 +3571,8 @@ export function POST(request: NextRequest) {
   プロンプトが出る）。**押す先の案内もアプリの中へ向ける**——一覧の行は「計画を承認」を出して
   Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
   `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
+  **計画を出し直したときは、同じIssueの直前の計画（`previousPlan`。`listSessionPlanRequests`が付ける）と
+  行単位で比べ、追加・変更行を`<ins>`で包んで赤字にする**（`lib/plan-diff.ts`・#5504。表・コードは対象外）。
   **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
   **Codexのセッションでは、判断を待つのではなく、issue-deck側から押し込む**（#3218。Codexは
   シェルの実行を30秒で打ち切って完了と解釈しターンを終えるため、`submit-plan.sh`・

@@ -282,5 +282,21 @@ export async function listSessionPlanRequests(
     orderBy: { createdAt: "desc" },
     take: 20,
   });
-  return rows.map(toSessionPlanRequestView);
+  // 計画の修正点を強調するため、待ちの計画には同じIssueの直前の計画を付ける（#5504）
+  return Promise.all(
+    rows.map(async (row) => {
+      const view = toSessionPlanRequestView(row);
+      if (row.status !== "WAITING") return view;
+      const previous = await db.sessionPlanRequest.findFirst({
+        where: {
+          repositoryFullName: row.repositoryFullName,
+          issueNumber: row.issueNumber,
+          createdAt: { lt: row.createdAt },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { plan: true },
+      });
+      return { ...view, previousPlan: previous?.plan ?? null };
+    }),
+  );
 }
