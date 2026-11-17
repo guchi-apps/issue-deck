@@ -1,3 +1,4 @@
+import { importedRevisionByPr } from "@/lib/release-contents";
 import { db } from "@/lib/db";
 import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
@@ -816,12 +817,16 @@ export async function requestRcImport(
 
   const numbers = [...new Map(input.selected.map((item) => [item.number, item])).values()];
   if (numbers.length === 0) return { ok: false, error: "empty_selection" };
+  const importedAt = importedRevisionByPr(row.revisions);
   const checked = await Promise.all(
     numbers.map(async ({ number, expectedMergeSha }) => {
       const fetched = await fetchPullRequestForRebuild(ctx.owner, ctx.repo, number, ctx.token);
-      const includedInOrigin = fetched?.merge_commit_sha
-        ? await isAncestorCommit(ctx.owner, ctx.repo, fetched.merge_commit_sha, current.headSha!, ctx.token)
-        : false;
+      // 取り込みは`cherry-pick -m 1`なので、元のマージは候補の祖先にならない。適用済みrevisionの記録も見る（#5469）
+      const includedInOrigin =
+        importedAt.has(number) ||
+        (fetched?.merge_commit_sha
+          ? await isAncestorCommit(ctx.owner, ctx.repo, fetched.merge_commit_sha, current.headSha!, ctx.token)
+          : false);
       const result = checkRebuildPullRequest(
         {
           number,
@@ -932,6 +937,8 @@ export type RcImportOption = {
   /** 選べない理由（選べるならnull） */
   problem: RebuildPullRequestProblem | null;
   problemLabel: string | null;
+  /** 適用済みrevisionでこの候補へ取り込み済みなら、そのrevision（#5469）。未取り込みならnull */
+  importedRevision: number | null;
 };
 
 export type RcImportOptions = {
@@ -967,16 +974,22 @@ export async function loadRcImportOptions(ctx: Context, candidateId: string): Pr
   const prNumbers = [...new Set(row.revisions.flatMap((r) => (r.prNumber === null ? [] : [r.prNumber])))];
   const fix = await relatedFixPrNumbers(row.repositoryFullName, prNumbers);
   const approved = jsonArray<ApprovedExtra>(row.approvedExtraPrs).map((a) => a.number);
+  const importedAt = importedRevisionByPr(row.revisions);
   const toOption = (base: { number: number; title: string; issueNumber: number | null; mergeSha: string | null; merged: boolean; problem: RebuildPullRequestProblem | null }): RcImportOption => {
     const relatedFix = fix.fixPrs.includes(base.number);
     const isApproved = approved.includes(base.number);
+    // 適用済みrevisionで取り込んだPRは、元のマージが候補の祖先でなくても取り込み済み（#5469）
+    const importedRevision = importedAt.get(base.number) ?? null;
+    const problem = importedRevision !== null ? "already_included" : base.problem;
     return {
       ...base,
+      problem,
       url: `https://github.com/${row.repositoryFullName}/pull/${base.number}`,
       relatedFix,
       approved: isApproved,
-      approvalRequired: base.problem === null && !relatedFix && !isApproved,
-      problemLabel: base.problem ? REBUILD_PR_PROBLEM_LABEL[base.problem] : null,
+      approvalRequired: problem === null && !relatedFix && !isApproved,
+      problemLabel: problem && importedRevision === null ? REBUILD_PR_PROBLEM_LABEL[problem] : null,
+      importedRevision,
     };
   };
 

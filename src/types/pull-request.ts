@@ -724,4 +724,9 @@ export type ReleaseChangeListResponse = {
   headSha: string | null;
   /** 1ページの上限で打ち切ったか */
   truncated: boolean;
+  /**
+   * 前のリリースでmainへ取り込み済み（cherry-pick）のため一覧から外したPR番号（#5469）。
+   * developの元のマージがこの範囲に残っていても、変更はすでにmainに入っている
+   */
+  releasedByPick?: number[];
 };

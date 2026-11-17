@@ -7,6 +7,7 @@ import {
   withFixedBy,
   withMergeChecks,
   withReleaseReviews,
+  withoutReleasedByPick,
 } from "@/lib/release-changes";
 
 function merge(sha: string, n: number, branch: string, title: string) {
@@ -143,5 +144,42 @@ describe("withFixedBy（#5175）", () => {
   it("修正PR自身とバンプPRには付けない", () => {
     const result = withFixedBy([pr(355), pr(352, true)], [series({ relatedPullRequests: [355, 352] })]);
     expect(result.every((p) => p.fixedBy === undefined)).toBe(true);
+  });
+});
+
+describe("withoutReleasedByPick（#5469）", () => {
+  // RC-48でcherry-pickされた#1012の、developの元のマージ（親2つ）とそのブランチ内コミットがRC-49の範囲に残る形
+  const commits = [
+    { sha: "s1", message: "AI生成の検索語から演算子を含む条件を除外する (#1011)", parents: 1 },
+    { sha: "s2", message: "Merge pull request #1012 from o/issue-1011\n\n検索語の修正", parents: 2 },
+    { sha: "s3", message: "Merge pull request #1013 from o/release-sync/main-abc\n\n同期", parents: 2 },
+    { sha: "s4", message: "メール検索の不具合を直す。 #1014", parents: 1 },
+    { sha: "s5", message: "Merge pull request #1016 from o/issue-1014\n\n検索の修正", parents: 2 },
+  ];
+  const folded = () => toReleaseChanges(commits.map((c) => ({ sha: c.sha, message: c.message })));
+  const sources = (over: Partial<Record<string, number | null>> = {}) =>
+    commits.map((c) => ({ message: c.message, parentCount: c.sha in over ? (over[c.sha] ?? null) : c.parents }));
+
+  it("mainでpick済みのPRの元のマージを結果から外し、ブランチ内コミットを個別の行として復活させない", () => {
+    const { pullRequests, unknownCommits } = folded();
+    const result = withoutReleasedByPick(pullRequests, sources(), new Set([1012, 999]));
+    expect(result.pullRequests.map((p) => p.number)).toEqual([1016, 1013]);
+    expect(result.releasedByPick).toEqual([1012]);
+    expect(unknownCommits).toEqual([]);
+  });
+
+  it("範囲内のマージが親1つ（候補自身のcherry-pick）なら外さない", () => {
+    const result = withoutReleasedByPick(folded().pullRequests, sources({ s2: 1 }), new Set([1012]));
+    expect(result.pullRequests.map((p) => p.number)).toContain(1012);
+    expect(result.releasedByPick).toEqual([]);
+  });
+
+  it("親の数が分からなければ外さない", () => {
+    const result = withoutReleasedByPick(folded().pullRequests, sources({ s2: null }), new Set([1012]));
+    expect(result.releasedByPick).toEqual([]);
+  });
+
+  it("mainの取り込みが取れなければ（空集合）何も外さない", () => {
+    expect(withoutReleasedByPick(folded().pullRequests, sources(), new Set()).releasedByPick).toEqual([]);
   });
 });
