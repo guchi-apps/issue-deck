@@ -30,6 +30,15 @@ describe("check-ui-design", () => {
     expect(rules("// 🚀 ここはコメント")).toEqual([]);
   });
 
+  it("絵文字の対象は画面を描くコードだけで、.ts の文面・マーカーは見ない", () => {
+    const active = (text, file) => scanText(text, file).filter((f) => !f.excluded).map((f) => f.rule);
+    expect(active("<span>✅ 記録済み</span>", "src/components/a.tsx")).toEqual(["emoji-icon"]);
+    expect(active('lines.push("⚠️ **終了しました**");', "src/lib/dispatch/session-wrapup.ts")).toEqual([]);
+    expect(active('["🔍", "planner"],', "src/lib/github/comment-source.ts")).toEqual([]);
+    // 絵文字以外のルールは .ts でも見る
+    expect(active('"shadow-lg"', "src/lib/x.ts")).toEqual(["heavy-shadow"]);
+  });
+
   it("大きな影を検出する", () => {
     expect(rules('<div className="shadow-lg">')).toEqual(["heavy-shadow"]);
     expect(rules('<div className="shadow-sm">')).toEqual([]);
