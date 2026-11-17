@@ -19,6 +19,12 @@ import {
   visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { needsReviewAttention, parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import {
+  resolveReviewFixSessionRoute,
+  reviewFixJobFailureReason,
+  REVIEW_FIX_SESSION_INSTRUCTION,
+} from "@/lib/dispatch/review-fix-session";
+import { findDispatchSessionForIssue } from "@/lib/dispatch/sessions";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
@@ -330,28 +336,48 @@ async function resolveReviewResponseContext(params: {
     .catch(() => null);
   const local = (issue?.labels.length ?? 0) > 0;
   const closed = issue?.state === "CLOSED";
-  // 11.localが残っていても、作業を終えたセッションの外し忘れ（再開で付け直された等）がある（#5160）。
-  // 生きているセッションが無ければ「対応中」とは言わず、外す案内に切り替えるために引く。
-  // 読めなければnull（分からない）にして、従来どおりの「対応中」の文言に倒す
-  const sessionAlive = local
-    ? await db.dispatchSession
-        .findFirst({
-          where: { repositoryFullName: params.repositoryFullName, issueNumber: params.issueNumber, state: "ALIVE" },
-          select: { id: true },
-        })
-        .then((row) => row !== null)
-        .catch(() => null)
-    : null;
+  // 「Issueのセッションで直す」の送り先（#5493）と、11.localの外し忘れの判定（#5160）は、
+  // 同じセッションの記録（最後に報告された1件）から決める。読めなければnull（分からない）にして、
+  // 送り先のボタンを出さず、11.localの文言は従来どおり「対応中」に倒す
+  const session = await findDispatchSessionForIssue({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
+  }).then(
+    (row) => ({ ok: true as const, row }),
+    () => ({ ok: false as const, row: null }),
+  );
+  const sessionAlive = local && session.ok ? session.row?.state === "ALIVE" : null;
+  const reviewFixRoute = session.ok ? resolveReviewFixSessionRoute(session.row) : null;
   try {
     const comments = await fetchCommentsForIssue(params.owner, params.repo, params.issueNumber, params.token);
+    let currentFixRequest = findCurrentFixRequest(comments, params.headSha);
+    let interruptedFixRequest = findInterruptedFixRequest(comments, params.headSha);
+    // 依頼のあとに積んだジョブが届かずに終わったなら、「依頼済み」で待たせず「中断」にする（#5493）
+    if (currentFixRequest) {
+      const failure = await findReviewFixJobFailure({
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        requestedAt: currentFixRequest.createdAt,
+      });
+      if (failure) {
+        interruptedFixRequest = {
+          kind: "failed",
+          reason: failure,
+          requestUrl: currentFixRequest.commentUrl,
+          resultUrl: null,
+        };
+        currentFixRequest = null;
+      }
+    }
     return {
       issueNumber: params.issueNumber,
       linkedIssueLocal: local,
       linkedIssueSessionAlive: sessionAlive,
       linkedIssueClosed: closed,
-      currentFixRequest: findCurrentFixRequest(comments, params.headSha),
-      interruptedFixRequest: findInterruptedFixRequest(comments, params.headSha),
+      currentFixRequest,
+      interruptedFixRequest,
       fetchFailed: false,
+      reviewFixRoute,
     };
   } catch (error) {
     console.error(`[GET /api/pull-requests/detail] fix-request lookup ${params.owner}/${params.repo}#${params.issueNumber}:`, error);
@@ -363,8 +389,38 @@ async function resolveReviewResponseContext(params: {
       currentFixRequest: null,
       interruptedFixRequest: null,
       fetchFailed: true,
+      reviewFixRoute,
     };
   }
+}
+
+/** GitHubとDBの時計のずれを見込む幅。依頼コメントの投稿はジョブの投入より先なので、少し前から探す */
+const REVIEW_FIX_JOB_LOOKBACK_MS = 60_000;
+
+/**
+ * 依頼のあとに積まれた、依頼を渡すジョブ（再開・起動の`LAUNCH`か、固定の1行の`INSTRUCTION`）の
+ * 最新1件が届かずに終わっていれば、その理由を返す（#5493）。読めなければnull（依頼済みのまま）。
+ */
+async function findReviewFixJobFailure(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  requestedAt: string;
+}): Promise<string | null> {
+  const requestedAt = Date.parse(params.requestedAt);
+  if (Number.isNaN(requestedAt)) return null;
+  const job = await db.dispatchJob
+    .findFirst({
+      where: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        createdAt: { gte: new Date(requestedAt - REVIEW_FIX_JOB_LOOKBACK_MS) },
+        OR: [{ kind: "LAUNCH" }, { kind: "INSTRUCTION", instruction: REVIEW_FIX_SESSION_INSTRUCTION }],
+      },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, message: true },
+    })
+    .catch(() => null);
+  return reviewFixJobFailureReason(job);
 }
 
 /**

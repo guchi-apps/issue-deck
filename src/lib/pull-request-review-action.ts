@@ -16,6 +16,7 @@ import type {
   PullRequestReviewAcknowledgement,
   PullRequestReviewResponseContext,
   PullRequestSummary,
+  ReviewFixSessionRoute,
 } from "@/types/pull-request";
 
 /**
@@ -30,8 +31,8 @@ import type {
  * - `stale` … 判定が前のHEADのもの。新しいHEADの再レビューを待つ（古い指摘を現在の指摘として扱わない）
  * - `acknowledged` … 人が「対応済み」と記録済み（#5159）。未対応扱いをやめ、取り消すまでマージ確認へ進める
  * - `requested` … 現在のHEADへ修正を依頼済み。pushされるとCI・再レビューが走る。操作は不要
- * - `respond` … 利用者が対応を選ぶ。要修正で自動修正が使えれば`autoRepair`、自由文の依頼は廃止済みのため
- *   `request.available=false`と理由・代わりの操作を返す（ボタンも案内も無い状態にしない）
+ * - `respond` … 利用者が対応を選ぶ。要修正で自動修正が使えれば`autoRepair`、元Issueのセッションへ
+ *   渡せれば`request.available=true`と送り先（#5493）。渡せなければ理由・代わりの操作を返す
  */
 export type ReviewAction =
   | { kind: "none" }
@@ -61,15 +62,18 @@ export type ReviewAction =
 export type ReviewAttentionKind = "changes-requested" | "needs-check";
 
 /**
- * 自由文の修正依頼（Actions経由）は#4680で廃止した。サーバーの`requestPullRequestFix`は常に拒否するため、
- * 画面にも実行できるかのような依頼ボタンは出さず、理由と実際に使える次の操作（Issue詳細のホストセッション・
- * 修正Issueの起案）だけを返す。
+ * 指摘をAIに直してもらう操作の可否（#5493）。自由文の修正依頼（Actions経由）は#4680で廃止し、
+ * 代わりに「Issueのセッションで直す」（元Issueのセッションへ指摘を渡す）を出す。
+ * 使えないとき（Issueブランチでない・Issueがクローズ済み・セッションの記録を確かめられない）は、
+ * 理由と実際に使える次の操作だけを返す（ボタンも案内も無い状態にしない）。
  */
-export type ReviewFixRequestAvailability = {
-  available: false;
-  reason: string;
-  alternative: "draft-fix-issue" | "open-issue";
-};
+export type ReviewFixRequestAvailability =
+  | { available: true; issueNumber: number; route: ReviewFixSessionRoute }
+  | {
+      available: false;
+      reason: string;
+      alternative: "draft-fix-issue" | "open-issue";
+    };
 
 const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 
@@ -172,29 +176,16 @@ function resolveRequestAvailability(
   if (context?.linkedIssueClosed) {
     return {
       available: false,
-      reason: `Issue #${issueNumber} はクローズ済みのため、ここからの依頼は実行されません。Issueを再オープンするか、修正Issueを起案してください。`,
+      reason: `Issue #${issueNumber} はクローズ済みのため、ここからは依頼できません。Issueを再オープンするか、修正Issueを起案してください。`,
       alternative: "draft-fix-issue",
     };
   }
-  // 11.localは作業を終えたあとも残ることがある（セッションの再開で付け直された等。#5160）。
-  // 生きているセッションが無いと確かめられたときは「対応中」と言わず、外し忘れとして外す案内を出す
-  if (context?.linkedIssueLocal && context.linkedIssueSessionAlive === false) {
-    return {
-      available: false,
-      reason: `Issue #${issueNumber} に11.local（ローカルで対応中）が残っていますが、動いているローカルセッションはありません。作業を終えたセッションの外し忘れの可能性があります。Issue詳細のラベルから11.localを外し、ホストセッションを開いて指摘を伝えてください。`,
-      alternative: "open-issue",
-    };
-  }
-  if (context?.linkedIssueLocal) {
-    return {
-      available: false,
-      reason: `Issue #${issueNumber} はローカルセッションで対応中（11.local）です。Issue詳細から実行中のセッションへ指摘を伝えて修正を依頼してください。`,
-      alternative: "open-issue",
-    };
+  if (context?.reviewFixRoute) {
+    return { available: true, issueNumber, route: context.reviewFixRoute };
   }
   return {
     available: false,
-    reason: `PRへの自由文の修正依頼（Actions経由）は廃止しました。Issue #${issueNumber} の詳細からホストセッションを開き、指摘を伝えて修正を依頼してください。`,
+    reason: `Issue #${issueNumber} のセッションの状態を確かめられませんでした。画面を更新するか、Issue #${issueNumber} の詳細からセッションを開いて指摘を伝えてください。`,
     alternative: "open-issue",
   };
 }

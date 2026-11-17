@@ -99,9 +99,9 @@ export async function removeCheckUserWithReason(
   issueNumber: number,
   token: string,
   /**
-   * `01.check-merge`も外してよいか（#2919）。**既定は`false`＝#1905のガードそのまま。**
-   * 真を渡せるのは、マージ待ちの「修正を依頼する」を人が押したことが起点になっている
-   * 経路だけ（`resolveFixedInstructionCheckUser`）。
+   * `01.check-merge`も外してよいか（#2919・#5493）。**既定は`false`＝#1905のガードそのまま。**
+   * 真を渡せるのは、PRのレビュー指摘を「Issueのセッションで直す」を人が押したことが起点に
+   * なっている経路だけ（`resolveFixedInstructionCheckUser`）。
    *
    * `onlyReasons`（#5326）を渡すと、**いま付いている理由がそのどれかのときだけ**外す。理由ラベルが
    * 無い・読めないときも外さない（既定の「読めなければ外す」とは逆）。停滞の引き上げが付けた

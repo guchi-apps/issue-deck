@@ -32,6 +32,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestStopCauseNotice } from "@/components/dashboard/pull-request-stop-cause";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { ReviewFixSessionButton } from "@/components/dashboard/review-fix-session-button";
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
 import { ReviewVerdictFreshnessNote } from "@/components/dashboard/review-verdict";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
@@ -225,6 +226,8 @@ export function PullRequestDetail({
   // レビュー本文もCIと同じく、開いたPRのidで状態を持つ。PRを切り替えたときに前の本文を
   // 誤って残さないため（#3319）。
   const [reviewDetailPullRequestId, setReviewDetailPullRequestId] = useState<string | null>(null);
+  // 自動修復の系列の状態（#5493）。停止したら「Issueのセッションで直す」を主ボタンへ上げる
+  const [repairLoopStatus, setRepairLoopStatus] = useState<"dispatching" | "running" | "completed" | "stopped" | null>(null);
   // 開いているタブ。**PRのidで持つ**（切り替えたら概要へ戻す。前のPRのタブを引き継がない）
   const [tabState, setTabState] = useState<{ pullRequestId: string; tab: DetailTab } | null>(null);
 
@@ -334,6 +337,11 @@ export function PullRequestDetail({
     reviewAction.kind === "repairing" ||
     reviewAction.kind === "not-run";
   const reviewRespond = reviewAction.kind === "respond" ? reviewAction : null;
+  // 「Issueのセッションで直す」を主ボタンにするか（#5493）。要修正で自動修正が使えるうちは
+  // 「PRを自動修正」を先に試してもらい、使えない・止まった・要確認のときだけ主にする
+  const reviewFixSessionPrimary =
+    reviewRespond !== null &&
+    (reviewRespond.verdict === "needs-check" || !reviewRespond.autoRepair || repairLoopStatus === "stopped");
   const showsReviewCommit =
     pullRequest.state === "open" &&
     !pullRequest.merged &&
@@ -478,6 +486,7 @@ export function PullRequestDetail({
                   runningKind={pullRequest.repairRun?.kind ?? null}
                   // 隣の「最新のbaseを取り込む」「マージ」と同じ高さにそろえる（#5388）
                   buttonClassName="h-9 text-xs"
+                  onLoopStatusChange={setRepairLoopStatus}
                 />
                 {(reviewAction.kind === "not-run" ||
                   (reviewAction.kind === "stale" && reviewRerunNeeded(reviewAction.progress))) && (
@@ -494,10 +503,30 @@ export function PullRequestDetail({
                     <ExternalLink aria-hidden className="size-3" />
                   </a>
                 )}
+                {/* 元Issueのセッションで直す（#5493）。自動修正が使えない・止まったときは主ボタンにする */}
+                {reviewRespond?.request.available && (
+                  <ReviewFixSessionButton
+                    repositoryFullName={pullRequest.repositoryFullName}
+                    pullRequestNumber={pullRequest.number}
+                    headSha={pullRequest.headSha}
+                    headRef={pullRequest.headRef}
+                    issueNumber={reviewRespond.request.issueNumber}
+                    route={reviewRespond.request.route}
+                    verdictLabel={reviewRespond.verdict === "needs-check" ? "要確認" : "要修正"}
+                    concerns={reviewRespond.concerns}
+                    reviewUrl={review?.htmlUrl ?? pullRequest.htmlUrl}
+                    variant={reviewFixSessionPrimary ? "default" : "outline"}
+                    onRequested={onRefresh}
+                  />
+                )}
                 {reviewRespond && (
                   <Button
                     size="sm"
-                    variant={reviewRespond.autoRepair || repairKinds.length > 0 ? "outline" : "default"}
+                    variant={
+                      reviewRespond.autoRepair || repairKinds.length > 0 || reviewRespond.request.available
+                        ? "outline"
+                        : "default"
+                    }
                     className="h-9 text-xs"
                     onClick={openReviewResponse}
                   >
