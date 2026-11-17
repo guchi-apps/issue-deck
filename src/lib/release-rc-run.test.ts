@@ -112,6 +112,7 @@ import {
   requestRcImport,
 } from "@/lib/release-rc-run";
 import { RC_NOT_UPDATED_REASON, RC_WORKFLOW_FAILED_NO_DETAIL_REASON } from "@/lib/release-rc";
+import { GithubApiError } from "@/lib/github/github-api-error";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
 const FROZEN = "f".repeat(40);
@@ -668,6 +669,20 @@ describe("refreshRcFailureReasons（#5473）", () => {
     vi.clearAllMocks();
     expect(await refreshRcFailureReasons(ctx, row(failed({ failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON })))).toBe(false);
     expect(mocks.runJobs).not.toHaveBeenCalled();
+  });
+
+  it("ログの保持期限切れ（404）は取り出せなかった印で確定し、一時的な失敗（5xx）は汎用の理由を残す", async () => {
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockRejectedValue(new GithubApiError(404, "gone"));
+    await refreshRcFailureReasons(ctx, row());
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON } }));
+    vi.clearAllMocks();
+    mocks.runJobs.mockResolvedValue(jobs);
+    mocks.jobLogs.mockRejectedValue(new GithubApiError(502, "bad gateway"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await refreshRcFailureReasons(ctx, row())).toBe(false);
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("取得に失敗しても読み込みを止めない", async () => {

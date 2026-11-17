@@ -3,6 +3,7 @@ import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-rev
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { closePullRequest, fetchWorkflowJobLogs, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { GithubApiError } from "@/lib/github/github-api-error";
 import { createComment } from "@/lib/github/issues-api";
 import {
   dispatchReleaseCandidateWorkflow,
@@ -537,7 +538,15 @@ export async function refreshRcFailureReasons(ctx: Context, row: CandidateRow): 
       if (jobs.some((job) => job.status !== "completed")) continue;
       const { jobName } = findFailedStep(jobs);
       const job = jobs.find((j) => j.name === jobName);
-      const excerpt = job?.id ? extractErrorExcerpt(await fetchWorkflowJobLogs(ctx.owner, ctx.repo, job.id, ctx.token)) : null;
+      // ログが消えている（保持期限切れ）ときだけ「取り出せませんでした」で確定する。それ以外の取得失敗（レート制限・5xx）は
+      // 例外のまま外へ出し、汎用の理由を残して次の読み込みで取り直す
+      const log = job?.id
+        ? await fetchWorkflowJobLogs(ctx.owner, ctx.repo, job.id, ctx.token).catch((error: unknown) => {
+            if (error instanceof GithubApiError && (error.status === 404 || error.status === 410)) return "";
+            throw error;
+          })
+        : "";
+      const excerpt = extractErrorExcerpt(log);
       const reason = excerpt ?? RC_WORKFLOW_FAILED_NO_DETAIL_REASON;
       const updated = await db.releaseCandidateRevision.updateMany({
         where: { id: revision.id, status: "failed", failureReason: revision.failureReason },
