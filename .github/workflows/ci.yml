@@ -122,6 +122,25 @@ jobs:
         continue-on-error: true
         run: scripts/check-workflow-sync-drift.sh
 
+  # 不適切なデザイン（AIっぽい装飾）の静的検出（#5465）。警告の注釈を出すだけで、CIの合否には影響させない。
+  # continue-on-errorをステップ単位に付けている理由はworkflow-drift-noticeと同じ（#1059）。
+  ui-design-notice:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: UIデザインの静的検出（警告のみ）
+        continue-on-error: true
+        run: node scripts/check-ui-design.mjs --github src
+
   notify:
     needs: [lint-and-build]
     if: always()
