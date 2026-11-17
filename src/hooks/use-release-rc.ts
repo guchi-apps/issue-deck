@@ -46,10 +46,12 @@ export function useReleaseRc(
   pullRequestNumber: number,
   enabled: boolean,
   reloadToken = 0,
-): { overview: RcOverviewWithFinalization | null; error: string | null; reload: () => void } {
+): { overview: RcOverviewWithFinalization | null; error: string | null; reload: () => void; settledToken: number } {
   const key = `${repositoryFullName}#${pullRequestNumber}`;
   const [loaded, setLoaded] = useState<{ key: string; overview: RcOverviewWithFinalization } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  // 取得を終えた（成功・失敗とも）最新の`reloadToken`。画面の「状態を取り直す」が完了を知るために使う（#5478）
+  const [settledToken, setSettledToken] = useState(-1);
   const [localReload, setLocalReload] = useState(0);
   const reload = useCallback(() => setLocalReload((n) => n + 1), []);
 
@@ -68,10 +70,12 @@ export function useReleaseRc(
         const body: RcOverviewWithFinalization = await res.json();
         setLoaded({ key, overview: body });
         setFailure(null);
+        setSettledToken(reloadToken);
         if (body.candidate && ACTIVE_STATUSES.has(body.candidate.status.status)) delay = ACTIVE_POLL_MS;
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setFailure({ key, message: clientErrorMessage(err) });
+        setSettledToken(reloadToken);
         delay = RETRY_POLL_MS;
       }
       if (delay !== null && !controller.signal.aborted) timer = setTimeout(load, delay);
@@ -87,5 +91,6 @@ export function useReleaseRc(
     overview: loaded?.key === key ? loaded.overview : null,
     error: failure?.key === key ? failure.message : null,
     reload,
+    settledToken,
   };
 }
