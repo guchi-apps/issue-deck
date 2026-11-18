@@ -6,9 +6,10 @@
 
 仕分けの目安は共有知識`standards/ui-design.md`の「意味を伝えている使い方は許容する」。
 一覧を見た範囲では、`src/components/ui/`の影（メニュー・ダイアログ・トースト）は浮き上がる要素なので意味あり、
-`notification-settings-section.tsx`の左線は状態の一件を示す通知で意味ありに寄るが、
+`notification-settings-section.tsx`の左線は状態の一件を示す通知に見えるが（#5509で装飾と判断して是正）、
 全件を装飾か意味ありかに決めるのは是正Issueで行う。
 
+#5509で通知設定画面の左端の色付き6件を仕分けた（6件とも装飾。左線を外して全周の枠に揃えた）。
 #5508で`dashboard`配下の左端の色付き・グラデーション8件を仕分けた（下の一覧の仕分け列）。装飾は是正済みで、
 意味ありは`design-ok`で検出から外した。件数は#5508の前の走査時点のもので、是正した行は現在の検出には出ない。
 
@@ -20,7 +21,7 @@
 
 | ルール | 件数 |
 |---|---|
-| side-border | 10（是正・除外後は6） |
+| side-border | 10（是正・除外後は0） |
 | gradient | 4（是正・除外後は0） |
 | emoji-icon | 2 |
 | heavy-shadow | 10 |
@@ -45,12 +46,12 @@
 | `src/components/dashboard/question-answer-panel.tsx:339` | gradient | `<div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">` | 装飾。グラデーションを単色＋上罫線へ（#5508） |
 | `src/components/dashboard/release-history-panel.tsx:938` | side-border | `<section className="mt-2 rounded border-l-2 border-red-500/40 pl-2">` | 装飾。赤い左線を上罫線へ（#5508） |
 | `src/components/dashboard/scroll-to-latest-comment-button.tsx:67` | heavy-shadow | `className={cn("absolute z-10 rounded-full shadow-lg", className)}` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:125` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:145` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:161` | side-border | `<p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leadi` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:169` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:326` | side-border | `<p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leadi` | |
-| `src/components/dashboard/settings/notification-settings-section.tsx:338` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | |
+| `src/components/dashboard/settings/notification-settings-section.tsx:125` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
+| `src/components/dashboard/settings/notification-settings-section.tsx:145` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
+| `src/components/dashboard/settings/notification-settings-section.tsx:161` | side-border | `<p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leadi` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
+| `src/components/dashboard/settings/notification-settings-section.tsx:169` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
+| `src/components/dashboard/settings/notification-settings-section.tsx:326` | side-border | `<p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leadi` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
+| `src/components/dashboard/settings/notification-settings-section.tsx:338` | side-border | `<p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed t` | 装飾。枠・背景色・文字色・太字の見出し文で警告・エラーは伝わるため左線を外し、6件とも全周の枠に揃えた（#5509） |
 | `src/components/loading-screen.tsx:104` | heavy-shadow | `<div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs shadow` | |
 | `src/components/ui/alert-dialog.tsx:57` | heavy-shadow | `"fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100%-2rem)] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 overfl` | |
 | `src/components/ui/dropdown-menu.tsx:247` | heavy-shadow | `className={cn("z-50 min-w-[96px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-lg bg-p` | |
