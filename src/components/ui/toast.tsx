@@ -36,6 +36,7 @@ function Toast({
     <ToastPrimitive.Root
       data-slot="toast"
       className={cn(
+        // design-ok: トーストは内容の上に浮き上がる要素で、影が重なりを示す
         "pointer-events-auto relative flex w-full items-start gap-2 rounded-xl bg-popover p-3 text-sm text-popover-foreground ring-1 ring-foreground/10 shadow-lg duration-200 data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-open:animate-in data-open:slide-in-from-bottom-4 data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}

@@ -839,6 +839,7 @@ function AnnotationEditor({
         <div
           role="alertdialog"
           aria-label="書き込みを破棄しますか"
+          // design-ok: 暗いキャンバスに重なる確認パネル。浮き上がる要素の影で重なりを示す
           className="absolute inset-x-3 top-16 mx-auto flex max-w-md flex-col gap-3 rounded-xl border border-white/15 bg-neutral-900 p-4 shadow-lg"
         >
           <p className="text-sm">書き込んだ内容は保存されていません。破棄して閉じますか？</p>

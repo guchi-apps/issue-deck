@@ -64,7 +64,7 @@ export function ScrollToLatestCommentButton({
       variant="secondary"
       size="sm"
       onClick={handleClick}
-      className={cn("absolute z-10 rounded-full shadow-lg", className)}
+      className={cn("absolute z-10 rounded-full shadow-sm", className)}
     >
       <ArrowDown />
       未読コメントへ移動

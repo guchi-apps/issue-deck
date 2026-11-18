@@ -81,6 +81,7 @@ export function AppUpdateChecker({ currentVersion }: AppUpdateCheckerProps) {
   if (!updateAvailable) return null;
 
   return (
+    /* design-ok: 画面下に浮かぶ通知バー。トーストと同じく内容の上に浮き上がる要素で、影が重なりを示す */
     <div className="fixed inset-x-4 bottom-4 z-50 flex items-center justify-between gap-3 rounded-lg border bg-foreground px-4 py-3 text-background shadow-lg sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2">
       <p className="text-sm">新しいバージョンがあります</p>
       <Button

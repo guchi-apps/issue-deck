@@ -101,7 +101,7 @@ export function LoadingStatusPill() {
       aria-live="polite"
       className="pointer-events-none absolute inset-x-0 top-14 z-10 flex justify-center md:top-12"
     >
-      <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs shadow-lg">
+      <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs shadow-sm">
         <Loader2 className="size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none" />
         <span className={cn(message.showReload && "font-medium")}>{message.status}</span>
         {message.showReload && (
