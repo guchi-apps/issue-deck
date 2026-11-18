@@ -559,6 +559,7 @@ function AttachmentStrip({
                   SVG
                 </span>
               )}
+              {/* design-ok: 画像の上に載せるファイル名の可読性を保つ下地（画像の明るさに依らず読める） */}
               <span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-[9px] leading-tight text-white">
                 {attachment.name}
               </span>

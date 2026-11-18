@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.107.1",
+    date: "2026-11-18",
+    changes: [
+      "リリース候補作成の画面を、送信中でも閉じられるようになりました。",
+      "ダッシュボードや通知設定などの画面で、装飾的な左端の色付きや絵文字アイコン、大きな影を整理し、見た目を統一しました。",
+    ],
+  },
+  {
     version: "8.107.0",
     date: "2026-11-18",
     changes: [

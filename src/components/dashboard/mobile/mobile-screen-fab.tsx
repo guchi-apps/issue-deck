@@ -26,7 +26,7 @@ export function MobileScreenFab({ raised, onCreateIssue, onOpenRemoteSessions, r
         type="button"
         onClick={onOpenRemoteSessions}
         aria-label="リモートセッションを開く"
-        className="relative flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
+        className="relative flex size-14 items-center justify-center rounded-full border bg-background shadow-sm"
       >
         <TerminalSquare className="size-6" />
         {remoteSessionCount ? (
@@ -39,7 +39,7 @@ export function MobileScreenFab({ raised, onCreateIssue, onOpenRemoteSessions, r
         type="button"
         onClick={onCreateIssue}
         aria-label="新しいIssueを作成"
-        className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
       >
         <Plus className="size-6" />
       </button>
