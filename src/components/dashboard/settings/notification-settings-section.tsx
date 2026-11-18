@@ -122,7 +122,7 @@ function WebPushSettings() {
           </p>
         )}
         {isExpired && (
-          <p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
             <b className="font-semibold">この端末の購読は失効しています。</b>
             送ろうとしたときに宛先が無くなっていたため、登録を削除しました。「登録し直す」を押すと
             取り直せます。登録し直すまでは、アプリを開いているあいだの確認待ちを画面内のお知らせで
@@ -142,7 +142,7 @@ function WebPushSettings() {
       <PushKindPreferences />
 
       {availability === "needs-standalone" && (
-        <p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <b className="font-semibold">ホーム画面に追加すると受け取れます。</b>
           iPhone・iPadは、ホーム画面のアイコンから開いているときだけ通知を受け取れます。
           共有ボタンから「ホーム画面に追加」で開き直してから、もう一度この画面を開いてください
@@ -158,7 +158,7 @@ function WebPushSettings() {
       )}
 
       {isDenied && (
-        <p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leading-relaxed text-destructive">
+        <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs leading-relaxed text-destructive">
           <b className="font-semibold">通知がブロックされています。</b>
           一度「許可しない」を選ぶと、この画面からは尋ね直せません。端末の設定の「通知」から
           IssueDeckを許可してください。
@@ -166,7 +166,7 @@ function WebPushSettings() {
       )}
 
       {notConfigured && !isLoading && (
-        <p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
           <b className="font-semibold">サーバー側の鍵が設定されていません。</b>
           Push通知に使う鍵（VAPID）が未設定のため、この機能はまだ使えません。設定するまで、
           他の機能には影響しません。
@@ -323,7 +323,7 @@ function NativePushSettings() {
         </div>
 
         {state === "denied" && (
-          <p className="rounded-md border border-l-2 border-destructive/40 border-l-destructive bg-destructive/5 p-3 text-xs leading-relaxed text-destructive">
+          <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs leading-relaxed text-destructive">
             <b className="font-semibold">iPhoneの設定で通知がオフになっています。</b>
             アプリからは許可を変えられません。「iPhoneの設定を開く」から「通知」でIssueDeckを許可してください。
             戻ってくると状態を自動で確かめます。
@@ -335,7 +335,7 @@ function NativePushSettings() {
           </p>
         )}
         {state === "expired" && (
-          <p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
             <b className="font-semibold">この端末の登録は失効しています。</b>
             送ろうとしたときに宛先が無くなっていたため、登録を削除しました。「登録し直す」で取り直せます。
           </p>
