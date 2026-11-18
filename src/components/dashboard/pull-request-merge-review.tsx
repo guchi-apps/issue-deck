@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { CheckCircle2, ExternalLink } from "lucide-react";
 
 import { ReviewVerdictFreshnessNote, VerdictText } from "@/components/dashboard/review-verdict";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
@@ -89,7 +89,7 @@ export function PullRequestMergeReview({
               <div className="flex items-center gap-2.5" data-testid="merge-review-acknowledgement">
                 <dt className="w-28 shrink-0 text-muted-foreground">対応済みの記録</dt>
                 <dd className="min-w-0 text-emerald-700 dark:text-emerald-400">
-                  ✅ 記録済み{acknowledgement.recordedBy ? `（記録: ${acknowledgement.recordedBy}）` : ""}
+                  <CheckCircle2 aria-hidden className="mr-1 inline size-3.5 align-[-2px]" />記録済み{acknowledgement.recordedBy ? `（記録: ${acknowledgement.recordedBy}）` : ""}
                   <span className="text-muted-foreground">。取り消しはPR詳細の指摘から</span>
                 </dd>
               </div>

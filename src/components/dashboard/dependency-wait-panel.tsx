@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, Hourglass, RefreshCw, Send, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Hourglass, CircleHelp, RefreshCw, Send, XCircle } from "lucide-react";
 
 import {
   AlertDialog,
@@ -138,7 +138,13 @@ export function DependencyWaitPanel({
         <ul className="flex flex-col gap-0.5 text-xs">
           {wait.results.map((r) => (
             <li key={r.condition} className="flex items-start gap-1.5">
-              <span aria-hidden>{r.satisfied === true ? "✅" : r.satisfied === false ? "⏳" : "❓"}</span>
+              {r.satisfied === true ? (
+                <CheckCircle2 aria-hidden className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              ) : r.satisfied === false ? (
+                <Hourglass aria-hidden className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              ) : (
+                <CircleHelp aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              )}
               <span>
                 <span className="font-medium">{describeWaitTarget(wait.dependency, r.condition)}</span>
                 <span className="text-muted-foreground">: {r.detail}</span>
