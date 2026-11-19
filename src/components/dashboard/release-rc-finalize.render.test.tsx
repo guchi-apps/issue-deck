@@ -269,13 +269,25 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(confirm).toContain("o/r");
     expect(confirm).toContain("RC-12 · revision 3");
     expect(confirm).toContain("最終公開差分から自動判定");
-    expect(confirm).toContain("版ファイル・更新履歴だけ");
+    expect(confirm).toContain("正式バンプ（版ファイル・更新履歴）まで");
+    expect(confirm).not.toContain("合格後");
     fireEvent.click(screen.getByText("公開を承認して進める"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body).toMatchObject({ action: "start", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "auto", approvePublish: true });
     expect(body.requestKey).toMatch(/^[A-Za-z0-9]{8,48}$/);
     vi.unstubAllGlobals();
+  });
+
+  it("公開内容はPRごとに1行で出し、区切りの記号を付けない（#5521）", () => {
+    const frozenPrs = [
+      { number: 1, title: "一つ目" },
+      { number: 2, title: "二つ目" },
+    ] as unknown as RcCandidateView["frozenPrs"];
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate({ frozenPrs })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
+    const rows = Array.from(screen.getByTestId("release-rc-approval-prs").children).map((e) => e.textContent);
+    expect(rows).toEqual(["#1 一つ目", "#2 二つ目"]);
   });
 
   it("確認はモーダルで出し、承認後は反映を確かめるまで閉じず、閉じても「本番公開へ進む」を出さない（#4917）", async () => {
