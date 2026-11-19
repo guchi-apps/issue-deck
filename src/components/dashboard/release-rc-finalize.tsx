@@ -439,17 +439,19 @@ function ApprovalConfirm({
           {candidate.label} · revision {target.revision} · main {short(target.baseSha)} ← {short(target.headSha)}
         </dd>
         <dt className="text-muted-foreground">公開内容</dt>
-        <dd className="min-w-0 break-words">
-          {candidate.frozenPrs.length > 0 ? candidate.frozenPrs.map((p) => `#${p.number} ${p.title}`).join("、") : "（候補に固定した内容）"}
+        <dd className="min-w-0 break-words" data-testid="release-rc-approval-prs">
+          {candidate.frozenPrs.length > 0
+            ? candidate.frozenPrs.map((p) => (
+                <div key={p.number}>
+                  #{p.number} {p.title}
+                </div>
+              ))
+            : "（候補に固定した内容）"}
         </dd>
         <dt className="text-muted-foreground">版の指定</dt>
         <dd>{BUMP_POLICY_LABEL[bumpPolicy] ?? bumpPolicy}</dd>
         <dt className="text-muted-foreground">承認の範囲</dt>
-        <dd className="min-w-0 break-words">
-          この候補と、正式バンプで版ファイル・更新履歴だけが変わることまで。それ以外のコード変更・候補の置換・mainの前進・取消があれば承認は失効し、もう一度確認します
-        </dd>
-        <dt className="text-muted-foreground">合格後</dt>
-        <dd className="min-w-0 break-words">mainへのマージ・タグ・デプロイ・稼働中の版の確認まで自動で進めます。画面を開いておく必要はありません。公開の直前までは取り消せます</dd>
+        <dd className="min-w-0 break-words">この候補と正式バンプ（版ファイル・更新履歴）まで。それ以外の変更・置換・mainの前進・取消で失効します</dd>
       </dl>
     </div>
   );
@@ -514,14 +516,19 @@ function ApprovalDialog({
               <span>全体レビューの結果（指摘・失敗・未完了）を確認し、承知のうえで本番公開へ進めます</span>
             </label>
           )}
-          {own && <PendingProgress pending={own} />}
-          {own && own.stage !== "timeout" && <p className="text-[11.5px] text-muted-foreground">閉じても処理は続きます。反映を確かめたら自動で閉じます。</p>}
           {message && !own && (
             <p className="text-[11.5px] text-destructive" role="alert">
               {message}
             </p>
           )}
         </div>
+        {/* 進行表示はスクロール領域の外に置き、ボタンの直上へ固定する（画面が広くてもスクロールせず見える） */}
+        {own && (
+          <div className="flex shrink-0 flex-col gap-1.5">
+            <PendingProgress pending={own} />
+            {own.stage !== "timeout" && <p className="text-[11.5px] text-muted-foreground">閉じても処理は続きます。反映を確かめたら自動で閉じます。</p>}
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {own ? "閉じる" : "やめる"}
