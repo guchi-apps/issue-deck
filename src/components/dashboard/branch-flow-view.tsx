@@ -1705,12 +1705,8 @@ function NextReleaseCard({
       {journey?.headline?.key === "approve" && journey.owner === "user" ? `本番PR #${pullRequest.number} で公開承認する` : `本番PR #${pullRequest.number} の詳細`}
     </GithubReferenceLink>
   ) : null;
-  // 主操作は1つ。旧方式の候補は人がmainへマージする。新方式の候補の手動マージ（承認を経ない公開）は
-  // 「その他の操作」へ下げる（#5076。主操作は公開承認で、本番PRの詳細から押す）
-  const manualPublish =
-    pullRequest && journey && !journey.legacy && publishDecision?.ok ? (
-      <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={() => onMerged(pullRequest)} variant="outline" label="承認せずに本番公開へ進む" />
-    ) : null;
+  // 主操作は1つ。旧方式の候補は人がmainへマージする。新方式の「承認せずに公開」・取消は、PRがある間は
+  // 本番PRの詳細にあるため一覧には出さない（#5522）。PRがまだ無い作成中の候補だけ、取消の入口を残す（#5331）
   const primaryPublish =
     pullRequest && (!journey || journey.legacy) ? (
       <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={() => onMerged(pullRequest)} hideVerifyHint className="shrink-0" />
@@ -1752,10 +1748,11 @@ function NextReleaseCard({
             action={primaryPublish}
             link={pullRequestLink}
             more={
-              <JourneyMoreActions count={(manualPublish ? 1 : 0) + (journey.cancelTarget ? 1 : 0)}>
-                {manualPublish}
-                <ReleaseJourneyCancel journey={journey} repositoryFullName={repository.repositoryFullName} onChanged={() => refreshFlow?.()} />
-              </JourneyMoreActions>
+              pullRequest ? null : (
+                <JourneyMoreActions count={journey.cancelTarget ? 1 : 0}>
+                  <ReleaseJourneyCancel journey={journey} repositoryFullName={repository.repositoryFullName} onChanged={() => refreshFlow?.()} />
+                </JourneyMoreActions>
+              )
             }
           />
         ) : (
