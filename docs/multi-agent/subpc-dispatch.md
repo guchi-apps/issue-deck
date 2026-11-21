@@ -3032,6 +3032,20 @@ systemd-run --user --quiet --scope --collect --unit=issue-deck-tmux-server \
 止まるべきものが止まらない側の危うさをunit全体に広げるより、tmuxサーバーだけを外へ出す方が
 影響が小さい。unitの入れ替え（`cp` + `daemon-reload`）という手作業が要らないのも大きい。
 
+## Mac mini 側のセットアップ（#5528）
+
+サブPCと並ぶ2台目のホストとして、Mac mini（識別子`macmini`・画面上の表記はMacMini）でもpollerを動かせる。
+**ジョブは両方のホストが同じAPIへ取りに行き、どちらか一方だけが取る**（`claim`の排他は
+ホストの台数に依存しない）。起動先の選び方・実行できないリポジトリの弾き方・同時実行数の上限は
+本文書のとおりで、ホストごとの申告（`DispatchHost`）で決まる。
+
+macOSにはsystemdが無いため、常駐はlaunchdのLaunchAgentで行い、設定ファイルは
+`deploy/macmini/run-with-env.sh`が読み込む。手順と運用コマンドは
+[deploy/macmini/README.md](../../deploy/macmini/README.md)を参照。**`DISPATCH_HOST_NAME=macmini`を必ず明示する**
+（macOSの`hostname -s`は端末名から自動で付いた名前になる）。
+
+スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot`など）の吸収は#5529で行う。
+
 ## ログをどこで見るか
 
 Actions UIに相当するものが無いため、次の3つで追う。
