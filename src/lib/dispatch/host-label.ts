@@ -15,6 +15,8 @@
  */
 const HOST_DISPLAY_NAMES: Record<string, string> = {
   subpc: "サブPC",
+  // サブPCと並ぶ2台目の常時起動ホスト（#5528）。識別子はstatus-hubのホスト統計と同じ`macmini`
+  macmini: "MacMini",
 };
 
 /** ホスト名を画面に出す表記へ直す。対応表に無ければそのまま返す */
