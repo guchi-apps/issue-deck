@@ -102,3 +102,50 @@ describe("local_repo_list_names", () => {
     expect(names).toContain("guchi-apps/issue-deck");
   });
 });
+
+/**
+ * macOS標準のgrep（BSD版）は`-P`を持たない。`grep -P`で読んでいた頃は、Mac miniで版数・宣言が
+ * 黙って空になり、宣言しているリポジトリまで汎用ランチャーで起動していた（#5542）。
+ * どのホストでも同じ値が読めることを固定する（読み方そのものはPOSIX EREの`sed -nE`）。
+ */
+describe("local_repo_declared_contract_version", () => {
+  function writeLauncher(name: string, content: string): string {
+    const file = path.join(workDir, name);
+    writeFileSync(file, content);
+    return file;
+  }
+
+  it("冒頭マーカーの版数を読む（空白の揺れ・CRLFも受ける）", () => {
+    const file = writeLauncher("start-v2.sh", "#!/usr/bin/env bash\n#  issue-deck-local-session:   v12 \r\necho\n");
+    expect(callShell("local_repo_declared_contract_version", file).trim()).toBe("12");
+  });
+
+  it("issue-deck自身のstart-issue.shから版数を読める", () => {
+    const own = path.resolve(__dirname, "../../scripts/start-issue.sh");
+    expect(callShell("local_repo_declared_contract_version", own).trim()).toMatch(/^[1-9][0-9]*$/);
+  });
+
+  it("マーカーが無い・行末に余計な文字がある・ファイルが無いときは空を返す", () => {
+    const none = writeLauncher("start-none.sh", "#!/usr/bin/env bash\n# issue-deck-local-session: v2 extra\n");
+    expect(callShell("local_repo_declared_contract_version", none)).toBe("");
+    expect(callShell("local_repo_declared_contract_version", path.join(workDir, "nope.sh"))).toBe("");
+  });
+});
+
+describe("detect_package_manager", () => {
+  it("package.jsonのpackageManager宣言をロックファイルより優先して読む", () => {
+    const dir = path.join(workDir, "pm-declared");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), '{\n  "name": "x",\n  "packageManager" : "pnpm@10.0.0+sha512.abc"\n}\n');
+    writeFileSync(path.join(dir, "package-lock.json"), "{}\n");
+    expect(callShell("detect_package_manager", dir).trim()).toBe("pnpm");
+  });
+
+  it("宣言が無ければロックファイルで判定する", () => {
+    const dir = path.join(workDir, "pm-lock");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), '{ "name": "x" }\n');
+    writeFileSync(path.join(dir, "yarn.lock"), "");
+    expect(callShell("detect_package_manager", dir).trim()).toBe("yarn");
+  });
+});
