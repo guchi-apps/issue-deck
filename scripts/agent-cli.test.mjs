@@ -175,7 +175,8 @@ describe("agent_cli_codex_writable_dirs", () => {
 
   /** 本体のクローンと、そこから生やしたlinked worktreeを作る */
   function makeRepoWithWorktree() {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-git-"));
+    // macOSの`/var`は`/private/var`への別名。`.git`の判定は実パスで行うので実パスで組む
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-git-")));
     tmpDirs.push(root);
     const main = path.join(root, "main");
     const worktree = path.join(root, "wt");

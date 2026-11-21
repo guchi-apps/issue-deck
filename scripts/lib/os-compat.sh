@@ -52,7 +52,9 @@ os_compat_setup_path() {
     [[ -n "$prefix" && -d "$prefix" ]] || continue
     dirs=(
       "$prefix/opt/coreutils/libexec/gnubin"
+      "$prefix/opt/gnu-sed/libexec/gnubin"
       "$prefix/opt/util-linux/bin"
+      "$prefix/opt/gettext/bin"
       "$prefix/bin"
     )
     break
@@ -71,7 +73,51 @@ os_compat_setup_path() {
 }
 os_compat_setup_path
 
+# 検証対象のCIが使うNodeのメジャー版（`node-version: "N"`）を、worktreeの`ci.yml`から読んで返す。読めなければ非0。
+os_compat_ci_node_major() {
+  local worktree="$1" value
+  value="$(grep -m1 -E '^[[:space:]]*node-version:[[:space:]]*"?[0-9]+' "$worktree/.github/workflows/ci.yml" 2>/dev/null |
+    sed -E 's/^[^0-9]*([0-9]+).*/\1/')"
+  [[ "$value" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$value"
+}
+
+# macOSだけ、HomebrewのNode（`node@<メジャー版>`）をPATHの先頭へ置く（#5549）。
+# Homebrewの`node`は常に最新版（Node 26では`localStorage`が`--localstorage-file`なしで無効になり、
+# CI＝Node 24で通るjsdomのテストが大量に落ちる）。無ければ何もしない（Linuxも同様）。
+os_compat_use_node_major() {
+  os_compat_is_darwin || return 0
+  local major="$1" prefix dir
+  [[ "$major" =~ ^[0-9]+$ ]] || return 0
+  for prefix in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local; do
+    dir="$prefix/opt/node@$major/bin"
+    [[ -n "$prefix" && -d "$dir" ]] || continue
+    case ":$PATH:" in
+      *":$dir:"*) PATH="$dir:${PATH//:$dir:/:}" ;;
+      *) PATH="$dir:$PATH" ;;
+    esac
+    export PATH
+    return 0
+  done
+  return 0
+}
+
 # --- 時刻・ファイル -----------------------------------------------------------
+
+# `*.jsonl`を「更新時刻(epoch秒)<TAB>パス」の行で列挙する（#5549）。
+#   os_compat_find_mtime <置き場> <最小の深さ> <最大の深さ>
+# GNUのfindは`-printf`で出せるが、BSDのfind（macOS）には`-printf`が無く、**エラーを捨てると何も出ない**
+# （転記を数えられず、使用量が黙って0になる）。BSDではstatで同じ形に揃える。
+# GNUのstat（coreutilsのgnubin）では`-f`の意味が違うので、macOSでは必ず`/usr/bin/stat`を指す。
+os_compat_find_mtime() {
+  local dir="$1" mindepth="$2" maxdepth="$3"
+  if find /dev/null -maxdepth 0 -printf '' >/dev/null 2>&1; then
+    find "$dir" -mindepth "$mindepth" -maxdepth "$maxdepth" -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null
+  else
+    find "$dir" -mindepth "$mindepth" -maxdepth "$maxdepth" -name '*.jsonl' \
+      -exec /usr/bin/stat -f '%m%t%N' {} + 2>/dev/null
+  fi
+}
 
 # ファイルの更新時刻（epoch秒）。取れなければ非0で終わり、何も出力しない。
 os_compat_mtime() {
