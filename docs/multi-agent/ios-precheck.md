@@ -161,6 +161,13 @@ statusはコミットに付くので、**修正をpushした新しいSHAには�
    ```bash
    printf 'IOS_PRECHECK_HOST=%s\n' '<ssh先>' > ~/.config/issue-deck/ios-precheck.env
    ```
+   **Mac mini 自身で実装セッションを動かす場合（#5535）は、SSHを挟まない。** Mac mini の
+   `~/.config/issue-deck/ios-precheck.env` に`IOS_PRECHECK_HOST=local`（`localhost`でも可）と書くと、
+   依頼・状態取得・ログ取得をその場の`bash -c`で実行する（手順2の鍵とknown_hostsは要らない）。
+   結果の契約・commit statusはSSH経由と同じ。
+   ```bash
+   printf 'IOS_PRECHECK_HOST=local\n' > ~/.config/issue-deck/ios-precheck.env
+   ```
 4. 対象リポジトリを[`scripts/ios-precheck.conf`](../../scripts/ios-precheck.conf)へ足す
    （project/workspace・scheme・Simulator・テストの有無・既定の種別・必須か）。schemeが共有されて
    いない（`xcshareddata/xcschemes`が無い）プロジェクトでも、xcodebuildが自動生成するschemeで

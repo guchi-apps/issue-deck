@@ -235,6 +235,30 @@ describe("ios-precheck.sh run", { timeout: 40_000 }, () => {
     expect(calls.every((c) => c.includes("context=issue-deck/ios-precheck"))).toBe(true);
   });
 
+  it("IOS_PRECHECK_HOST=local ならsshを呼ばずにその場で検証し、同じ結果を返す（#5535）", async () => {
+    const sha = git(path.join(work, "app"), "rev-parse", "HEAD");
+    // sshが呼ばれたら失敗させ、呼ばれたこと自体も記録する
+    const sshLog = path.join(work, "ssh-called.log");
+    writeExecutable(
+      path.join(work, "bin", "fail-ssh"),
+      `#!/usr/bin/env bash\necho called >> "${sshLog}"\nexit 255\n`,
+    );
+    const macHome = path.join(work, "mac-home");
+    const { code, json } = await run(["run"], {
+      IOS_PRECHECK_HOST: "local",
+      IOS_PRECHECK_SSH: path.join(work, "bin", "fail-ssh"),
+      HOME: macHome,
+    });
+    expect(code, workerLogs()).toBe(0);
+    expect(json).toMatchObject({
+      state: "succeeded",
+      verifiedSha: sha,
+      build: { status: "passed", exitCode: 0 },
+    });
+    expect(existsSync(sshLog)).toBe(false);
+    expect(ghCalls().at(-1)).toContain("state=success");
+  });
+
   it("テスト未設定のアプリにテストを依頼しても、テスト成功とは返さない", async () => {
     const { code, json } = await run(["run", "--kind", "test"]);
     expect(code).toBe(0);
