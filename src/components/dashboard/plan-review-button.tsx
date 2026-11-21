@@ -75,8 +75,9 @@ export function PlanReviewButton({
 
   const rejectionMessage = rejection
     ? describePlanReviewRejection(rejection, {
-        // 名指しする相手は判定に使ったホスト。1台も申告が無ければ既定の起動先の呼び名を出す
-        hostName: judgedHost?.name ?? "subpc",
+        // 名指しする相手は判定に使ったホスト。1台も申告が無ければ特定のホストを名指ししない
+        // （起動先はサブPC・MacMiniのどちらにもなりうる。#5528）
+        hostName: judgedHost?.name ?? "実行ホスト",
         repositoryFullName: issue.repositoryFullName,
       })
     : null;

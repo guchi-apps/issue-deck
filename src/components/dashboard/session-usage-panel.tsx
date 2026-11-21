@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { useNow } from "@/hooks/use-now";
 import { formatCompactTime, formatDateTime, formatMonthDay, formatMonthDayTime } from "@/lib/format-date-time";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   AGENT_BASE_COLORS,
@@ -1979,7 +1980,7 @@ export function SessionUsagePanel({
         <h2 className="shrink-0 text-sm font-bold">AI使用量</h2>
         {data?.reportedAt && (
           <p className="min-w-0 truncate text-[11px] text-muted-foreground">
-            {`${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`}
+            {`${data.hosts.map(formatDispatchHostName).join("・") || "ホスト不明"} から ${formatRelativeDate(data.reportedAt)}`}
           </p>
         )}
         <Button
