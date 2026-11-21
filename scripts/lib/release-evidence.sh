@@ -43,7 +43,10 @@ evidence_redact() {
   local s='token|tkn|secret|passwor?d|passphrase|phrase|pwd|[_-]pass|pass[_-]|key|auth|cred|cookie|signature|dsn|bearer|jwt|otp|session[-_]?id|[_-]sid|sid[_-]|database[-_]?url|connection[-_]?string'
   local q='("([^"\\]|\\.)*"|'"'"'([^'"'"'\\]|\\.)*'"'"')'
   sed -E \
-    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\[秘密鍵を除去]' \
+    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/{' \
+    -e '/-----END [A-Z ]*PRIVATE KEY-----/!d' \
+    -e 's/.*/[秘密鍵を除去]/' \
+    -e '}' \
     -e 's#^-----END [A-Z ]*PRIVATE KEY-----$#[秘密鍵を除去]#' \
     -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
     -e 's#op://[^[:space:]]+#op://[除去]#g' \
