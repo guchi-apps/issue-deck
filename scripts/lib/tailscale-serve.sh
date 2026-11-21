@@ -19,16 +19,49 @@
 #
 # 呼び出し側（run-issue-session.sh・reap-dev-servers.sh・dev.sh）で共有する。
 # **どの関数もセッションを止めない。** 公開できなくても実装は続く。
+#
+# **macOS（Mac mini）はアプリ版のTailscaleで、`sudo`を使わない**（#5533）。CLIは
+# `/Applications/Tailscale.app/Contents/MacOS/Tailscale`にあり、ログインユーザーとしてGUIの
+# デーモンへつながる。`/usr/bin/tailscale`も`/etc/sudoers.d/`も無いため、Linuxの呼び方のままだと
+# `tailscale_serve_available`が常に偽になり、黙って公開されない。
+
+# tailscaleのCLIの場所。PATH → macOSのアプリ版の既定位置の順に探す。見つからなければ空。
+tailscale_serve_cli() {
+  if command -v tailscale >/dev/null 2>&1; then
+    command -v tailscale
+    return 0
+  fi
+  local app_cli="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" && -x "$app_cli" ]]; then
+    printf '%s' "$app_cli"
+  fi
+}
+
+# `tailscale serve`を呼ぶ。Linux（サブPC）は従来どおり`sudo -n /usr/bin/tailscale`、
+# macOSはアプリ版のCLIを`sudo`無しで呼ぶ。
+tailscale_serve_cmd() {
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local cli
+    cli="$(tailscale_serve_cli)"
+    [[ -n "$cli" ]] || return 1
+    "$cli" serve "$@"
+    return
+  fi
+  sudo -n /usr/bin/tailscale serve "$@"
+}
 
 # tailscale serveが使えるか。使えないホスト（メインPCのWSL等）では黙って何もしない。
 tailscale_serve_available() {
-  command -v tailscale >/dev/null 2>&1 || return 1
-  sudo -n /usr/bin/tailscale serve status >/dev/null 2>&1
+  [[ -n "$(tailscale_serve_cli)" ]] || return 1
+  tailscale_serve_cmd status >/dev/null 2>&1
 }
 
 # 自ホストのMagicDNS名（末尾のドットは落とす）。取れなければ空。
 tailscale_serve_hostname() {
-  tailscale status --json 2>/dev/null |
+  local cli
+  cli="$(tailscale_serve_cli)"
+  [[ -n "$cli" ]] || return 0
+  "$cli" status --json 2>/dev/null |
     python3 -c 'import json,sys
 try:
     d = json.load(sys.stdin)
@@ -44,7 +77,7 @@ tailscale_serve_publish() {
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
   tailscale_serve_available || return 1
 
-  sudo -n /usr/bin/tailscale serve --bg --http="$port" "localhost:$port" >/dev/null 2>&1 || return 1
+  tailscale_serve_cmd --bg --http="$port" "localhost:$port" >/dev/null 2>&1 || return 1
 
   host="$(tailscale_serve_hostname)"
   [[ -n "$host" ]] || return 1
@@ -56,13 +89,13 @@ tailscale_serve_unpublish() {
   local port="$1"
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
   tailscale_serve_available || return 0
-  sudo -n /usr/bin/tailscale serve --http="$port" off >/dev/null 2>&1 || return 0
+  tailscale_serve_cmd --http="$port" off >/dev/null 2>&1 || return 0
 }
 
 # 現在serveされているHTTPポートを1行ずつ返す（孤児の回収に使う）。
 tailscale_serve_ports() {
   tailscale_serve_available || return 0
-  sudo -n /usr/bin/tailscale serve status --json 2>/dev/null |
+  tailscale_serve_cmd status --json 2>/dev/null |
     python3 -c 'import json,sys
 try:
     d = json.load(sys.stdin)

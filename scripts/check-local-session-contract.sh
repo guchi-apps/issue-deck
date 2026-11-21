@@ -41,7 +41,8 @@ V2_REQUIRED_TOKENS=(tmux)
 # シェル側で数字を二重に書かない。
 expected_version() {
   local version
-  version="$(grep -oP 'LOCAL_SESSION_CONTRACT_VERSION\s*=\s*\K[0-9]+' "$CONTRACT_SOURCE" | head -1)"
+  # `grep -P`はmacOS標準のgrep（BSD版）に無いため、POSIX EREの`sed -nE`で読む（#5542）
+  version="$(sed -nE 's/.*LOCAL_SESSION_CONTRACT_VERSION[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$CONTRACT_SOURCE" | head -1)"
   if [[ -z "$version" ]]; then
     echo "Error: $CONTRACT_SOURCE から LOCAL_SESSION_CONTRACT_VERSION を読み取れません。" >&2
     exit 1
@@ -62,7 +63,8 @@ check_script() {
   fi
 
   local declared
-  declared="$(grep -oP '^#\s*issue-deck-local-session:\s*v\K[0-9]+' "$script_path" | head -1 || true)"
+  # パターンは scripts/lib/local-repo-resolve.sh の local_repo_declared_contract_version と揃える
+  declared="$(sed -nE 's/^#[[:space:]]*issue-deck-local-session:[[:space:]]*v([0-9]+)[[:space:]]*$/\1/p' "$script_path" | head -1 || true)"
 
   if [[ -z "$declared" ]]; then
     problems+=("マーカー行 '# issue-deck-local-session: v$expected' がありません")

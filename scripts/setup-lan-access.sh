@@ -36,7 +36,7 @@ if ! command -v powershell.exe >/dev/null 2>&1; then
   exit 0
 fi
 
-WSL_IP="$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)"
+WSL_IP="$(ip -4 addr show eth0 2>/dev/null | sed -nE 's/.*inet[[:space:]]+([0-9]+(\.[0-9]+){3}).*/\1/p' || true)"
 if [[ -z "$WSL_IP" ]]; then
   echo "警告: WSLのIPアドレスを取得できなかったため、LANアクセス設定をスキップします。" >&2
   exit 0

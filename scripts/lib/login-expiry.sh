@@ -39,7 +39,7 @@ login_expiry_credentials_file() {
 login_expiry_credentials_mtime() {
   local file mtime
   file="$(login_expiry_credentials_file)"
-  mtime="$(stat -c %Y "$file" 2>/dev/null || true)"
+  mtime="$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || true)"
   [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
   printf '%s' "$mtime"
 }
@@ -62,7 +62,7 @@ login_expiry_session_expired() {
   transcript="$(session_transcript_path "$session" 2>/dev/null || true)"
   [[ -n "$transcript" && -f "$transcript" ]] || return 1
   login_expiry_transcript_auth_failed "$transcript" || return 1
-  mtime="$(stat -c %Y "$transcript" 2>/dev/null || true)"
+  mtime="$(stat -c %Y "$transcript" 2>/dev/null || stat -f %m "$transcript" 2>/dev/null || true)"
   [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   ((now - mtime >= LOGIN_EXPIRY_MIN_AGE_SECONDS)) || return 1
@@ -82,7 +82,7 @@ login_expiry_scan() {
     [[ "$(session_state_agent_kind "$session" 2>/dev/null || true)" == "codex" ]] && continue
     login_expiry_session_expired "$session" || continue
     transcript="$(session_transcript_path "$session" 2>/dev/null || true)"
-    mtime="$(stat -c %Y "$transcript" 2>/dev/null || printf 0)"
+    mtime="$(stat -c %Y "$transcript" 2>/dev/null || stat -f %m "$transcript" 2>/dev/null || printf 0)"
     found+=("$mtime $session")
   done
   LOGIN_EXPIRED_SESSIONS=()

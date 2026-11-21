@@ -3032,6 +3032,52 @@ systemd-run --user --quiet --scope --collect --unit=issue-deck-tmux-server \
 止まるべきものが止まらない側の危うさをunit全体に広げるより、tmuxサーバーだけを外へ出す方が
 影響が小さい。unitの入れ替え（`cp` + `daemon-reload`）という手作業が要らないのも大きい。
 
+## Mac mini 側のセットアップ（#5528）
+
+サブPCと並ぶ2台目のホストとして、Mac mini（識別子`macmini`・画面上の表記はMacMini）でもpollerを動かせる。
+**ジョブは両方のホストが同じAPIへ取りに行き、どちらか一方だけが取る**（`claim`の排他は
+ホストの台数に依存しない）。起動先の選び方・実行できないリポジトリの弾き方・同時実行数の上限は
+本文書のとおりで、ホストごとの申告（`DispatchHost`）で決まる。
+
+macOSにはsystemdが無いため、常駐はlaunchdのLaunchAgentで行い、設定ファイルは
+`deploy/macmini/run-with-env.sh`が読み込む。手順と運用コマンドは
+[deploy/macmini/README.md](../../deploy/macmini/README.md)を参照。**`DISPATCH_HOST_NAME=macmini`を必ず明示する**
+（macOSの`hostname -s`は端末名から自動で付いた名前になる）。
+
+スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot`など）は#5529で吸収した（次の節）。
+## ホストのOSの違いの吸収（#5529）
+
+pollerと周辺スクリプトはサブPC（Ubuntu・systemd）だけを前提に書かれていたが、Mac mini（macOS）でも
+同じスクリプトを動かすため、OSで取り方が分かれる処理を[scripts/lib/os-compat.sh](../../scripts/lib/os-compat.sh)へ
+集めた。**Linuxの分岐は従来の実装をそのまま移したもので、サブPCの挙動は変えていない。**
+
+| 対象 | Linux（サブPC） | macOS（Mac mini） |
+|---|---|---|
+| CPU・メモリ・SWAP・起動時刻 | `/proc/stat`・`/proc/meminfo` | `top -l 2`・`vm_stat`・`sysctl`（status-hubの`agent-macos.sh`と同じ取り方） |
+| ディスク使用量 | `/` | `/System/Volumes/Data`（`/`は読み取り専用のシステムボリューム） |
+| 待ち受けポートとPID | `ss -tlnp` | `lsof -iTCP -sTCP:LISTEN` |
+| プロセスのargv・cwd・経過秒数 | `/proc/<pid>/cmdline`・`cwd`、`ps -o etimes` | `ps`・`lsof -d cwd`、`ps -o etime` |
+| 再起動コマンド | `/usr/sbin/reboot` | `/sbin/reboot` |
+| 手作業の代行実行の停止 | `systemd-run`のtransient unitを`systemctl --user stop` | `setsid`で切り離したプロセスグループをPIDファイルから止める |
+| tmuxサーバーの分離 | `systemd-run --scope`で別cgroup | cgroupは無い。tmuxはデーモン化して別セッションになるため、launchdの停止で巻き添えにならない |
+
+- **macOSではプロセスのargvの境界を正確に取れない**（`ps`は空白で連結した文字列しか返さない）。
+  開発サーバーの判定（`dev_server_is_dev_command`）で`claude`のプロンプト中の「pnpm dev」に当たらないよう、
+  **実行ファイル名がnode・pnpm・npm・yarn・bun・next・viteのものだけ**argvを読む
+- `os-compat.sh`を読み込むと、**bash 4以降でなければ理由を出して止まる**（macOS標準のbash 3.2では
+  `mapfile`・`declare -A`で途中から構文エラーになるため）。macOSではHomebrewのGNU coreutils（gnubin）・
+  util-linux・Homebrewのbinを`PATH`の先頭に置くので、子プロセスの`date -d`・`stat -c`・`timeout`・
+  `setsid`・`flock`もそのまま動く
+- 単体で動くスクリプト（`session-usage.sh`・`worktree-status.sh`など）は、`stat -f`・`date -v`への
+  フォールバックも持たせてある
+- **bashの`[[ =~ ]]`で`{0,400}`のような256回以上の回数指定を書かない。** macOSの正規表現ライブラリは
+  上限が255で、照合自体が失敗する（`maximum repetition exceeds 255`）。取り出した後に`${var:0:N}`で切る
+- **スクリプトで`grep -P`（PCRE）を使わない**（#5542）。macOS標準のgrep（BSD版）は`-P`を持たず、
+  gnubinにもGNU grepは入っていない。`2>/dev/null`や`|| true`と組み合わさると**エラーも出ずに空になり**、
+  契約版数が読めずに自前の`start-issue.sh`を持つリポジトリまで汎用ランチャーで起動していた。
+  `\K`や後読みで値を取り出す箇所は`sed -nE 's/…(値)…/\1/p'`で書き、`\s`・`\d`は`[[:space:]]`・`[0-9]`にする
+  （`pgrep -P`はBSD版にもあるので対象外）
+
 ## ログをどこで見るか
 
 Actions UIに相当するものが無いため、次の3つで追う。

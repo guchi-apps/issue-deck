@@ -540,7 +540,7 @@ prepare_issue() {
   else
     echo "#$n: LANアクセス用のポートフォワーディングを設定しています（Windowsの管理者権限が必要です）..."
     if bash "$ROOT/scripts/setup-lan-access.sh" "$DEV_PORT"; then
-      WSL_IP="$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)"
+      WSL_IP="$(ip -4 addr show eth0 2>/dev/null | sed -nE 's/.*inet[[:space:]]+([0-9]+(\.[0-9]+){3}).*/\1/p' || true)"
       if [[ -n "$WSL_IP" ]]; then
         SSLIP_URL="http://${WSL_IP}.sslip.io:${DEV_PORT}"
       fi
