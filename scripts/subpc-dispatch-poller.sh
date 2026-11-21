@@ -192,6 +192,13 @@ DISPATCH_POLLER_VERSION="43"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ホストのOS差（Ubuntu＝サブPC／macOS＝Mac mini）の吸収（#5529）。**他のライブラリより先に読む。**
+# bash 4以降でなければここで止まり、macOSではGNU coreutils・util-linuxをPATHの先頭へ置くため、
+# 以降のライブラリと子プロセス（tmuxサーバー・ランチャー）がGNU版の`date`・`stat`・`timeout`・
+# `setsid`・`flock`をそのまま使える。
+# shellcheck source=scripts/lib/os-compat.sh
+source "$SCRIPT_DIR/lib/os-compat.sh"
+
 # 「どのリポジトリを起動できるか」の判定は受け口（start-local-session.sh）と共有する。
 # **判定を二重に持つと、申告と実際の起動可否が必ずずれる**（#1179のコメント）。
 # 手作業の`<…>`へ値を差し込む規則（#2403）。**issue-deck側と突き合わせる2枚目の壁**なので、
@@ -308,7 +315,8 @@ PREVIEW_LAUNCHER="$SCRIPT_DIR/start-preview-dev.sh"
 # ホストごとの再起動（#2496）で打つコマンド。**sudoersに書く許可と1文字も違えられない**
 # （`sudo -n -l <コマンド>`は許可された表記と突き合わせるため、`/sbin/reboot`のような別名では
 # 一致しない）。許可そのものは`guchi-apps/subpc`の`/etc/sudoers.d/`が持つ。
-REBOOT_COMMAND="/usr/sbin/reboot"
+# OSごとの正規の置き場所（Ubuntuは`/usr/sbin/reboot`、macOSは`/sbin/reboot`）を使う（#5529）。
+REBOOT_COMMAND="$(os_compat_reboot_command)"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -872,7 +880,7 @@ reap_idle_remote_sessions() {
     last="$created"
     path="$(session_transcript_path "$name" 2>/dev/null || true)"
     if [[ -n "$path" && -f "$path" ]]; then
-      mtime="$(stat -c %Y "$path" 2>/dev/null || echo 0)"
+      mtime="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null || echo 0)"
       ((mtime > last)) && last="$mtime"
     fi
     ((now - last >= REMOTE_SESSION_IDLE_MINUTES * 60)) || continue
@@ -915,11 +923,28 @@ manual_step_capable() {
 # 起こしたものは止められない。止められないと分かっていれば、画面は押す前に
 # 「打ち切り（5分）まで待つことになります」と案内できる。
 manual_step_abort_capable() {
-  if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  if manual_step_systemd_available; then
+    printf 'true'
+  elif command -v setsid >/dev/null 2>&1; then
+    # systemdが無いホスト（macOS＝Mac mini）では、`setsid`で切り離したプロセスグループを
+    # PIDファイルから止める（#5529。`abort_manual_step_job`）
     printf 'true'
   else
     printf 'false'
   fi
+}
+
+# 代行実行をsystemdのtransient unitで扱えるか（#1882・#5529）。
+manual_step_systemd_available() {
+  command -v systemd-run >/dev/null 2>&1 &&
+    command -v systemctl >/dev/null 2>&1 &&
+    systemctl --user show-environment >/dev/null 2>&1
+}
+
+# systemdが無いホストで切り離した代行実行の、プロセスグループのPIDを置くファイル（#5529）。
+# ジョブidは呼び出し側で形を確かめてから渡す。
+manual_step_pid_file() {
+  printf '%s/manual-step/%s.pid' "$(os_compat_state_dir)" "$1"
 }
 
 # 埋めた値を差し込んで代行実行できるか（#2403）。**この版のスクリプトが
@@ -1167,11 +1192,12 @@ collect_reboot_state() {
   fi
 
   # 起動時刻。**`uptime -s`はローカルタイムで秒までしか出さない**ため、UTCで揃う
-  # `/proc/stat`の`btime`（epoch秒）から作る。読めなければ空のまま送る
+  # epoch秒（Linuxは`/proc/stat`の`btime`、macOSは`kern.boottime`。#5529）から作る。
+  # 読めなければ空のまま送る
   local btime
-  btime="$(awk '/^btime /{print $2}' /proc/stat 2>/dev/null || true)"
+  btime="$(os_compat_boot_epoch || true)"
   if [[ "$btime" =~ ^[0-9]+$ ]]; then
-    booted_at="$(date -u -d "@$btime" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+    booted_at="$(os_compat_epoch_to_utc_iso "$btime" || true)"
   fi
 
   jq -n \
@@ -1246,42 +1272,37 @@ preview_state() {
 # **どれか1つでも取れなければ何も出力しない**（呼び出し側が`metrics`ごと落とす）。部分的に0が
 # 入ると、取れなかった項目が「空いている」と読めてしまう。
 collect_host_metrics() {
-  local cpu_first cpu_second cpu_percent mem_total_mb mem_used_mb disk_total_gb disk_used_gb
+  local cpu_percent mem_total_mb mem_used_mb disk_total_gb disk_used_gb
   local swap_total_mb swap_used_mb
 
-  # CPUは瞬間値が取れないため、/proc/stat のアイドル時間と全体の累積を1秒あけて2回読み、
-  # その差分から出す。1巡30秒に対する1秒なので、claimの開始が1秒遅れるだけ
-  cpu_first="$(awk '/^cpu / { idle = $5 + $6; total = 0; for (i = 2; i <= NF; i++) total += $i; print idle, total; exit }' /proc/stat 2>/dev/null)" || return 1
-  [[ -n "$cpu_first" ]] || return 1
-  sleep 1
-  cpu_second="$(awk '/^cpu / { idle = $5 + $6; total = 0; for (i = 2; i <= NF; i++) total += $i; print idle, total; exit }' /proc/stat 2>/dev/null)" || return 1
-  [[ -n "$cpu_second" ]] || return 1
-  cpu_percent="$(awk -v first="$cpu_first" -v second="$cpu_second" 'BEGIN {
-    split(first, a, " "); split(second, b, " ");
-    idle = b[1] - a[1]; total = b[2] - a[2];
-    if (total <= 0) exit 1;
-    value = (1 - idle / total) * 100;
-    if (value < 0) value = 0; if (value > 100) value = 100;
-    printf "%.1f", value;
-  }')" || return 1
+  # 取り方のOS差は scripts/lib/os-compat.sh に寄せている（#5529）。Linuxは従来どおり`/proc`、
+  # macOSは`top`・`sysctl`・`vm_stat`（status-hubの`agent-macos.sh`と同じ取り方）。
+  #
+  # CPUは瞬間値が取れないため、約1秒あけた2回の観測の差分から出す。1巡30秒に対する1秒なので、
+  # claimの開始が1秒遅れるだけ
+  cpu_percent="$(os_compat_cpu_percent)" || return 1
   [[ -n "$cpu_percent" ]] || return 1
 
-  # MemAvailable は「実際に割り当て可能な量」で、キャッシュぶんを空きとして数える。
-  # free と MemFree の差で使用量を出すと、キャッシュを使い切ったホストが常に満杯に見える
-  mem_total_mb="$(awk '/^MemTotal:/ { printf "%d", $2 / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
-  mem_used_mb="$(awk '/^MemTotal:/ { total = $2 } /^MemAvailable:/ { printf "%d", (total - $2) / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
-  [[ -n "$mem_total_mb" && -n "$mem_used_mb" ]] || return 1
+  # メモリの使用量は、Linuxは MemTotal − MemAvailable（キャッシュぶんを空きとして数える。
+  # free と MemFree の差で使用量を出すと、キャッシュを使い切ったホストが常に満杯に見える）
+  local mem_pair swap_pair
+  mem_pair="$(os_compat_memory_mb)" || return 1
+  read -r mem_total_mb mem_used_mb <<<"$mem_pair"
+  [[ "$mem_total_mb" =~ ^[0-9]+$ && "$mem_used_mb" =~ ^[0-9]+$ ]] || return 1
 
   # SWAP（#1624）。メモリが100%に達したホストは、そこから先の余力がSWAPの増え方にしか出ない。
-  # **SwapTotalが0（SWAPを持たない・`swapoff`）でも申告を落とさない**（issue-deck側が0を
+  # **SWAPの総量が0（SWAPを持たない・`swapoff`）でも申告を落とさない**（issue-deck側が0を
   # 「SWAPなし」として行ごと出さない）。メモリと違い、0は壊れた値ではなく正常な構成
-  swap_total_mb="$(awk '/^SwapTotal:/ { printf "%d", $2 / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
-  swap_used_mb="$(awk '/^SwapTotal:/ { total = $2 } /^SwapFree:/ { printf "%d", (total - $2) / 1024; exit }' /proc/meminfo 2>/dev/null)" || return 1
-  [[ -n "$swap_total_mb" && -n "$swap_used_mb" ]] || return 1
+  swap_pair="$(os_compat_swap_mb)" || return 1
+  read -r swap_total_mb swap_used_mb <<<"$swap_pair"
+  [[ "$swap_total_mb" =~ ^[0-9]+$ && "$swap_used_mb" =~ ^[0-9]+$ ]] || return 1
 
-  # worktreeと開発サーバーで埋まるのは `/` なので、そこ1本だけを見る（#1223・#1525）
-  disk_total_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $2 / 1048576 }')" || return 1
-  disk_used_gb="$(df -Pk / 2>/dev/null | awk 'NR == 2 { printf "%.1f", $3 / 1048576 }')" || return 1
+  # worktreeと開発サーバーで埋まるのは `/` なので、そこ1本だけを見る（#1223・#1525）。
+  # macOSの`/`は読み取り専用のシステムボリュームで、ホームやworktreeはデータボリュームにある（#5529）
+  local disk_path
+  disk_path="$(os_compat_data_fs_path)"
+  disk_total_gb="$(df -Pk "$disk_path" 2>/dev/null | awk 'NR == 2 { printf "%.1f", $2 / 1048576 }')" || return 1
+  disk_used_gb="$(df -Pk "$disk_path" 2>/dev/null | awk 'NR == 2 { printf "%.1f", $3 / 1048576 }')" || return 1
   [[ -n "$disk_total_gb" && -n "$disk_used_gb" ]] || return 1
 
   jq -n \
@@ -2038,7 +2059,7 @@ report_session_usage() {
   fi
 
   local cutoff
-  cutoff="$(date -d "$((days > 0 ? days - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
+  cutoff="$(os_compat_days_ago_midnight "$((days > 0 ? days - 1 : 0))" || echo 0)"
 
   local payload claude_payload codex_payload codex_backfill_ok=1
   # **集計の失敗で1巡を止めない。** 転記の形はClaude Codeの内部仕様で、読めない日が
@@ -2124,7 +2145,7 @@ report_live_session_usage() {
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
   local codex_sessions_dir="${CODEX_SESSIONS_DIR:-$HOME/.codex/sessions}"
   local cutoff
-  cutoff="$(date -d "$((SESSION_USAGE_WINDOW_DAYS > 0 ? SESSION_USAGE_WINDOW_DAYS - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
+  cutoff="$(os_compat_days_ago_midnight "$((SESSION_USAGE_WINDOW_DAYS > 0 ? SESSION_USAGE_WINDOW_DAYS - 1 : 0))" || echo 0)"
 
   local claude_files codex_files claude_payload="" codex_payload=""
   claude_files="$(session_usage_live_transcripts "$projects_dir" "$since" "$cutoff")"
@@ -2504,6 +2525,13 @@ ensure_tmux_server_scope() {
   fi
 
   if ! command -v systemd-run >/dev/null 2>&1; then
+    if os_compat_is_darwin; then
+      # macOS（Mac mini）にはcgroupが無い（#5529）。tmuxサーバーは起動時にデーモン化して
+      # 自分のセッションを作るため、launchdがpoller（のプロセスグループ）を止めても巻き添えに
+      # ならない。ここでは先にサーバーだけを起こし、セッションが0本でも残るようにしておく
+      tmux start-server ';' set-option -s exit-empty off >/dev/null 2>&1 || true
+      return 0
+    fi
     echo "警告: systemd-run が無いため、tmuxサーバーはpollerと同じcgroupで起こされます（#1935）。" >&2
     return 0
   fi
@@ -4004,11 +4032,23 @@ run_manual_step_job() {
     return 0
   fi
 
-  # systemd-runが使えない環境向けの退避経路。**pollerを再起動する手順ではここは巻き添えになる**
-  # （そのときは結果が返らず、ジョブはタイムアウトする）。それでも実行できない状態よりはよい。
+  # systemd-runが使えない環境向けの経路（macOS＝Mac miniでは常にこちら。#5529）。
+  # `setsid`で新しいセッション（＝プロセスグループ）として切り離し、そのPIDをファイルへ残す。
+  # 中断（`abort_manual_step_job`）はこのPIDのプロセスグループごと止める。
+  #
+  # 非対話のbashの`&`で起こした子はプロセスグループのリーダーではないため、`setsid`はforkせずに
+  # その場で新しいセッションを作る。**`$!`がそのままセッション＝プロセスグループのIDになる。**
+  #
+  # Linuxのsystemd無し環境では、pollerを再起動する手順で巻き添えになりうる（そのときは結果が
+  # 返らず、ジョブはタイムアウトする）。macOSのlaunchdが止めるのはpoller自身のプロセスグループ
+  # だけなので、切り離したこのプロセスは残る。
   echo "  systemd-runが使えないため、切り離したプロセスとして実行します" >&2
-  setsid nohup /bin/bash -lc "$MANUAL_STEP_RUNNER $(printf '%q' "$payload_file")" \
+  local pid_file
+  pid_file="$(manual_step_pid_file "$job_id")"
+  mkdir -p "$(dirname "$pid_file")"
+  setsid nohup bash -lc "$MANUAL_STEP_RUNNER $(printf '%q' "$payload_file")" \
     >/dev/null 2>&1 &
+  printf '%s\n' "$!" >"$pid_file"
   disown
   return 0
 }
@@ -4035,8 +4075,8 @@ abort_manual_step_job() {
   fi
 
   unit="issue-deck-manual-step-$target_job_id"
-  if ! command -v systemctl >/dev/null 2>&1; then
-    report_job "$job_id" failed "systemctlが無いため、走っているコマンドを止められません。"
+  if ! manual_step_systemd_available; then
+    abort_detached_manual_step "$job_id" "$target_job_id"
     return 0
   fi
 
@@ -4059,6 +4099,54 @@ abort_manual_step_job() {
     return 0
   fi
   report_job "$job_id" failed "走っているコマンドを止められませんでした（$unit）。"
+  return 0
+}
+
+# systemdが無いホスト（macOS＝Mac mini）で、`setsid`で切り離した代行実行を止める（#5529）。
+#
+# PIDファイルのPIDを、**今も`run-manual-step.sh`を動かしているプロセスグループのリーダー**だと
+# 確かめてから、グループごと止める（PIDの再利用で無関係なプロセスを撃たないため）。
+# 結果の扱いは systemd の経路と同じで、止めたジョブ自身の結果は返らない。
+abort_detached_manual_step() {
+  local job_id="$1" target_job_id="$2" pid_file pid args i
+
+  pid_file="$(manual_step_pid_file "$target_job_id")"
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pid_file"
+    report_job "$job_id" succeeded "走っているコマンドは既に終わっていました。"
+    return 0
+  fi
+
+  args="$(ps -ww -o args= -p "$pid" 2>/dev/null || true)"
+  if [[ "$args" != *"$(basename "$MANUAL_STEP_RUNNER")"* ]]; then
+    rm -f "$pid_file"
+    report_job "$job_id" succeeded "走っているコマンドは既に終わっていました。"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため停止しません（プロセスグループ $pid）"
+    return 0
+  fi
+
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  for ((i = 0; i < 10; i++)); do
+    kill -0 -- "-$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 -- "-$pid" 2>/dev/null; then
+    kill -KILL -- "-$pid" 2>/dev/null || true
+    sleep 1
+  fi
+
+  if kill -0 -- "-$pid" 2>/dev/null; then
+    report_job "$job_id" failed "走っているコマンドを止められませんでした（プロセスグループ $pid）。"
+    return 0
+  fi
+  rm -f "$pid_file"
+  echo "  代行実行を中断しました（プロセスグループ $pid）"
+  report_job "$job_id" succeeded "走っているコマンドを止めました。"
   return 0
 }
 

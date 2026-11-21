@@ -263,14 +263,14 @@ reap_orphan_serves() {
 # 誤って撃たない）。**worktreeのログにも書かない**（ログのmtimeはアイドル判定の材料で、
 # ここで毎回書くとアイドルでの回収が永久に成立しなくなる）。
 warn_wildcard_listening() {
-  command -v ss >/dev/null 2>&1 || return 0
+  os_compat_can_list_tcp || return 0
 
-  local local_addr proc_info pid port cwd leaf worktree_base issue_number repo
+  local local_addr pid port cwd leaf worktree_base issue_number repo
   local -A seen_pid=()
 
-  while read -r local_addr proc_info; do
-    [[ "$proc_info" =~ pid=([0-9]+) ]] || continue
-    pid="${BASH_REMATCH[1]}"
+  # 待ち受けの一覧は scripts/lib/os-compat.sh 経由（Linuxは`ss`、macOSは`lsof`。#5529）
+  while IFS=$'\t' read -r local_addr pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
     # 同じプロセスがIPv4/IPv6の両方で待ち受けていることがある。1回だけ見る
     [[ -z "${seen_pid[$pid]:-}" ]] || continue
     seen_pid["$pid"]=1
@@ -290,7 +290,7 @@ warn_wildcard_listening() {
     dev_server_wildcard_listening "$port" || continue
     echo "警告: 開発サーバーがポート $port を全インターフェースで待ち受けています（$repo #$issue_number）。tailnet上の他端末から到達できます（#1526）。"
     echo "      $cwd の scripts/dev.sh が古い可能性があります。git -C $cwd merge origin/develop で取り込むか、worktreeを作り直してください。"
-  done < <(ss -tlnpH 2>/dev/null | awk '{ rest = ""; for (i = 5; i <= NF; i++) rest = rest $i; print $4, rest }')
+  done < <(os_compat_tcp_listeners)
 
   return 0
 }
@@ -355,7 +355,7 @@ session_alive() {
 
 reap_untracked_dev_servers() {
   local grace_seconds=$((ORPHAN_GRACE_MINUTES * 60))
-  local proc_dir pid root cwd leaf base repo issue_number session etimes reason
+  local pid root cwd leaf base repo issue_number session etimes reason
   local worktree_base log_file
   local -A seen_root=()
 
@@ -366,9 +366,9 @@ reap_untracked_dev_servers() {
     return 0
   fi
 
-  shopt -s nullglob
-  for proc_dir in /proc/[0-9]*; do
-    pid="${proc_dir#/proc/}"
+  # プロセスの一覧は scripts/lib/os-compat.sh 経由（Linuxは`/proc`、macOSは`ps`。#5529）
+  while read -r pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
 
     # 1. argvの位置で開発サーバーだと確定できるか（部分一致では探さない）
     dev_server_is_dev_command "$pid" || continue
@@ -405,7 +405,7 @@ reap_untracked_dev_servers() {
 
     # 5. 猶予。**セッションが立つ前の開発サーバーを撃たないための時間で、唯一の誤爆の防波堤。**
     #    開発サーバーとtmuxセッションのどちらが先に立つかは起動経路によって前後する
-    etimes="$(ps -o etimes= -p "$root" 2>/dev/null | tr -d '[:space:]')"
+    etimes="$(os_compat_pid_elapsed_seconds "$root" || true)"
     [[ "$etimes" =~ ^[0-9]+$ ]] || continue
     if [[ "$etimes" -lt "$grace_seconds" ]]; then
       echo "  $repo #$issue_number: tmuxセッション「$session」はありませんが、起動から $((etimes / 60))分（猶予 ${ORPHAN_GRACE_MINUTES}分）のため見送ります。"
@@ -418,7 +418,7 @@ reap_untracked_dev_servers() {
     reason="PIDファイルに無く、tmuxセッション「$session」も無い状態で $((etimes / 60))分動いていた（孤児）"
     log_file="$worktree_base/.dev-servers/issue-$issue_number.log"
     stop_one "$repo #$issue_number" "$root" "$log_file" "$cwd" "$reason" tree
-  done
+  done < <(os_compat_list_pids)
 
   return 0
 }
@@ -459,7 +459,7 @@ reap_idle_preview() {
   fi
 
   [[ -f "$PREVIEW_LOG" ]] || return 0
-  log_mtime="$(stat -c %Y "$PREVIEW_LOG" 2>/dev/null || echo "")"
+  log_mtime="$(os_compat_mtime "$PREVIEW_LOG" || echo "")"
   [[ "$log_mtime" =~ ^[0-9]+$ ]] || return 0
   idle_for=$((NOW - log_mtime))
   [[ "$idle_for" -ge "$idle_seconds" ]] || return 0
@@ -530,7 +530,7 @@ for pid_file in "$DEV_SERVER_DIR"/issue-*.pid; do
   # 実績がある。docs/multi-agent/gates.md）。
   [[ "$IDLE_SECONDS" -gt 0 ]] || continue
   [[ -f "$log_file" ]] || continue
-  log_mtime="$(stat -c %Y "$log_file" 2>/dev/null || echo "")"
+  log_mtime="$(os_compat_mtime "$log_file" || echo "")"
   [[ "$log_mtime" =~ ^[0-9]+$ ]] || continue
   idle_for=$((NOW - log_mtime))
   if [[ "$idle_for" -ge "$IDLE_SECONDS" ]]; then
