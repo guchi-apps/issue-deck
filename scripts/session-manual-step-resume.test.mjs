@@ -14,7 +14,7 @@
 // だけの偽の`tmux`をPATHの先頭へ置く。
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,8 @@ let binDir;
 let historyDir;
 
 beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "session-manual-step-resume-"));
+  // macOSの`/var`は`/private/var`への別名。ランチャーは実パスから履歴の置き場を決めるので実パスで組む
+  workDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-manual-step-resume-")));
   stateDir = path.join(workDir, "state");
   cwdDir = path.join(workDir, "cwd");
   binDir = path.join(workDir, "bin");

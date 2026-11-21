@@ -14,6 +14,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/os-compat.sh
+source "$SCRIPT_DIR/lib/os-compat.sh"
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/clone-lock.sh
@@ -234,6 +236,11 @@ main() {
     return 0
   fi
   summary="統合対象: main ${base_sha:0:7} + release head ${head_sha:0:7}"$'\n'
+
+  # 検証対象のCIと同じNodeのメジャー版で実行する（macOSのHomebrewは最新版を入れるため。#5549）
+  if ci_node_major="$(os_compat_ci_node_major "$WORKTREE")"; then
+    os_compat_use_node_major "$ci_node_major"
+  fi
 
   # 既存CIの証跡（head SHAの成功）。**再利用する証跡であり、統合状態のビルド・テストの代わりではない**
   ci_json="$(gh run list --repo "$full_name" --workflow ci.yml --commit "$head_sha" --json conclusion,url --limit 1 2>/dev/null || printf '[]')"

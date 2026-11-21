@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -14,7 +14,8 @@ const legacyScript = join(repoRoot, "scripts/lib/codex-artifact.sh");
  * 決まった応答を返す。**実際のIssueDeckへは届かない。**
  */
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), "issue-deck-issue-artifact-"));
+  // macOSの`/var`は`/private/var`への別名。スクリプトは実パスを送るので実パスで組む
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "issue-deck-issue-artifact-")));
   const html = join(dir, "design.html");
   const bin = join(dir, "bin");
   mkdirSync(bin);

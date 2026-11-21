@@ -10,7 +10,7 @@
 - Homebrew で次を導入済み。スクリプトは bash 4 以降と GNU 版のコマンドを前提にしているため、plist で PATH の先頭に置く。
 
   ```bash
-  brew install bash coreutils util-linux flock jq tmux node pnpm
+  brew install bash coreutils util-linux flock jq tmux node pnpm gnu-sed gettext node@24
   ```
 
 - Tailscale に参加済みで、Claude Code にサインイン済み。
