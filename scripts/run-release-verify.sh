@@ -292,7 +292,7 @@ main() {
       unverified="Mac検証（remote-build-check.sh）が未接続です"
       summary+="Mac検証: 未実施（スクリプトがありません）"$'\n'
       mac_result_set needs_check "$unverified" "$unverified"
-    elif ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$MAC_HOST_NAME" true >/dev/null 2>&1; then
+    elif [[ "$MAC_HOST_NAME" != "local" && "$(uname -s)" != "Darwin" ]] && ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$MAC_HOST_NAME" true >/dev/null 2>&1; then
       unverified="Mac（${MAC_HOST_NAME}）へ接続できず、iOSのビルドを確認できていません"
       summary+="Mac検証: 未実施（Macへ接続できません）"$'\n'
       mac_result_set needs_check "$unverified" "$unverified"
