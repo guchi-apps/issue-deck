@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.108.0",
+    date: "2026-11-22",
+    changes: [
+      "Mac mini を実行ホストとして使えるようになり、画面のホスト表示にも Mac mini の名前が出るようになりました。",
+      "macOS 環境で起きていた、リリース候補の検証や全体レビューが環境の違いだけで失敗する問題を直しました。",
+    ],
+  },
+  {
     version: "8.107.2",
     date: "2026-11-20",
     changes: [
