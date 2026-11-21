@@ -119,7 +119,8 @@ detect_package_manager() {
   local dir="$1"
   if [[ -f "$dir/package.json" ]]; then
     local declared
-    declared="$(grep -oP '"packageManager"\s*:\s*"\K[a-z]+' "$dir/package.json" | head -1 || true)"
+    # `grep -P`はmacOS標準のgrep（BSD版）に無いため、POSIX EREの`sed -nE`で読む（#5542）
+    declared="$(sed -nE 's/.*"packageManager"[[:space:]]*:[[:space:]]*"([a-z]+).*/\1/p' "$dir/package.json" | head -1 || true)"
     if [[ -n "$declared" ]]; then
       printf '%s\n' "$declared"
       return 0
@@ -221,8 +222,11 @@ local_repo_resolve_path() {
 
 # start-issue.sh の冒頭マーカーから、宣言されているプロトコル版数を読む。
 # パターンは src/lib/local-session.ts の LOCAL_SESSION_MARKER_PATTERN と揃える。
+# `grep -P`はmacOS標準のgrep（BSD版）に無く、`2>/dev/null`でエラーまで消えて版数が空になり、
+# 宣言しているリポジトリまで汎用ランチャーで起動していた（#5542）。POSIX EREの`sed -nE`で読む。
 local_repo_declared_contract_version() {
-  grep -oP '^#\s*issue-deck-local-session:\s*v\K[0-9]+' "$1" 2>/dev/null | head -1 || true
+  [[ -r "$1" ]] || return 0
+  sed -nE 's/^#[[:space:]]*issue-deck-local-session:[[:space:]]*v([0-9]+)[[:space:]]*$/\1/p' "$1" | head -1 || true
 }
 
 # リポジトリが「いま起動できる」かを判定する。
