@@ -210,7 +210,7 @@ fi
 # 途中から読み始めた1行目は必ず壊れているので落とす（ファイルが閾値未満なら落とさない）。
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
-SIZE="$(stat -c %s "$TRANSCRIPT" 2>/dev/null || echo 0)"
+SIZE="$(stat -c %s "$TRANSCRIPT" 2>/dev/null || stat -f %z "$TRANSCRIPT" 2>/dev/null || echo 0)"
 if ((SIZE > INSPECT_TAIL_BYTES)); then
   tail -c "$INSPECT_TAIL_BYTES" "$TRANSCRIPT" | tail -n +2 | jq -R 'fromjson? // empty' >"$TMP" || true
 else

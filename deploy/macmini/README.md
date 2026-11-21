@@ -2,7 +2,7 @@
 
 サブPC（`subpc`）と並ぶ2台目の常時起動ホストとして、Mac mini（識別子 `macmini`、画面上の表記は MacMini）でジョブを受け取るための導入手順。仕組み・設定項目の意味は [docs/multi-agent/subpc-dispatch.md](../../docs/multi-agent/subpc-dispatch.md) と [deploy/subpc/](../subpc/) を正とし、ここには macOS で異なる点だけを書く。
 
-> **注意:** スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot` など）の吸収は #5529 で行う。それまでは、ホストのメトリクス・開発サーバーの掃除・手作業ジョブの代行実行が Mac mini では正しく動かない。
+> スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot` など）は `scripts/lib/os-compat.sh` で吸収している（#5529。[docs/multi-agent/subpc-dispatch.md](../../docs/multi-agent/subpc-dispatch.md)「ホストのOSの違いの吸収」）。
 
 ## 前提
 

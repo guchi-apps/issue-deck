@@ -3044,7 +3044,34 @@ macOSにはsystemdが無いため、常駐はlaunchdのLaunchAgentで行い、�
 [deploy/macmini/README.md](../../deploy/macmini/README.md)を参照。**`DISPATCH_HOST_NAME=macmini`を必ず明示する**
 （macOSの`hostname -s`は端末名から自動で付いた名前になる）。
 
-スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot`など）の吸収は#5529で行う。
+スクリプト群のOS差（`/proc`・`ss`・`systemctl`・`setsid`・`reboot`など）は#5529で吸収した（次の節）。
+## ホストのOSの違いの吸収（#5529）
+
+pollerと周辺スクリプトはサブPC（Ubuntu・systemd）だけを前提に書かれていたが、Mac mini（macOS）でも
+同じスクリプトを動かすため、OSで取り方が分かれる処理を[scripts/lib/os-compat.sh](../../scripts/lib/os-compat.sh)へ
+集めた。**Linuxの分岐は従来の実装をそのまま移したもので、サブPCの挙動は変えていない。**
+
+| 対象 | Linux（サブPC） | macOS（Mac mini） |
+|---|---|---|
+| CPU・メモリ・SWAP・起動時刻 | `/proc/stat`・`/proc/meminfo` | `top -l 2`・`vm_stat`・`sysctl`（status-hubの`agent-macos.sh`と同じ取り方） |
+| ディスク使用量 | `/` | `/System/Volumes/Data`（`/`は読み取り専用のシステムボリューム） |
+| 待ち受けポートとPID | `ss -tlnp` | `lsof -iTCP -sTCP:LISTEN` |
+| プロセスのargv・cwd・経過秒数 | `/proc/<pid>/cmdline`・`cwd`、`ps -o etimes` | `ps`・`lsof -d cwd`、`ps -o etime` |
+| 再起動コマンド | `/usr/sbin/reboot` | `/sbin/reboot` |
+| 手作業の代行実行の停止 | `systemd-run`のtransient unitを`systemctl --user stop` | `setsid`で切り離したプロセスグループをPIDファイルから止める |
+| tmuxサーバーの分離 | `systemd-run --scope`で別cgroup | cgroupは無い。tmuxはデーモン化して別セッションになるため、launchdの停止で巻き添えにならない |
+
+- **macOSではプロセスのargvの境界を正確に取れない**（`ps`は空白で連結した文字列しか返さない）。
+  開発サーバーの判定（`dev_server_is_dev_command`）で`claude`のプロンプト中の「pnpm dev」に当たらないよう、
+  **実行ファイル名がnode・pnpm・npm・yarn・bun・next・viteのものだけ**argvを読む
+- `os-compat.sh`を読み込むと、**bash 4以降でなければ理由を出して止まる**（macOS標準のbash 3.2では
+  `mapfile`・`declare -A`で途中から構文エラーになるため）。macOSではHomebrewのGNU coreutils（gnubin）・
+  util-linux・Homebrewのbinを`PATH`の先頭に置くので、子プロセスの`date -d`・`stat -c`・`timeout`・
+  `setsid`・`flock`もそのまま動く
+- 単体で動くスクリプト（`session-usage.sh`・`worktree-status.sh`など）は、`stat -f`・`date -v`への
+  フォールバックも持たせてある
+- **bashの`[[ =~ ]]`で`{0,400}`のような256回以上の回数指定を書かない。** macOSの正規表現ライブラリは
+  上限が255で、照合自体が失敗する（`maximum repetition exceeds 255`）。取り出した後に`${var:0:N}`で切る
 
 ## ログをどこで見るか
 

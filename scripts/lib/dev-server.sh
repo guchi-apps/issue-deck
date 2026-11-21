@@ -11,8 +11,12 @@
 #
 # このファイル自体は実行せず、source して使う。
 #
-# `/proc` を読むためLinux専用。読めない環境では `dev_server_pid_matches` が常に偽を返し、
-# **何も止めない側（安全側）に倒れる**。実行基盤はサブPC（Ubuntu）とWSLのいずれもLinux。
+# プロセスのargv・cwdと待ち受けポートは scripts/lib/os-compat.sh 経由で読む（#5529）。Linuxは
+# 従来どおり`/proc`と`ss`、macOS（Mac mini）は`ps`と`lsof`。読めない環境では
+# `dev_server_pid_matches` が常に偽を返し、**何も止めない側（安全側）に倒れる**。
+
+# shellcheck source=scripts/lib/os-compat.sh
+source "$(dirname "${BASH_SOURCE[0]}")/os-compat.sh"
 
 # 開発サーバーのログへ1行追記する。**止める前に必ず呼ぶ。**
 #
@@ -75,12 +79,12 @@ dev_server_is_dev_command() {
   local pid="$1" i arg base
   local -a argv=()
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  # 判定に要るのは先頭5つまで。プロンプト全文のような巨大なargvを読み切らない。
+  # macOSでは実行ファイル名で先に絞られる（os_compat_pid_argvのコメント）
   while IFS= read -r -d '' arg; do
     argv+=("$arg")
-    # 判定に要るのは先頭5つまで。プロンプト全文のような巨大なargvを読み切らない
-    [[ "${#argv[@]}" -lt 5 ]] || break
-  done <"/proc/$pid/cmdline"
+  done < <(os_compat_pid_argv "$pid" 5 2>/dev/null || true)
+  [[ "${#argv[@]}" -gt 0 ]] || return 1
 
   for ((i = 0; i < ${#argv[@]} && i < 3; i++)); do
     base="${argv[i]##*/}"
@@ -106,9 +110,9 @@ dev_server_is_dev_command() {
 dev_server_cwd_of() {
   local pid="$1" cwd
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  cwd="$(os_compat_pid_cwd "$pid" 2>/dev/null || true)"
   [[ -n "$cwd" ]] || return 1
-  printf '%s' "${cwd%" (deleted)"}"
+  printf '%s' "$cwd"
   return 0
 }
 
@@ -129,14 +133,14 @@ dev_server_cwd_of() {
 dev_server_loopback_listening() {
   local port="$1" addr
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
-  command -v ss >/dev/null 2>&1 || return 0
-  while read -r addr; do
+  os_compat_can_list_tcp || return 0
+  while IFS=$'\t' read -r addr _; do
     # 末尾の `:<ポート>` を落とす（IPv6は `[fd7a:...]:5403` の形なので後方一致で外す）
     addr="${addr%:*}"
     case "$addr" in
       '*' | '0.0.0.0' | '[::]' | '[::1]' | 127.*) return 0 ;;
     esac
-  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
+  done < <(os_compat_tcp_listeners "$port")
   return 1
 }
 
@@ -154,13 +158,13 @@ dev_server_loopback_listening() {
 dev_server_wildcard_listening() {
   local port="$1" addr
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
-  command -v ss >/dev/null 2>&1 || return 1
-  while read -r addr; do
+  os_compat_can_list_tcp || return 1
+  while IFS=$'\t' read -r addr _; do
     addr="${addr%:*}"
     case "$addr" in
       '*' | '0.0.0.0' | '[::]') return 0 ;;
     esac
-  done < <(ss -tlnH "sport = :$port" 2>/dev/null | awk '{ print $4 }')
+  done < <(os_compat_tcp_listeners "$port")
   return 1
 }
 
@@ -324,9 +328,8 @@ dev_server_port_note() {
 dev_server_port_listener_pids() {
   local port="$1"
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
-  command -v ss >/dev/null 2>&1 || return 0
-  ss -tlnpH "sport = :$port" 2>/dev/null |
-    grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
+  os_compat_can_list_tcp || return 0
+  os_compat_tcp_listeners "$port" | cut -f2 | grep -E '^[1-9][0-9]*$' | sort -u || true
 }
 
 # そのポートを掴んでいるプロセスのworktree（cwd）のうち、自分以外を列挙する（#2470）。
@@ -360,8 +363,8 @@ dev_server_port_owner_worktrees() {
 dev_server_listening_ports_for_worktree() {
   local worktree_dir="$1" local_addr pid port cwd
   [[ -n "$worktree_dir" ]] || return 0
-  command -v ss >/dev/null 2>&1 || return 0
-  while read -r local_addr pid; do
+  os_compat_can_list_tcp || return 0
+  while IFS=$'\t' read -r local_addr pid; do
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
     cwd="$(dev_server_cwd_of "$pid" || true)"
     [[ "$cwd" == "$worktree_dir" ]] || continue
@@ -369,8 +372,7 @@ dev_server_listening_ports_for_worktree() {
     port="${local_addr##*:}"
     [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
     printf '%s\n' "$port"
-  done < <(ss -tlnpH 2>/dev/null |
-    awk '{ if (match($0, /pid=[0-9]+/)) print $4, substr($0, RSTART + 4, RLENGTH - 4) }') |
+  done < <(os_compat_tcp_listeners) |
     sort -un
   return 0
 }
@@ -389,7 +391,7 @@ dev_server_listening_ports_for_worktree() {
 dev_server_wait_for_port() {
   local port="$1" worktree_dir="$2" timeout_seconds="${3:-30}" pid="${4:-}" i found
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
-  command -v ss >/dev/null 2>&1 || return 0
+  os_compat_can_list_tcp || return 0
   for ((i = 0; i < timeout_seconds * 2; i++)); do
     while read -r found; do
       [[ "$found" == "$port" ]] && return 0
@@ -424,7 +426,7 @@ dev_server_process_looks_like_dev() {
   local pid="$1" arg
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
   local -a argv=()
-  mapfile -t -n 2 argv < <(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null || true)
+  mapfile -t -n 2 argv < <(os_compat_pid_argv "$pid" 2 2>/dev/null | tr '\0' '\n' || true)
   [[ "${#argv[@]}" -gt 0 ]] || return 1
   if [[ "${argv[0]}" == next-server* ]]; then
     return 0

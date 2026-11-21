@@ -151,13 +151,13 @@ worktree_prepared_minutes() {
   now="$(date +%s)"
 
   # ディレクトリはbirth timeを優先する。ext4では取れるが、取れない場合は0が返るためmtimeへ落とす。
-  ts="$(stat -c %W "$dir" 2>/dev/null || echo 0)"
-  [[ "$ts" =~ ^[1-9][0-9]*$ ]] || ts="$(stat -c %Y "$dir" 2>/dev/null || echo 0)"
+  ts="$(stat -c %W "$dir" 2>/dev/null || stat -f %B "$dir" 2>/dev/null || echo 0)"
+  [[ "$ts" =~ ^[1-9][0-9]*$ ]] || ts="$(stat -c %Y "$dir" 2>/dev/null || stat -f %m "$dir" 2>/dev/null || echo 0)"
   [[ "$ts" =~ ^[1-9][0-9]*$ ]] && newest="$ts"
 
   for f in "$dir/.env.local" "$prompt_file"; do
     [[ -n "$f" && -e "$f" ]] || continue
-    ts="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    ts="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"
     [[ "$ts" =~ ^[1-9][0-9]*$ ]] || continue
     ((ts > newest)) && newest="$ts"
   done
