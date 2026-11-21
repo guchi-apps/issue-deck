@@ -35,4 +35,16 @@ if [[ $# -eq 0 ]]; then
   echo "使い方: $0 <コマンド> [引数...]" >&2
   exit 2
 fi
+
+# **PATHはここで並べ直す**（#5538）。plistで先頭に置いても、`bash -l`（ログインシェル）が
+# `/etc/profile`経由で`path_helper`を走らせ、`/usr/bin:/bin`を先頭へ並べ替える。pollerの
+# shebangは`#!/usr/bin/env bash`なので、そのままだとmacOS標準のbash 3.2が選ばれて
+# `scripts/lib/os-compat.sh`の版チェックで止まる（launchdが30秒おきに起こし直し続ける）。
+for dir in /opt/homebrew/bin /opt/homebrew/opt/util-linux/bin /opt/homebrew/opt/coreutils/libexec/gnubin; do
+  [[ -d "$dir" ]] || continue
+  PATH="$dir:${PATH//":$dir"/}"
+  PATH="${PATH#"$dir:$dir:"}"
+done
+export PATH
+
 exec "$@"
