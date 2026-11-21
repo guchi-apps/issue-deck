@@ -7,6 +7,10 @@ describe("formatDispatchHostName", () => {
     expect(formatDispatchHostName("subpc")).toBe("サブPC");
   });
 
+  it("`macmini`は「MacMini」として出す（#5528）", () => {
+    expect(formatDispatchHostName("macmini")).toBe("MacMini");
+  });
+
   it("大文字小文字が揺れても同じ表記にする（`hostname`の出力に依存させない）", () => {
     expect(formatDispatchHostName("SubPC")).toBe("サブPC");
   });

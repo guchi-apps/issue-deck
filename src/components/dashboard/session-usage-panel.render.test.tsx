@@ -963,7 +963,7 @@ describe("SessionUsagePanel", () => {
       renderPanel(response([entry()]));
       const heading = screen.getByRole("heading", { name: "AI使用量" });
       const header = heading.parentElement as HTMLElement;
-      expect(within(header).getByText(/subpc から/)).toBeTruthy();
+      expect(within(header).getByText(/サブPC から/)).toBeTruthy();
       const refresh = within(header).getByRole("button", { name: "更新" });
       expect(header.lastElementChild).toBe(refresh);
       expect(screen.queryByText(/GitHub Actionsが使ったトークン/)).toBeNull();
