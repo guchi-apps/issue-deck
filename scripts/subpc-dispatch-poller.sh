@@ -1039,6 +1039,13 @@ release_evidence_redacts() {
 # リリースPRの統合検証（`RELEASE_VERIFY`・#4237）を実行できるか。ランナーと`git`・`gh`・`jq`が
 # 手元にあるかで判定する（申告しないpollerへは配られない）。
 release_verify_capable() {
+  # 統合検証はCI（Linux・Node 24・GNU版のsed/bash）と同じ前提で`pnpm test`を実行するため、macOSでは受けない（#5547）。
+  # Mac miniで流すとNode 26の`localStorage`無効化・BSD版sed・`envsubst`不在などで、コードの不具合ではなく
+  # 環境の違いで落ちる。サブPC（Ubuntu）が受ける
+  if os_compat_is_darwin; then
+    printf 'false'
+    return 0
+  fi
   # 失敗ログの機密を伏せる処理（evidence_redact_v2・#4629）を持たない古いチェックアウトへは配らない
   if [[ -f "$RELEASE_VERIFY_RUNNER" ]] && release_evidence_redacts && command -v git >/dev/null 2>&1 &&
     command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
