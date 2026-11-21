@@ -250,10 +250,27 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes
   -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 SSH_ERR=""
 
+# 接続先がこのホスト自身か（#5535）。`IOS_PRECHECK_HOST=local`（または`localhost`）を
+# 書いたMac mini では、SSHを挟まずにその場で実行する。Mac mini がディスパッチのホストに
+# なったため、自分自身へSSHするためだけに鍵とknown_hostsを整えずに済むようにしている。
+is_local_host() {
+  case "$1" in
+    local | localhost) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # 失敗したら非0で返り、理由を`SSH_ERR`へ入れる（unreachable / host_key / auth）
 remote() {
   local host="$1" err rc
   shift
+  if is_local_host "$host"; then
+    # SSHの`ssh host <コマンド>`と同じく、コマンドはログインユーザーのシェルで解釈させる
+    # （`$HOME`などの展開をMac側で行う前提の文字列のため）。標準入力もそのまま渡す
+    SSH_ERR=""
+    bash -c "$*"
+    return
+  fi
   err="$(mktemp)"
   set +e
   "$SSH_BIN" "${SSH_OPTS[@]}" "$host" "$@" 2>"$err"
