@@ -444,11 +444,13 @@ describe("agent_cli_codex_sandbox_probe", () => {
   // `codex sandbox`は`--sandbox`を受け取らないので`-c sandbox_mode=`で渡す。
   it("起動と同じサンドボックスのモードで下見する", () => {
     const script = ['#!/bin/bash', 'if [[ "$2" == "--help" ]]; then exit 0; fi', 'echo "$*" >&2', "exit 1"].join("\n");
+    // 下見で動かす`true`はホストに実在するもの（Linuxは`/bin/true`、macOSは`/usr/bin/true`。#5540）
+    const trueBin = fs.existsSync("/bin/true") ? "/bin/true" : "/usr/bin/true";
     expect(probe(script).reason).toBe(
-      "sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- /bin/true",
+      `sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- ${trueBin}`,
     );
     expect(probe(script, { ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }).reason).toBe(
-      "sandbox -c sandbox_mode=danger-full-access -- /bin/true",
+      `sandbox -c sandbox_mode=danger-full-access -- ${trueBin}`,
     );
   });
 
