@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac mini のジョブ即時通知の受信サービス（#5528）。サブPCの deploy/subpc/issue-deck-dispatch-wake.service に当たる。
+  launchdはパスの `~` や `%h` を展開しないため、__HOME__ はインストール時に置き換える
+  （deploy/macmini/README.md の手順を参照）。
+
+  - 設定（DISPATCH_SECRET など）は ~/.config/issue-deck/dispatch.env から run-with-env.sh が読む。
+    このファイルを変更したら `launchctl kickstart -k gui/$(id -u)/com.guchi-apps.issue-deck.dispatch-wake` が要る。
+  - pollerとは別のジョブ。こちらを止めても、pollerと実行中のセッションには触れない
+    （通知が止まれば従来の定期巡回に戻るだけ）。
+  - WAKE_LISTEN_ADDR（tailnetのアドレス）・WAKE_LISTEN_PORT も dispatch.env に書く。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.guchi-apps.issue-deck.dispatch-wake</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/bash</string>
+    <string>-lc</string>
+    <string>exec "$HOME/apps/issue-deck/deploy/macmini/run-with-env.sh" node "$HOME/apps/issue-deck/scripts/dispatch-wake-receiver.mjs"</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- GNU版のコマンドとbash 5を、macOS標準のBSD版より先に見つけさせる -->
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/util-linux/bin:/opt/homebrew/bin:/opt/homebrew/sbin:__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+    <key>LANG</key>
+    <string>ja_JP.UTF-8</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- systemdの Restart=always / RestartSec=30s に当たる -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <!-- journaldの代わり。`tail -f ~/Library/Logs/issue-deck/dispatch-wake.log` で読む -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/issue-deck/dispatch-wake.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/issue-deck/dispatch-wake.log</string>
+</dict>
+</plist>

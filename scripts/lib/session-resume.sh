@@ -79,7 +79,7 @@ session_resume_transcript_interrupted() {
 # 転記が最後に書かれてから経った秒数。読めなければ非0で返る。
 session_resume_stalled_seconds() {
   local transcript="$1" mtime now
-  mtime="$(stat -c %Y "$transcript" 2>/dev/null || true)"
+  mtime="$(stat -c %Y "$transcript" 2>/dev/null || stat -f %m "$transcript" 2>/dev/null || true)"
   [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   printf '%s' "$((now - mtime))"

@@ -54,6 +54,10 @@ _session_usage_run_python() {
   python3 -c "$script" "$@"
 }
 
+# `find -printf`のOS差（BSDのfindには無い）を吸収する`os_compat_find_mtime`を使う（#5549）
+# shellcheck source=scripts/lib/os-compat.sh
+source "$(dirname "${BASH_SOURCE[0]}")/os-compat.sh"
+
 # 転記の一覧を出す。第1引数は転記の置き場、第2引数は最終更新のしきい値（epoch秒。0で無制限）。
 #
 # **ここでの絞り込みは粗い前段でしかない。** ファイルの最終更新が新しくても中身は古い行を
@@ -67,7 +71,7 @@ _session_usage_run_python() {
 session_usage_transcripts() {
   local dir="$1" cutoff="${2:-0}"
   [[ -d "$dir" ]] || return 0
-  find "$dir" -mindepth 2 -maxdepth 2 -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null |
+  os_compat_find_mtime "$dir" 2 2 |
     awk -F'\t' -v cutoff="$cutoff" '$1 >= cutoff' |
     sort -n |
     cut -f2-
@@ -87,10 +91,12 @@ session_usage_live_transcripts() {
   local dir="$1" live_cutoff="${2:-0}" window_cutoff="${3:-0}"
   [[ -d "$dir" ]] || return 0
   local slug_dir
-  find "$dir" -mindepth 2 -maxdepth 2 -name '*.jsonl' -newermt "@$live_cutoff" -printf '%h\n' 2>/dev/null |
+  # 「動いている」は第2引数より新しい（`-newermt`と同じ、含まない）。BSDのfindは`-newermt "@秒"`を解釈できない
+  os_compat_find_mtime "$dir" 2 2 |
+    awk -F'\t' -v live="$live_cutoff" '$1 > live { p = $2; sub(/\/[^\/]*$/, "", p); print p }' |
     sort -u |
     while IFS= read -r slug_dir; do
-      find "$slug_dir" -mindepth 1 -maxdepth 1 -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null
+      os_compat_find_mtime "$slug_dir" 1 1
     done |
     awk -F'\t' -v cutoff="$window_cutoff" '$1 >= cutoff' |
     sort -n |
@@ -101,7 +107,7 @@ session_usage_live_transcripts() {
 codex_session_usage_transcripts() {
   local dir="$1" cutoff="${2:-0}"
   [[ -d "$dir" ]] || return 0
-  find "$dir" -mindepth 4 -maxdepth 4 -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null |
+  os_compat_find_mtime "$dir" 4 4 |
     awk -F'\t' -v cutoff="$cutoff" '$1 >= cutoff' |
     sort -n |
     cut -f2-

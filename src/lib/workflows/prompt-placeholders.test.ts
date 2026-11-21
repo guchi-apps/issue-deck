@@ -141,8 +141,10 @@ describe("無人実行プロンプト", () => {
       const expanded = execFileSync("envsubst", [vars.map((key) => `$\{${key}}`).join(" ")], {
         input: readPrompt(name),
         // envsubstへ渡す変数だけの環境にする。型定義がNODE_ENVを要求するため補う
+        // PATHは`envsubst`の探索用（HomebrewのgettextはLinuxの/usr/binと置き場が違う）。置換は引数で渡した変数だけ
         env: {
           NODE_ENV: "test",
+          PATH: process.env.PATH ?? "",
           ...Object.fromEntries(vars.map((key) => [key, values[key] as string])),
         },
         encoding: "utf8",

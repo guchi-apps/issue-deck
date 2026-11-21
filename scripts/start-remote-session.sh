@@ -152,7 +152,7 @@ if [[ "$MODE" == "sweep" ]]; then
     safe_repo="${repo//[^A-Za-z0-9_-]/-}"
     name="$safe_repo-remote-${dir##*/remote-}"
     printf '%s\n' "$live" | grep -qxF "$name" && continue
-    mtime="$(stat -c %Y "$dir" 2>/dev/null || echo "$now")"
+    mtime="$(stat -c %Y "$dir" 2>/dev/null || stat -f %m "$dir" 2>/dev/null || echo "$now")"
     ((now - mtime >= min_age)) || continue
     remove_worktree "$dir"
   done

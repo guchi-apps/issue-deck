@@ -528,7 +528,8 @@ describe("session_usage_live_transcripts", () => {
   }
 
   it("動いている転記と、同じ作業ディレクトリの範囲内の転記だけを古い順に出す（#3135）", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-"));
+    // macOSの`/var`は`/private/var`への別名。作業ディレクトリの突き合わせは実パスで行うので実パスで組む
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-")));
     tempDirs.push(root);
     const now = 2_000_000_000;
     // 動いている転記（issue-1）と、その写し元になりうる同じ置き場の転記
@@ -550,7 +551,8 @@ describe("session_usage_live_transcripts", () => {
   });
 
   it("動いている転記が無ければ何も出さない", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-"));
+    // macOSの`/var`は`/private/var`への別名。作業ディレクトリの突き合わせは実パスで行うので実パスで組む
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-")));
     tempDirs.push(root);
     const now = 2_000_000_000;
     place(root, "slug-issue-1", "idle", now - 600);

@@ -6,8 +6,7 @@
 // 見ていなかったあいだ、差し替わったセッションでは「アーティファクト」カードが黙って出なかった。
 
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,7 +18,10 @@ const script = path.join(repoRoot, "scripts/session-notify.sh");
 let workDir;
 
 beforeEach(() => {
-  workDir = mkdtempSync(path.join(tmpdir(), "session-notify-artifact-"));
+  // dry-runの出力は先頭300文字で切れる。macOSの`tmpdir()`（`/var/folders/…`）は長く、`sourcePath`が
+  // 300文字の外へ出てしまうので、短い`/tmp`配下に作る。`/tmp`も`/private/tmp`への別名で、フックは
+  // 実パスを送るので実パスで組む（#5549）
+  workDir = realpathSync(mkdtempSync(path.join("/tmp", "sna-")));
   mkdirSync(path.join(workDir, "scratch"), { recursive: true });
   writeFileSync(path.join(workDir, "notify.env"), "");
   writeFileSync(

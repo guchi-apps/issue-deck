@@ -20,6 +20,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = path.join(repoRoot, ".github/workflows/reusable-sync-secrets.yml");
 const workflowYaml = readFileSync(workflowPath, "utf8");
+// Actionsの既定シェルはUbuntuのbash 5。テストはPATHを絞るので、そのままではmacOSの/bin/bash（3.2）が選ばれ、
+// `set -u`下の空配列展開で落ちる。bashだけはテストを動かす側のPATHから決める（#5549）
+const BASH = execFileSync("/bin/sh", ["-c", "command -v bash"], { encoding: "utf8" }).trim();
 
 const SYNC_STEP = "1Password から GitHub へ同期する";
 
@@ -86,7 +89,7 @@ function runSyncStep({ lines, exitCode, env = {} }) {
   let stdout = "";
   let status = 0;
   try {
-    stdout = execFileSync("bash", ["-e", script], {
+    stdout = execFileSync(BASH, ["-e", script], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       env: {

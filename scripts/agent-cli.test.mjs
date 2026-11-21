@@ -175,7 +175,8 @@ describe("agent_cli_codex_writable_dirs", () => {
 
   /** 本体のクローンと、そこから生やしたlinked worktreeを作る */
   function makeRepoWithWorktree() {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-git-"));
+    // macOSの`/var`は`/private/var`への別名。`.git`の判定は実パスで行うので実パスで組む
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-git-")));
     tmpDirs.push(root);
     const main = path.join(root, "main");
     const worktree = path.join(root, "wt");
@@ -444,11 +445,13 @@ describe("agent_cli_codex_sandbox_probe", () => {
   // `codex sandbox`は`--sandbox`を受け取らないので`-c sandbox_mode=`で渡す。
   it("起動と同じサンドボックスのモードで下見する", () => {
     const script = ['#!/bin/bash', 'if [[ "$2" == "--help" ]]; then exit 0; fi', 'echo "$*" >&2', "exit 1"].join("\n");
+    // 下見で動かす`true`はホストに実在するもの（Linuxは`/bin/true`、macOSは`/usr/bin/true`。#5540）
+    const trueBin = fs.existsSync("/bin/true") ? "/bin/true" : "/usr/bin/true";
     expect(probe(script).reason).toBe(
-      "sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- /bin/true",
+      `sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- ${trueBin}`,
     );
     expect(probe(script, { ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }).reason).toBe(
-      "sandbox -c sandbox_mode=danger-full-access -- /bin/true",
+      `sandbox -c sandbox_mode=danger-full-access -- ${trueBin}`,
     );
   });
 

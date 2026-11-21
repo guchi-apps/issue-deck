@@ -129,7 +129,8 @@ fi
 # `--days 7` は「今日を含む直近7日」。日付の境界はローカル時刻で切る。
 CUTOFF=0
 if ((!ALL)); then
-  CUTOFF="$(date -d "$((DAYS > 0 ? DAYS - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
+  CUTOFF="$(date -d "$((DAYS > 0 ? DAYS - 1 : 0)) days ago 00:00" +%s 2>/dev/null ||
+  date -v-"$((DAYS > 0 ? DAYS - 1 : 0))"d -v0H -v0M -v0S +%s 2>/dev/null || echo 0)"
 fi
 
 JSON="$(session_usage_transcripts "$CLAUDE_PROJECTS_DIR" "$CUTOFF" |
@@ -143,7 +144,7 @@ fi
 if ((ALL)); then
   printf '集計期間: 全期間'
 else
-  printf '集計期間: 直近%s日（%s 以降）' "$DAYS" "$(date -d "@$CUTOFF" +%Y-%m-%d 2>/dev/null || echo '?')"
+  printf '集計期間: 直近%s日（%s 以降）' "$DAYS" "$(date -d "@$CUTOFF" +%Y-%m-%d 2>/dev/null || date -r "$CUTOFF" +%Y-%m-%d 2>/dev/null || echo '?')"
 fi
 if [[ -n "$ISSUE_FILTER" ]]; then
   printf '　対象: %s#%s' "$REPO_FILTER" "$ISSUE_FILTER"

@@ -311,7 +311,14 @@ agent_cli_codex_sandbox_probe() {
     probe_args+=(-c sandbox_workspace_write.network_access=true)
   fi
 
-  if output="$("${timeout_args[@]}" "$codex_command" sandbox "${probe_args[@]}" -- /bin/true 2>&1)"; then
+  # 下見で動かす`true`はホストに実在する絶対パスで渡す（#5540）。macOSには`/bin/true`が無く
+  # （`/usr/bin/true`）、サンドボックス自体は組み立てられるのに実行ファイルが無いことで
+  # `broken`と判定されていた。
+  # Linuxは従来どおり`/bin/true`のまま（あればそれを優先する）。
+  local true_bin=/bin/true
+  [[ -x "$true_bin" ]] || true_bin=/usr/bin/true
+
+  if output="$("${timeout_args[@]}" "$codex_command" sandbox "${probe_args[@]}" -- "$true_bin" 2>&1)"; then
     printf 'ok'
     return 0
   fi
