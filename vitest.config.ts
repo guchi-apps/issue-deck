@@ -21,6 +21,12 @@ function resolveMaxWorkers(): number {
   return Math.max(1, Math.min(limit, availableParallelism() - 1));
 }
 
+// Node 25以降はlocalStorageを組み込みで持ち、`--localstorage-file`が無いと`undefined`を返すため、
+// jsdom環境の`window.localStorage`まで隠れて大量のテストが落ちる（macOS・Node 26で実測）。
+// Node側のWeb Storageを無効にしてjsdomのものを使う。Node 22.4未満にはこの旗が無いので付けない。
+const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
+const hasWebStorageFlag = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 4);
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -29,5 +35,6 @@ export default defineConfig({
   },
   test: {
     maxWorkers: resolveMaxWorkers(),
+    execArgv: hasWebStorageFlag ? ["--no-experimental-webstorage"] : [],
   },
 });
