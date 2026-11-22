@@ -84,7 +84,8 @@
 #   DISPATCH_SESSION_MEMORY_RESERVE_MB
 #                                   上の見積りで常に残しておく余白MB（省略時は2048）
 #   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
-#   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
+#   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時はLinuxが50・macOSが80・0で無効）
+#   DISPATCH_CPU_HOLD_PERCENT       起動を見送るCPU使用率（省略時は90・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_FAST_POLL_INTERVAL_SECONDS
 #                                   枠外ジョブだけを取りに行く軽い巡回の秒数（省略時は3・0で無効）
@@ -500,7 +501,14 @@ require_percent() {
 # 別の値にすると「赤いのに起動する」「赤くないのに止まっている」が起きる。
 # SWAPの50%は、平常時（実装セッション6本前後）の実測が20%程度であることから取った値。
 MEMORY_HOLD_PERCENT="$(require_percent DISPATCH_MEMORY_HOLD_PERCENT "${DISPATCH_MEMORY_HOLD_PERCENT:-}" 85)"
-SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" 50)"
+# SWAPの省略時既定はOSで分ける（#5591）。Linuxは固定サイズのSWAPファイルで平常時20%程度のため50。
+# macOSのSWAPは必要に応じて増減する動的ファイルで、総量が小さいまま使用率だけ高く出やすい
+# （Mac miniで2GiB中61%＝1.2GiBでも見送っていた）ため、80まで緩める。
+if os_compat_is_darwin; then SWAP_HOLD_DEFAULT=80; else SWAP_HOLD_DEFAULT=50; fi
+SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" "$SWAP_HOLD_DEFAULT")"
+# CPUの上限（#5591）。90%以上で起動を見送る。瞬間値で揺れるが、見送りは1巡だけで次の巡に自動再開し、
+# 実行中のセッションは落とさない。常時高いホストは0で無効にできる。
+CPU_HOLD_PERCENT="$(require_percent DISPATCH_CPU_HOLD_PERCENT "${DISPATCH_CPU_HOLD_PERCENT:-}" 90)"
 
 # 空きメモリに応じて本数の上限を絞る（#3780）。**0（既定）で無効**＝`DISPATCH_MAX_SESSIONS`のまま。
 # 実効上限は`min(DISPATCH_MAX_SESSIONS, 生きている本数 + (空き - 余白) ÷ 1本あたりの見積り)`。
@@ -1492,7 +1500,7 @@ announce() {
 
   # 集めた使用率から「この巡は起動ジョブを見送るか」を決める（#2095）。**申告と判定を同じ
   # 場所で行う**ので、画面に出る理由と実際の動きが必ず一致する。取れなかった巡は見送らない
-  resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT"
+  resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT" "$CPU_HOLD_PERCENT"
 
   # 空きメモリから本数の上限を絞る（#3780）。**申告する`maxSessions`も実効上限にする**ので、
   # 絞って見送った巡は画面の既存の「上限に達している」表示で理由が出る（issue-deck側は変えない）

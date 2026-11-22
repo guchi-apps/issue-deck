@@ -179,7 +179,7 @@ export function describeDispatchHostMetrics(host: DispatchHostView): DispatchHos
   const memoryPercent = (metrics.memoryUsedMb / metrics.memoryTotalMb) * 100;
   const diskPercent = (metrics.diskUsedGb / metrics.diskTotalGb) * 100;
 
-  return [
+  const rows: DispatchHostMetricRow[] = [
     {
       label: "CPU",
       percent: metrics.cpuPercent,
@@ -202,6 +202,15 @@ export function describeDispatchHostMetrics(host: DispatchHostView): DispatchHos
       tone: resolveHostMetricTone(diskPercent),
     },
   ];
+
+  // 起動を見送っている項目（上限に達した項目）は赤にする（#5591）。使用率だけの色
+  // （60%で橙・85%で赤）だと、上限50%で止まっているのに橙のままで「なぜ止まったか」が読めない。
+  // 閾値は持たず、pollerが申告した見送りの理由だけを根拠にする（判定し直さない）
+  if (host.launchHold) {
+    const heldLabel = formatLaunchHoldReason(host.launchHold.reason);
+    return rows.map((row) => (row.label === heldLabel ? { ...row, tone: "critical" } : row));
+  }
+  return rows;
 }
 
 /**
@@ -238,7 +247,7 @@ export function formatHostMetricPercent(percent: number): string {
  * **どちらも超えている場合、pollerはメモリを出す。** SWAPが増えるのはメモリが足りなくなった
  * 結果なので、原因の側を出した方が「何を畳めばよいか」に繋がる。
  */
-export type DispatchHostLaunchHoldReason = "MEMORY" | "SWAP";
+export type DispatchHostLaunchHoldReason = "MEMORY" | "CPU" | "SWAP";
 
 /**
  * メモリ・SWAPが逼迫しているため、pollerが新しいセッションの起動ジョブを見送っている（#2095）。
@@ -273,7 +282,7 @@ export function parseDispatchHostLaunchHold(value: unknown): DispatchHostLaunchH
   const input = value as Record<string, unknown>;
 
   const reason = input.reason;
-  if (reason !== "MEMORY" && reason !== "SWAP") return null;
+  if (reason !== "MEMORY" && reason !== "CPU" && reason !== "SWAP") return null;
 
   const percent = parseFinite(input.percent, 100);
   const thresholdPercent = parseFinite(input.thresholdPercent, 100);
@@ -284,7 +293,8 @@ export function parseDispatchHostLaunchHold(value: unknown): DispatchHostLaunchH
 
 /** 見送りの理由に出す名前。使用率のメーターのラベル（`describeDispatchHostMetrics`）と揃える */
 function formatLaunchHoldReason(reason: DispatchHostLaunchHoldReason): string {
-  return reason === "MEMORY" ? "メモリ" : "SWAP";
+  if (reason === "MEMORY") return "メモリ";
+  return reason === "CPU" ? "CPU" : "SWAP";
 }
 
 /** 「メモリ 92%（上限 85%）」。見送りを説明する文のどこでも同じ形で出す */

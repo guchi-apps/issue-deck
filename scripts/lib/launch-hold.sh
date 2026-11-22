@@ -35,23 +35,27 @@
 LAUNCH_HOLD_JSON=""
 LAUNCH_HOLD_MESSAGE=""
 
-# 使い方: resolve_launch_hold <metricsのJSON> <メモリの閾値%> <SWAPの閾値%>
+# 使い方: resolve_launch_hold <metricsのJSON> <メモリの閾値%> <SWAPの閾値%> [<CPUの閾値%>]
 #
-# 閾値はどちらも0〜100の整数で、**0はその項目で見送らない**（無効）。
+# 閾値はいずれも0〜100の整数で、**0はその項目で見送らない**（無効）。CPUは省略すると無効（#5591）。
+# 優先順はメモリ→CPU→SWAP（原因の側を先に出す）。
 # 判定できない入力（空・壊れたJSON）では見送らずに正常終了する。
 resolve_launch_hold() {
-  local metrics="$1" memory_threshold="$2" swap_threshold="$3" hold
+  local metrics="$1" memory_threshold="$2" swap_threshold="$3" cpu_threshold="${4:-0}" hold
   LAUNCH_HOLD_JSON=""
   LAUNCH_HOLD_MESSAGE=""
   [[ -n "$metrics" ]] || return 0
 
   hold="$(printf '%s' "$metrics" | jq -c \
     --argjson memoryThreshold "$memory_threshold" \
-    --argjson swapThreshold "$swap_threshold" '
+    --argjson swapThreshold "$swap_threshold" \
+    --argjson cpuThreshold "$cpu_threshold" '
       (if (.memoryTotalMb // 0) > 0 then .memoryUsedMb / .memoryTotalMb * 100 else null end) as $memory |
       (if (.swapTotalMb // 0) > 0 then .swapUsedMb / .swapTotalMb * 100 else null end) as $swap |
       if $memoryThreshold > 0 and $memory != null and $memory >= $memoryThreshold then
         {reason: "MEMORY", percent: $memory, thresholdPercent: $memoryThreshold}
+      elif $cpuThreshold > 0 and (.cpuPercent // null) != null and .cpuPercent >= $cpuThreshold then
+        {reason: "CPU", percent: .cpuPercent, thresholdPercent: $cpuThreshold}
       elif $swapThreshold > 0 and $swap != null and $swap >= $swapThreshold then
         {reason: "SWAP", percent: $swap, thresholdPercent: $swapThreshold}
       else
@@ -61,11 +65,11 @@ resolve_launch_hold() {
 
   LAUNCH_HOLD_JSON="$hold"
   LAUNCH_HOLD_MESSAGE="$(printf '%s' "$hold" | jq -r '
-    (if .reason == "MEMORY" then "メモリ" else "SWAP" end) as $label |
+    (if .reason == "MEMORY" then "メモリ" elif .reason == "CPU" then "CPU" else "SWAP" end) as $label |
     "\($label)が逼迫しているため、起動ジョブは取りに行きません（\($label) \(.percent | round)%・上限 \(.thresholdPercent)%）。"' \
     2>/dev/null)" || LAUNCH_HOLD_MESSAGE=""
   # 文言を組み立てられなくても見送りそのものは成立させる（呼び出し側は`LAUNCH_HOLD_JSON`を見る）
   [[ -n "$LAUNCH_HOLD_MESSAGE" ]] ||
-    LAUNCH_HOLD_MESSAGE="メモリ・SWAPが逼迫しているため、起動ジョブは取りに行きません。"
+    LAUNCH_HOLD_MESSAGE="メモリ・CPU・SWAPが逼迫しているため、起動ジョブは取りに行きません。"
   return 0
 }
