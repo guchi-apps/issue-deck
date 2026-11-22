@@ -3185,3 +3185,16 @@ issue-deck(VPS) --POST /wake(署名付き・本文なし)--> 受信サービス 
   VPS側のログの`ジョブ即時通知を送れませんでした`を見る。tailnetのACL・待ち受けアドレス・時刻のずれ（±60秒）が主な原因
 - 受信サービスが落ちている: 再起動してよい（実行中のセッションは無関係）。直るまでは30秒の定期巡回で動く
 - 通知を止めたい: VPSの`DISPATCH_WAKE_TARGETS`を空にする
+
+
+### セッション詳細の「ターミナルで開く」（#5574）
+
+セッション詳細の「セッションの情報」の下に、そのセッションのtmuxへ入るコマンドをコピーできる欄を出す。
+組み立ては[src/lib/dispatch/session-terminal-command.ts](../../src/lib/dispatch/session-terminal-command.ts)。
+
+- 既定は「そのホスト上で」: `tmux attach -t <セッション名>`（サブPC・Mac miniのターミナルで直接実行する）
+- 「別の端末から（SSH）」: `ssh -t <ホスト識別子> 'exec "$SHELL" -lc "tmux attach -t <セッション名>"'`。
+  ホスト識別子をそのままTailscale MagicDNSの短い名前として使う。非対話のSSHはmacOSでHomebrewのPATHを持たないため、
+  ログインシェル経由でtmuxを見つけさせる
+- ホスト名・セッション名が英数字・`.`・`_`・`-`以外を含むときはコマンドを組み立てず、欄ごと出さない（シェル注入の防止）。
+  消えた（GONE）セッションにも出さない
