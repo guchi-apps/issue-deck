@@ -612,6 +612,35 @@ describe("DispatchHostPanel", () => {
       },
     });
 
+    it("最新でも「poller を再起動」が出て、確認を通した1回だけ積む（#5557）", async () => {
+      const onRequestSelfUpdate = vi.fn().mockResolvedValue({ ok: true });
+      render(
+        <DispatchHostPanel
+          hosts={[
+            {
+              ...BEHIND,
+              liveSessions: 2,
+              checkout: { ...BEHIND.checkout!, behindCount: 0 },
+            },
+          ]}
+          sessions={[]}
+          onRequestSelfUpdate={onRequestSelfUpdate}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+      await act(async () => {
+        screen.getByRole("button", { name: "poller を再起動" }).click();
+      });
+      // 確認の段階ではまだ積まない。セッション数と「止まらない」旨を出す
+      expect(onRequestSelfUpdate).not.toHaveBeenCalled();
+      expect(screen.getByText(/2本/)).toBeTruthy();
+      await act(async () => {
+        screen.getByRole("button", { name: "再起動する" }).click();
+      });
+      expect(onRequestSelfUpdate).toHaveBeenCalledWith("subpc");
+    });
+
     it("押すとホスト名を渡して更新を積む", async () => {
       const onRequestSelfUpdate = vi.fn().mockResolvedValue({ ok: true });
       render(
