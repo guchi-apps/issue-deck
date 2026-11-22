@@ -28,7 +28,7 @@ import { ParentRunBadge, ParentRunChildBadge } from "@/components/dashboard/pare
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
-import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
+import { IssueSessionRuntime } from "@/components/dashboard/issue-session-runtime";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseBulkReserveModelChoice } from "@/lib/app-settings";
@@ -72,7 +72,6 @@ import {
 import {
   describeSessionPermission,
   findSessionForIssue,
-  resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
 import {
@@ -1240,7 +1239,13 @@ export function IssueList({
               #{issue.number} {issue.title}
             </span>
           </p>
-          {attention && <IssueAttentionLine attention={attention} compact />}
+          {attention && (
+            <IssueAttentionLine
+              attention={attention}
+              compact
+              trailing={issueSession ? <IssueSessionRuntime session={issueSession} /> : null}
+            />
+          )}
           {planReviewState && (
             <div>
               <PlanReviewStateBadge state={planReviewState} />
@@ -1279,9 +1284,6 @@ export function IssueList({
                   : undefined
               }
             >
-              {issueSession && (
-                <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
-              )}
               {dependencyWait && <DependencyWaitBadge wait={dependencyWait} />}
               {parentRun && <ParentRunBadge run={parentRun} />}
               {issue.parentRunChild && <ParentRunChildBadge mark={issue.parentRunChild} />}
