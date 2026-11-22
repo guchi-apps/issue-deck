@@ -8,6 +8,11 @@ MYSQL_SOCKET_PATHS=(
 )
 
 is_mysql_listening() {
+  # macOSには`ss`が無く`netstat -tln`も形式が違う（`.3306`区切り）ため
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
   if command -v ss >/dev/null 2>&1; then
     ss -tln 2>/dev/null | grep -q ':3306 '
     return $?
@@ -42,7 +47,39 @@ wait_for_mysql() {
   return 1
 }
 
+start_mysql_macos() {
+  local formula
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "Error: Homebrew が見つかりません。" >&2
+    return 1
+  fi
+  formula="$(brew list --formula 2>/dev/null | grep -E '^mysql(@[0-9.]+)?$' | head -n 1 || true)"
+  if [[ -z "$formula" ]]; then
+    echo "Error: MySQL がインストールされていません。" >&2
+    echo "  → brew install mysql@8.0" >&2
+    return 1
+  fi
+  echo "ローカル MySQL が未起動のため、brew services で起動します（${formula}）..."
+  if ! brew services start "$formula"; then
+    echo "Error: MySQL の起動に失敗しました。" >&2
+    echo "  → brew services start ${formula} を手動で実行してください。" >&2
+    return 1
+  fi
+  if wait_for_mysql; then
+    echo "ローカル MySQL: 起動しました"
+    return 0
+  fi
+  echo "Error: MySQL を起動しましたが、ポート 3306 で応答しません。" >&2
+  echo "  → brew services list で状態を確認してください。" >&2
+  return 1
+}
+
 start_mysql() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    start_mysql_macos
+    return $?
+  fi
+
   if [[ ! -f /etc/init.d/mysql ]]; then
     echo "Error: MySQL がインストールされていません（/etc/init.d/mysql なし）。" >&2
     echo "  → sudo apt install mysql-server" >&2

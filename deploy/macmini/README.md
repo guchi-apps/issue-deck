@@ -61,3 +61,19 @@ LaunchAgent はユーザーのログインセッションで動く。再起動�
 | ログ | journald | `~/Library/Logs/issue-deck/*.log` |
 | ログアウト後の常駐 | `loginctl enable-linger` | 自動ログイン |
 | ホスト名 | 省略時は `hostname -s`（`subpc`） | `DISPATCH_HOST_NAME=macmini` を必ず明示する |
+
+## MySQLを要る統合検証（#5564）
+
+asset-manager・db-consoleのリリース統合検証は、Mac miniでも実行できる。検証スクリプトが使い捨ての`mysqld`を空きポートで起動するので、常駐MySQLの3306・ユーザー・DBは**要らない**（足りない前提は`mysqld`が`PATH`にあることだけ）。
+
+```bash
+brew install mysql@8.0          # 未導入の場合。mysqld・mysqlが/opt/homebrew/binに入る
+command -v mysqld && command -v mysql
+```
+
+開発用に常駐MySQLが要るとき（`scripts/ensure-mysql.sh`は`brew services`で起動する）は、DB・ユーザーを手元で作る。パスワードは1Passwordで管理し、ここへは書かない。
+
+```bash
+brew services start mysql@8.0
+mysql -uroot -e "CREATE DATABASE IF NOT EXISTS <DB名>; CREATE USER IF NOT EXISTS '<ユーザー>'@'localhost' IDENTIFIED BY '<パスワード>'; GRANT ALL ON <DB名>.* TO '<ユーザー>'@'localhost';"
+```
