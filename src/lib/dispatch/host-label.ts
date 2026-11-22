@@ -19,6 +19,18 @@ const HOST_DISPLAY_NAMES: Record<string, string> = {
   macmini: "Mac mini",
 };
 
+/**
+ * メインのホスト。画面の並び順の先頭になり、「実装を開始」の既定の実行先もこのホストに寄る（#5569）。
+ * 以前は名前の昇順（`macmini`＜`subpc`）で返していたため、Mac miniが先頭・既定になっていた。
+ */
+export const PRIMARY_DISPATCH_HOST = "subpc";
+
+/** ホストを表示順（メインのサブPCが先頭、残りは名前順）に並べた新しい配列を返す */
+export function sortDispatchHosts<T extends { name: string }>(hosts: readonly T[]): T[] {
+  const rank = (name: string) => (name.toLowerCase() === PRIMARY_DISPATCH_HOST ? 0 : 1);
+  return [...hosts].sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+}
+
 /** ホスト名を画面に出す表記へ直す。対応表に無ければそのまま返す */
 export function formatDispatchHostName(hostName: string): string {
   return HOST_DISPLAY_NAMES[hostName.toLowerCase()] ?? hostName;

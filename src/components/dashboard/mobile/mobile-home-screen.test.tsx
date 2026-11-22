@@ -332,7 +332,7 @@ describe("MobileHomeScreen（#1690）", () => {
     const { container } = renderHome();
 
     expect(container.querySelector('[data-testid="dispatch-host-skeleton"]')).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe("DeskMiniの状態を読み込み中");
+    expect(screen.getByRole("status").textContent).toBe("ホストの状態を読み込み中");
   });
 
   it("取得が終わればスケルトンを消す（ホストが1台も無くても残さない）", () => {

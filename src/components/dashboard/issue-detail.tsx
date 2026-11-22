@@ -10,7 +10,6 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
-  Play,
   RotateCcw,
   SlidersHorizontal,
   TerminalSquare,
@@ -54,6 +53,7 @@ import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartSplitTrigger } from "@/components/dashboard/start-split-trigger";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import {
   findBlockingSession,
@@ -310,6 +310,9 @@ export function IssueDetail({
     setError: setDeleteError,
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // 「実装を開始」分割ボタン（#5569）。▼で選んだ実行先を選択済みにしてダイアログを開く
+  const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
+  const [startPresetHost, setStartPresetHost] = useState<string | null>(null);
   const {
     createComment,
     updateComment,
@@ -885,12 +888,23 @@ export function IssueDetail({
                   defaultDispatchAgent={defaultDispatchAgent}
                   dispatchFailoverEnabled={dispatchFailoverEnabled}
                   dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                  renderTrigger={(isSubmitting) => (
-                    <Button size="sm" disabled={isSubmitting}>
-                      {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                      {startLabel}
-                    </Button>
-                  )}
+                  open={isStartDialogOpen}
+                  onOpenChange={setIsStartDialogOpen}
+                  presetHost={startPresetHost}
+                />
+              )}
+              {showStartDialog && (
+                <StartSplitTrigger
+                  label={startLabel}
+                  hostNames={dispatch.hosts.map((host) => host.name)}
+                  onStartDefault={() => {
+                    setStartPresetHost(null);
+                    setIsStartDialogOpen(true);
+                  }}
+                  onStartOnHost={(hostName) => {
+                    setStartPresetHost(hostName);
+                    setIsStartDialogOpen(true);
+                  }}
                 />
               )}
               {canCloseQuestion && (

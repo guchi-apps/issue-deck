@@ -134,6 +134,9 @@ type MobileHomeScreenProps = {
  * **PCの左メニュー（`sidebar-nav.tsx`）にはフッターが無く「ブランチ」の唯一の入口なので、
  * そちらには残す**——このためスマホとPCのメニューはこの1行分だけ並びが一致しない。
  */
+/** 取得前のホスト枚数の場所取り（Mac mini・サブPCの2台。#5573） */
+const HOME_HOST_SKELETON_COUNT = 2;
+
 export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "onRefresh" | "isRefreshing">) {
   /*
     引っ張って更新（#2182）もここから配る。**ベル右上の「更新」ボタンと同じ`refresh`**で、
@@ -300,8 +303,9 @@ export function MobileHomeScreenView({
               `[]`なので、スケルトンが無いと届くまでカードごと消え、下のメニューがカード1枚ぶん
               繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ押した指が別の行に当たる。
               出すのは`isLoaded`が立つまでの1回だけで、20秒ごとの取り直しでは出さない
-              （出すと20秒おきにカードが灰色に戻る）。枚数が1枚なのは、台数が取得するまで
-              分からないため——いま申告しているのはDeskMini1台。
+              （出すと20秒おきにカードが灰色に戻る）。枚数は`HOME_HOST_SKELETON_COUNT`（2枚）。台数が取得するまで
+              分からないため、いま申告しているMac miniとDeskMiniの2台に合わせる（1枚だと取得後に
+              2枚目の高さぶん下のボタンが落ちる。#5573）。
 
               **取得に失敗しても`isLoaded`は立ち、スケルトンは消える**（計画レビュー指摘2）。
               失敗は表面化しない作りなので、残すと「読み込み中」の顔のまま止まって見える。
@@ -310,7 +314,7 @@ export function MobileHomeScreenView({
             */}
             {!dispatch.isLoaded ? (
               <div className="mt-2">
-                <CompactHostCardSkeleton />
+                <CompactHostCardSkeleton count={HOME_HOST_SKELETON_COUNT} />
               </div>
             ) : (
               dispatch.hosts.length > 0 && (

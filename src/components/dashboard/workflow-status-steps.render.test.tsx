@@ -220,7 +220,7 @@ describe("WorkflowStepBadge", () => {
     cleanup();
 
     const presented = render(
-      <WorkflowStepBadge labels={labels} projectStatus="Planning" planReviewState="presented" />,
+      <WorkflowStepBadge labels={labels} projectStatus="Planning" planReviewState={null} />,
     );
     expect(hasEmphasizedTrack(presented.container)).toBe(true);
     cleanup();

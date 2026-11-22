@@ -1,5 +1,6 @@
 import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import {
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
@@ -1190,7 +1191,7 @@ export async function enqueueCodeReviewRerun(params: {
   now?: Date;
 }): Promise<EnqueueCodeReviewRerunResult> {
   const now = params.now ?? new Date();
-  const hosts = await db.dispatchHost.findMany({ orderBy: { name: "asc" } });
+  const hosts = sortDispatchHosts(await db.dispatchHost.findMany({ orderBy: { name: "asc" } }));
   const hostName = resolveDefaultCodeReviewHost(
     hosts.map((host) => toHostView(host, now)),
     params.repositoryFullName,
@@ -2460,7 +2461,7 @@ export async function listDispatchState(
   // （#2994）も同じ理由でここへ足す
   const [hosts, jobs, sessions, planRequests, questionRequests, concurrency, agentPause] =
     await Promise.all([
-      db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
+      db.dispatchHost.findMany({ orderBy: { name: "asc" } }).then(sortDispatchHosts),
       db.dispatchJob.findMany({
         where: {
           // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、

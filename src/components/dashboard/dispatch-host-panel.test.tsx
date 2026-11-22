@@ -578,10 +578,25 @@ describe("DispatchHostPanel", () => {
       expect(realClasses.length).toBeGreaterThan(0);
     });
 
+    it("count枚ぶんを実物と同じ縦積みで描く（#5573）", () => {
+      const { container } = render(<CompactHostCardSkeleton count={2} />);
+      expect(screen.getAllByTestId("dispatch-host-skeleton")).toHaveLength(2);
+      expect(container.firstElementChild?.className).toBe("flex flex-col gap-2");
+
+      const real = render(
+        <DispatchHostPanel
+          hosts={[makeHost({ name: "macmini" }), makeHost()]}
+          sessions={[]}
+          compact
+        />,
+      );
+      expect(real.container.firstElementChild?.className).toBe("flex flex-col gap-2");
+    });
+
     it("中身は読み上げず、読み込み中であることだけを渡す", () => {
       render(<CompactHostCardSkeleton />);
 
-      expect(screen.getByRole("status").textContent).toBe("DeskMiniの状態を読み込み中");
+      expect(screen.getByRole("status").textContent).toBe("ホストの状態を読み込み中");
       // 帯の下に敷いた文字（`サブPC`・`CPU`など）は幅を実物へ合わせるためだけのものなので、
       // まとめて`aria-hidden`の中へ入れる
       expect(screen.getByText("CPU").closest("[aria-hidden]")).toBeTruthy();
