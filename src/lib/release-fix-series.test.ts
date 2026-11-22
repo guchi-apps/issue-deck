@@ -76,6 +76,11 @@ describe("reviewFindingKey（#4766）", () => {
 });
 
 describe("classifyIntegrationFailure", () => {
+  it("環境の不足（setup_missing・P1001）は実行障害として扱う（#5561）", () => {
+    expect(classifyIntegrationFailure("実施・失敗（setup_missing・終了コード 1）: npm run verify:build")).toBe("execution");
+    expect(classifyIntegrationFailure("Error: P1001: Can't reach database server at `127.0.0.1:3306`")).toBe("execution");
+  });
+
   it("終了コード126や接続失敗は実行障害", () => {
     expect(classifyIntegrationFailure("command exited with code 126")).toBe("execution");
     expect(classifyIntegrationFailure("connect ECONNREFUSED 127.0.0.1")).toBe("execution");

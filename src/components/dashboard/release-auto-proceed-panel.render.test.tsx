@@ -105,6 +105,13 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
       } as unknown as ReleaseVerificationSummary;
     };
 
+    it("統合検証の失敗が環境の不足なら、自動修正を勧めず環境の案内にする（#5561）", () => {
+      const env = (summary: string) =>
+        ({ ...make({ integration: "failed", review: "passed" }), integration: { state: "failed", summary, reason: null } }) as unknown as ReleaseVerificationSummary;
+      expect(decideAutoProceedMode(env("実施・失敗（setup_missing・終了コード 1）: npm run verify:build\nError: P1001: Can't reach database server"), false)).toBe("environment");
+      expect(decideAutoProceedMode(env("実施・失敗（test_failed・終了コード 1）: npm test\nAssertionError"), false)).toBe("start");
+    });
+
     it("未判断の止める指摘があれば表を出す", () => {
       expect(decideAutoProceedMode(verification(), false)).toBe("table");
     });
