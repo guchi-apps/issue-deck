@@ -28,11 +28,11 @@ const BASE = {
  * 判定を1回実行し、`{json, message}`を返す。見送っていなければどちらも空文字。
  * `metrics`に`null`を渡すと「取れなかった巡」（pollerは空文字を渡す）になる。
  */
-function resolve(metrics, { memory = 85, swap = 50 } = {}) {
+function resolve(metrics, { memory = 85, swap = 50, cpu } = {}) {
   const payload = metrics === null ? "" : JSON.stringify(metrics);
   const script = [
     `source ${JSON.stringify(path.join(repoRoot, "scripts/lib/launch-hold.sh"))}`,
-    `resolve_launch_hold ${JSON.stringify(payload)} ${memory} ${swap}`,
+    `resolve_launch_hold ${JSON.stringify(payload)} ${memory} ${swap}${cpu === undefined ? "" : ` ${cpu}`}`,
     `printf '%s\\n%s\\n' "$LAUNCH_HOLD_JSON" "$LAUNCH_HOLD_MESSAGE"`,
   ].join("\n");
   const stdout = execFileSync("bash", ["-c", script], { encoding: "utf8" });
@@ -77,6 +77,22 @@ describe("resolve_launch_hold（#2095）", () => {
     const noSwap = { ...BASE, swapUsedMb: null, swapTotalMb: null };
     expect(resolve(noSwap).json).toBe("");
     expect(resolve({ ...noSwap, memoryUsedMb: 13000 }).json).toContain('"reason":"MEMORY"');
+  });
+
+  it("CPUが閾値以上なら見送る（#5591）。省略時は無効", () => {
+    const busy = { ...BASE, cpuPercent: 93 };
+    const { json, message } = resolve(busy, { cpu: 90 });
+    expect(JSON.parse(json)).toMatchObject({ reason: "CPU", percent: 93, thresholdPercent: 90 });
+    expect(message).toContain("CPU 93%・上限 90%");
+    expect(resolve({ ...BASE, cpuPercent: 89 }, { cpu: 90 }).json).toBe("");
+    expect(resolve(busy).json).toBe("");
+    expect(resolve(busy, { cpu: 0 }).json).toBe("");
+  });
+
+  it("CPUはSWAPより先、メモリより後に出す", () => {
+    const both = { ...BASE, cpuPercent: 95, swapUsedMb: 3000 };
+    expect(JSON.parse(resolve(both, { cpu: 90 }).json).reason).toBe("CPU");
+    expect(JSON.parse(resolve({ ...both, memoryUsedMb: 13000 }, { cpu: 90 }).json).reason).toBe("MEMORY");
   });
 
   it("閾値0はその項目を無効にする", () => {

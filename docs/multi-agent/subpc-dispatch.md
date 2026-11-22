@@ -1646,7 +1646,9 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
 [`scripts/lib/launch-hold.sh`](../../scripts/lib/launch-hold.sh)の`resolve_launch_hold`が持つ。
 
 - **閾値は`dispatch.env`の設定値**（`DISPATCH_MEMORY_HOLD_PERCENT`・既定85、
-  `DISPATCH_SWAP_HOLD_PERCENT`・既定50。どちらも**0で無効**）。コードに埋め込まないのは
+  `DISPATCH_SWAP_HOLD_PERCENT`・省略時はLinuxが50・macOSが80、`DISPATCH_CPU_HOLD_PERCENT`・既定90。
+  いずれも**0で無効**。#5591でCPUを足し、macOSのSWAPを緩めた。macOSのSWAPは動的ファイルで総量が
+  小さく、50%だと2GiB中1.2GiBでも止まるため）。コードに埋め込まないのは
   `DISPATCH_MAX_SESSIONS`と同じ理由で、ホストの搭載メモリで決まる値だから（#1176）
 - **メモリの既定85%は、画面の使用率が赤くなる境目**（`host-metrics.ts`の`CRITICAL_PERCENT`）
   に合わせてある。見た目の警告と実際の見送りを同じ線に置くためで、別の値にすると
@@ -1660,7 +1662,10 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
   申告と同じ場所で決める**（新しい絞りを足すときも同じ）。1巡の入口で決めた結果を使う
   ぶん、直後の回収（`reap_sessions`）で空いたメモリは次の巡まで反映されないが、ずれは最大で
   ポーリング間隔（既定30秒）——`liveSessions`の申告と同じ性質の遅れ
-- **どちらも超えていれば理由はメモリ。** SWAPが増えるのはメモリが足りなくなった結果なので、
+- **見送った項目は画面でメーターが赤になる**（#5591。`describeDispatchHostMetrics`が申告された
+  `launchHold.reason`の行を`critical`へ上げる。閾値は持たず判定し直さない）。使用率だけの色
+  （60%橙・85%赤）では、上限50%で止まっていても橙のままで理由が読めなかった
+- **複数超えていれば理由はメモリ→CPU→SWAPの順。** SWAPが増えるのはメモリが足りなくなった結果なので、
   原因の側を出した方が読み手の次の行動（何を畳むか）に繋がる
 - **SWAPを持たないホスト（総量0）ではSWAPを見ない。** 割合を出せず、0%として扱うと
   「常に空いている」と読める（画面の`describeSwapRow`と同じ向き）
