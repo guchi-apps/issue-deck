@@ -357,7 +357,7 @@ function ManualStepSessionRunPlan({
             <span className="min-w-0 flex-1 basis-[60%] text-xs">{entry.text}</span>
             <span className="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
               {/* 端末は**それが理由のときだけ**出す。コマンドが1つに定まらない手順に
-                  「サブPC」と付けると、端末のせいで代行できないように読める */}
+                  「DeskMini」と付けると、端末のせいで代行できないように読める */}
               {entry.checked ? (
                 <Badge tone="done">
                   <Check className="size-3" aria-hidden />

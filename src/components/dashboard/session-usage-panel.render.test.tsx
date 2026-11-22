@@ -362,7 +362,7 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
   });
-  it("サブPCのCodex PRレビューを実行場所・エージェント付きで出し、使用量の欠損を$0と出さない（#3995）", () => {
+  it("DeskMiniのCodex PRレビューを実行場所・エージェント付きで出し、使用量の欠損を$0と出さない（#3995）", () => {
     const codex = {
       agent: "codex" as const,
       source: "local" as const,
@@ -871,7 +871,7 @@ describe("SessionUsagePanel", () => {
 
   it("記録が無いときは、報告待ちであることを出す", () => {
     renderPanel(response([]));
-    expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
+    expect(screen.getByText(/記録がありません。DeskMiniまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
   it("Issueを開くと計画・実装・Actionのサマリーを出し、実績の無いフェーズは行を出さない（#2670）", () => {
@@ -963,7 +963,7 @@ describe("SessionUsagePanel", () => {
       renderPanel(response([entry()]));
       const heading = screen.getByRole("heading", { name: "AI使用量" });
       const header = heading.parentElement as HTMLElement;
-      expect(within(header).getByText(/サブPC から/)).toBeTruthy();
+      expect(within(header).getByText(/DeskMini から/)).toBeTruthy();
       const refresh = within(header).getByRole("button", { name: "更新" });
       expect(header.lastElementChild).toBe(refresh);
       expect(screen.queryByText(/GitHub Actionsが使ったトークン/)).toBeNull();

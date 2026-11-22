@@ -12,7 +12,7 @@ function run(overrides: Partial<ManualStepRunView> = {}): ManualStepRunView {
   return {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
-    issueTitle: "[手作業] サブPC: pollerを再起動する",
+    issueTitle: "[手作業] DeskMini: pollerを再起動する",
     issueId: "issue-1",
     targetHost: "subpc",
     status: "RUNNING",

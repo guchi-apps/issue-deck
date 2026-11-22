@@ -105,7 +105,7 @@ LOCK_DIR=""
 cleanup() {
   local code=$?
   if ((code != 0)); then
-    finish failed "統合検証の実行中に失敗しました（終了コード ${code}）。サブPCのtmuxセッション ${TMUX_SESSION_NAME:-不明}を確認してください。"
+    finish failed "統合検証の実行中に失敗しました（終了コード ${code}）。DeskMiniのtmuxセッション ${TMUX_SESSION_NAME:-不明}を確認してください。"
   fi
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
     clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"

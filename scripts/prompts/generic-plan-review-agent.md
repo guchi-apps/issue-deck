@@ -52,7 +52,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>.<拡張子>`�
 画像が複数あるときは、`gh issue view <番号> --json body,comments --jq '.body, .comments[].body' | <上のスクリプト> -`のように本文をまとめて渡すと、URLを書き写さずに全部取得できます。
 
 **画像の配信は認証が必要で、URLを`WebFetch`・`curl`で直接読んでも401になります**（#2967）。
-このスクリプトはサブPCの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境
+このスクリプトはDeskMiniの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境
 （`画像の取得先（APP_BASE_URL）か鍵（DISPATCH_SECRET）が見つかりません`と出る）だけは、画像を読めないものとして進めてください（鍵を探したり、別の方法で取得を
 試みたりしないでください）。
 

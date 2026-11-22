@@ -91,7 +91,7 @@ describe("loadOrGenerateRecommendations", () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it("サブPCが受け取らなかった・時間切れの失敗は、次に開いたときに自動で作り直す（#5268）", async () => {
+  it("DeskMiniが受け取らなかった・時間切れの失敗は、次に開いたときに自動で作り直す（#5268）", async () => {
     for (const kind of ["not_claimed", "timeout"] as const) {
       findMany.mockResolvedValue([row("R-1", { status: "failed", recommended: null, error: describeAppAiCodexError(kind) })]);
       const generate = vi.fn(async (batch: RecommendationTarget[]) => generated(batch.map((t) => t.id)));

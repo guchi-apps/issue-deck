@@ -171,7 +171,7 @@ describe("Codexレビューの状態を取得する", () => {
   });
 
   it("キュー待ち・実行中は pending（結果を待たずに判定を保留できる）", () => {
-    const out = status(api({ state: "pending", message: "サブPCの受け取り待ちです。" }));
+    const out = status(api({ state: "pending", message: "DeskMiniの受け取り待ちです。" }));
     expect(out.result).toBe("pending");
     expect(out.reason).toContain("受け取り待ち");
   });
@@ -182,7 +182,7 @@ describe("Codexレビューの状態を取得する", () => {
   });
 
   it("失敗・時間切れは failed と理由を返す（自動マージしない側）", () => {
-    const out = status(api({ state: "failed", reason: "サブPCからの応答が途絶えたためタイムアウトしました。" }));
+    const out = status(api({ state: "failed", reason: "DeskMiniからの応答が途絶えたためタイムアウトしました。" }));
     expect(out.result).toBe("failed");
     expect(out.reason).toContain("タイムアウト");
   });
@@ -234,19 +234,19 @@ describe("Codexレビューの状態を取得する", () => {
   });
 });
 
-describe("CodexレビューをサブPCへ依頼する", () => {
+describe("CodexレビューをDeskMiniへ依頼する", () => {
   function request(extra = {}) {
     const { env, outputPath } = baseEnv({
       BASE_SHA: "c".repeat(40),
       RUN_ID: "123456",
       APP_BASE_URL: "https://deck.example.com",
       PROGRESS_REPORT_SECRET: "s",
-      ...api({ state: "pending", message: "サブPCの受け取り待ちです。" }),
+      ...api({ state: "pending", message: "DeskMiniの受け取り待ちです。" }),
       ...extra,
     });
     let exitCode = 0;
     try {
-      execFileSync("bash", ["-e", "-c", extractRunScript("CodexレビューをサブPCへ依頼する（結果は待たない）")], {
+      execFileSync("bash", ["-e", "-c", extractRunScript("CodexレビューをDeskMiniへ依頼する（結果は待たない）")], {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -264,13 +264,13 @@ describe("CodexレビューをサブPCへ依頼する", () => {
     expect(sent).toMatchObject({ action: "request", pullRequest: 3990, headSha: HEAD, agent: "codex", runId: "123456" });
   });
 
-  it("実行できるサブPCが無ければ、その場で理由つきで失敗する（30分待たない）", () => {
+  it("実行できるDeskMiniが無ければ、その場で理由つきで失敗する（30分待たない）", () => {
     const { exitCode, outputs } = request({
       STUB_API_CODE: "409",
-      ...api({ message: "PRレビューを実行できるサブPCがありません" }),
+      ...api({ message: "PRレビューを実行できるDeskMiniがありません" }),
     });
     expect(exitCode).toBe(1);
-    expect(outputs.reason).toContain("サブPCがありません");
+    expect(outputs.reason).toContain("DeskMiniがありません");
   });
 
   it("移行前の実装が判定済みなら、依頼しない", () => {
@@ -289,7 +289,7 @@ describe("CodexレビューをサブPCへ依頼する", () => {
   });
 
   it("結果を待つループを持たない", () => {
-    const script = extractRunScript("CodexレビューをサブPCへ依頼する（結果は待たない）");
+    const script = extractRunScript("CodexレビューをDeskMiniへ依頼する（結果は待たない）");
     expect(script).not.toMatch(/sleep|seq 1/);
   });
 });
@@ -323,7 +323,7 @@ describe("マージ保留の判定を反映する（Codexの結果）", () => {
   });
 
   it("失敗は自動マージせず、01.check-blockedで人へ渡す", () => {
-    const { outputs, log } = hold("failed", { CODEX_FAILURE_REASON: "サブPCからの応答が途絶えたためタイムアウトしました。" });
+    const { outputs, log } = hold("failed", { CODEX_FAILURE_REASON: "DeskMiniからの応答が途絶えたためタイムアウトしました。" });
     expect(outputs.waiting).toBeUndefined();
     expect(log).toContain("--add-label 00.check-user");
     expect(log).toContain("--add-label 01.check-blocked");
@@ -366,7 +366,7 @@ describe("ワークフロー変更PRの代替Codexレビュー（#4149）", () =
     });
     let exitCode = 0;
     try {
-      execFileSync("bash", ["-e", "-c", extractRunScript("CodexレビューをサブPCへ依頼する（結果は待たない）")], {
+      execFileSync("bash", ["-e", "-c", extractRunScript("CodexレビューをDeskMiniへ依頼する（結果は待たない）")], {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -383,11 +383,11 @@ describe("ワークフロー変更PRの代替Codexレビュー（#4149）", () =
     expect(outputs.requested).toBe("true");
   });
 
-  it("サブPCへ届かなくても失敗させず、requested=false と理由を返す", () => {
-    const { exitCode, outputs } = request({ STUB_API_CODE: "409", ...api({ message: "PRレビューを実行できるサブPCがありません" }) });
+  it("DeskMiniへ届かなくても失敗させず、requested=false と理由を返す", () => {
+    const { exitCode, outputs } = request({ STUB_API_CODE: "409", ...api({ message: "PRレビューを実行できるDeskMiniがありません" }) });
     expect(exitCode).toBe(0);
     expect(outputs.requested).toBe("false");
-    expect(outputs.reason).toContain("サブPCがありません");
+    expect(outputs.reason).toContain("DeskMiniがありません");
   });
 
   it("接続設定の無い配布先でも失敗させない", () => {

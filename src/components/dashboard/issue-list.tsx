@@ -1170,7 +1170,7 @@ export function IssueList({
             </span>
             {/* 進捗が円（18px）から横棒（40px）になり、右側のクラスタが22px広くなった（#2516）。
                 `shrink-0`のままだと、一覧カラムを最小幅（280px）まで詰めたときに逃げ場が無く
-                行からはみ出す。縮められるようにして、**添える字（「実装中（サブPC）」）だけが
+                行からはみ出す。縮められるようにして、**添える字（「実装中（DeskMini）」）だけが
                 切り詰められる**ようにする（アイコン・バー・アバターは`shrink-0`のまま） */}
             <span className="flex min-w-0 items-center gap-1.5">
               <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />

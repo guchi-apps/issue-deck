@@ -36,7 +36,7 @@ describe("resolveExecutionFlows", () => {
       }),
       expect.objectContaining({
         name: "自動計画レビュー（Claude Codeで開始後）",
-        location: "サブPC",
+        location: "DeskMini",
         agent: "Codex CLI",
         model: "GPT-6 Sol",
       }),
@@ -62,19 +62,19 @@ describe("resolveExecutionFlows", () => {
 describe("原因診断の実行基盤表示（#4143）", () => {
   const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
 
-  it("GPT系はアプリ内AIの各機能をサブPCのCodex CLIで実行すると表示する（#5067）", () => {
+  it("GPT系はアプリ内AIの各機能をDeskMiniのCodex CLIで実行すると表示する（#5067）", () => {
     const flows = resolveExecutionFlows({ ...settings, appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra", modelPickEngine: "app-ai" });
     for (const name of [
       "原因診断（チャット調査）",
       "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨",
       "要約・検索・文章整理・Issue作成補助・手作業アシスタント",
     ]) {
-      expect(find(flows, name)).toEqual(expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }));
+      expect(find(flows, name)).toEqual(expect.objectContaining({ location: "DeskMini", agent: "Codex CLI（ChatGPTサブスク）" }));
     }
     const routine = find(flows, "要約・検索・文章整理・Issue作成補助・手作業アシスタント");
     expect(routine.model).toContain("GPT-6 Luna");
     // 画像入力もCodexで動くこと（#5068）と、Claudeへ戻さないことを明記する
-    expect(routine.note).toContain("画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります");
+    expect(routine.note).toContain("画像からの変更内容の抽出も、画像をDeskMiniへ渡してCodex CLIで読み取ります");
     expect(routine.note).toContain("Claudeへは切り替えません");
     expect(find(flows, "おまかせのモデル選択・Issueラベル判定").note).toContain("ルール");
   });
@@ -112,7 +112,7 @@ describe("resolveProviderFlowRows", () => {
     const plan = rows.find((row) => row.step === "計画")!;
 
     expect(plan.entries).toEqual([
-      expect.objectContaining({ label: "サブPC", agent: "Codex CLI", model: "GPT-5.6 Terra", binding: "provider" }),
+      expect.objectContaining({ label: "DeskMini", agent: "Codex CLI", model: "GPT-5.6 Terra", binding: "provider" }),
       expect.objectContaining({ label: "GitHub Actions", agent: "Codex Action", model: "GPT-5.6 Terra", binding: "provider" }),
     ]);
     expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(

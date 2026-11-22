@@ -235,7 +235,7 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
   });
 
-  it("GPT系が選ばれた機能はサブPCのCodex CLIで実行し、Claude APIにもOpenAI APIにもリクエストしない（#5067）", async () => {
+  it("GPT系が選ばれた機能はDeskMiniのCodex CLIで実行し、Claude APIにもOpenAI APIにもリクエストしない（#5067）", async () => {
     findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";
     const fetchMock = vi.fn();
@@ -268,7 +268,7 @@ describe("callClaudeMessages", () => {
     findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    runAppAiOnCodex.mockRejectedValue(new Error("Codex CLIで実行できませんでした: サブPCのCodex CLIがログインしていません"));
+    runAppAiOnCodex.mockRejectedValue(new Error("Codex CLIで実行できませんでした: DeskMiniのCodex CLIがログインしていません"));
 
     await expect(
       callClaudeMessages({ feature: "issue_search", token: "codex-cli", body: { max_tokens: 16, messages: [] } }),

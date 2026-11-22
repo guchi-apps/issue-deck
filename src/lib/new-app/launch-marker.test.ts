@@ -80,7 +80,7 @@ describe("マーカー", () => {
     );
     const guide = parseManualStepGuide(body);
     expect(guide.hasTemplate).toBe(true);
-    expect(guide.where.defaultDevice).toBe("サブPC");
+    expect(guide.where.defaultDevice).toBe("DeskMini");
     const plan = buildManualStepRunPlan(body, undefined, {
       host: { online: true, manualStepCapable: true, manualStepValuesCapable: true, manualStepVpsCapable: true },
       isManualStepIssue: true,

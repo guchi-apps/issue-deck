@@ -150,7 +150,7 @@ describe("SessionStallPanel", () => {
   it("送信に失敗した理由は押した場所に出す", async () => {
     const sendSessionRecovery = vi
       .fn()
-      .mockResolvedValue({ ok: false, message: "サブPCが応答していません。" });
+      .mockResolvedValue({ ok: false, message: "DeskMiniが応答していません。" });
     const preset = describeSessionStall(makeSession())!.presets[0];
     render(
       <SessionStallPanel
@@ -162,7 +162,7 @@ describe("SessionStallPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(preset.label) }));
 
     await waitFor(() => {
-      expect(screen.getByText("サブPCが応答していません。")).toBeTruthy();
+      expect(screen.getByText("DeskMiniが応答していません。")).toBeTruthy();
     });
   });
 

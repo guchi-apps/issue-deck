@@ -323,7 +323,7 @@ local_repo_print_error() {
       echo "  次の1行を足し、約束を満たすようにしてください:" >&2
       echo "    # issue-deck-local-session: v$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" >&2
       echo "  約束の内容は issue-deck の docs/multi-agent/local-quick-start.md を参照してください。" >&2
-      echo "  サブPCからの起動であれば、issue-deckのチェックアウトを最新化すれば汎用ランチャーで起動できます" >&2
+      echo "  DeskMiniからの起動であれば、issue-deckのチェックアウトを最新化すれば汎用ランチャーで起動できます" >&2
       echo "  （docs/multi-agent/generic-launcher.md）。" >&2
       ;;
     contract_too_new)

@@ -2067,7 +2067,7 @@ describe("enqueueManualStepSessionJob", () => {
 describe("enqueueManualStepJob", () => {
   const MANUAL_STEP_BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること
@@ -2273,8 +2273,8 @@ describe("enqueueManualStepJob", () => {
   });
 
   // 1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
-  it("実行するデバイスがサブPC・VPSでなければ積まない", async () => {
-    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**ブラウザ**") });
+  it("実行するデバイスがDeskMini・VPSでなければ積まない", async () => {
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**DeskMini**", "**ブラウザ**") });
     const result = await run();
 
     expect(result.ok).toBe(false);
@@ -2285,7 +2285,7 @@ describe("enqueueManualStepJob", () => {
   // #2901。VPSの手順はサブPCからSSHで実行する。**ジョブに実行先を載せる**ので、
   // pollerは接続先を自分の設定から引ける（issue-deckは接続先を知らない）
   it("VPSの手順は実行先をジョブに載せて積む", async () => {
-    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**VPS**") });
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**DeskMini**", "**VPS**") });
     dispatchHostFindUnique.mockResolvedValue(
       host({ manualStepCapable: true, manualStepVpsCapable: true }),
     );

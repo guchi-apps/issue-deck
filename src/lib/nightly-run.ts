@@ -267,7 +267,7 @@ export function classifyNightlyRunOutcome(input: {
     return { kind: "bad", detail: "セッションを起動できませんでした" };
   }
   if (job?.status === "QUEUED" || job?.status === "CLAIMED" || job?.status === "RUNNING") {
-    return { kind: "run", detail: "サブPCでの起動を待っています" };
+    return { kind: "run", detail: "DeskMiniでの起動を待っています" };
   }
   return { kind: "run", detail: "状態を確認しています" };
 }
@@ -483,8 +483,8 @@ export function resolveBulkReserveRejection(input: {
   if (labelRejection) return labelRejection;
   if (!input.hasHost) {
     return input.agent === "codex"
-      ? "このリポジトリをCodexで実行できるサブPCがありません"
-      : "このリポジトリを実行できるサブPCが登録されていません";
+      ? "このリポジトリをCodexで実行できるローカルのホストがありません"
+      : "このリポジトリを実行できるローカルのホストが登録されていません";
   }
   return null;
 }

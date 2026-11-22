@@ -12,7 +12,7 @@ import { parseManualStepGuide } from "@/lib/manual-step-guide";
 const job = (targetHost: string, command: string) => ({ targetHost, command });
 
 describe("全ホストで揃える手作業の適用状況（#5568）", () => {
-  it("Mac miniだけ確認が通っていれば「MacMini 済／サブPC 未適用」で、全ホスト済みではない", () => {
+  it("Mac miniだけ確認が通っていれば「Mac mini 済／DeskMini 未適用」で、全ホスト済みではない", () => {
     const applications = computeManualStepHostApplications({
       commands: ["test -f ~/a", "test -f ~/b"],
       hosts: ["subpc", "macmini"],
@@ -22,7 +22,7 @@ describe("全ホストで揃える手作業の適用状況（#5568）", () => {
       { host: "macmini", applied: true },
       { host: "subpc", applied: false },
     ]);
-    expect(describeManualStepHostApplications(applications)).toBe("MacMini 済／サブPC 未適用");
+    expect(describeManualStepHostApplications(applications)).toBe("Mac mini 済／DeskMini 未適用");
     expect(isManualStepAppliedOnAllHosts(applications)).toBe(false);
   });
 
@@ -35,7 +35,7 @@ describe("全ホストで揃える手作業の適用状況（#5568）", () => {
     expect(entry.applied).toBe(false);
   });
 
-  it("両方のホストで通れば全ホスト済み。サブPCが戻って実行されると揃う", () => {
+  it("両方のホストで通れば全ホスト済み。DeskMiniが戻って実行されると揃う", () => {
     const applications = computeManualStepHostApplications({
       commands: ["a"],
       hosts: ["macmini", "subpc"],

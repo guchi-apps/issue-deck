@@ -244,7 +244,7 @@ describe("describePreviewRejection（#2455）", () => {
     const message = describePreviewRejection("preview_unsupported");
     expect(message).toContain("実行キュー");
     expect(message).toContain("実行状況");
-    expect(message).toContain("サブPCのカード");
+    expect(message).toContain("DeskMiniのカード");
     expect(message).toContain("「更新して再起動」");
   });
 });
@@ -430,7 +430,7 @@ describe("resolvePreviewOpenState（#5495）", () => {
     expect(state.kind).toBe("starting");
   });
 
-  it("サブPCが応答しない・開発サーバーが無いなら blocked", () => {
+  it("DeskMiniが応答しない・開発サーバーが無いなら blocked", () => {
     expect(
       resolvePreviewOpenState({
         host: host({ online: false }),

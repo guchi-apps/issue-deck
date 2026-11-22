@@ -98,7 +98,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     tmuxSessionName: "issue-deck-issue-1567",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1567,
-    issueTitle: "サブPC上のセッション表示とリソース使用率の表示機能",
+    issueTitle: "DeskMini上のセッション表示とリソース使用率の表示機能",
     issueId: null,
     state: "ALIVE",
     exitStatus: null,
@@ -143,7 +143,7 @@ describe("DispatchHostPanel", () => {
 
   it("ホスト名・セッション本数・使用率を出す", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
-    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("DeskMini")).toBeTruthy();
     expect(screen.getByText("セッション 2/12")).toBeTruthy();
     expect(screen.getByText("34%")).toBeTruthy();
     expect(screen.getByText("39%・12.4 / 31.9 GB")).toBeTruthy();
@@ -181,7 +181,7 @@ describe("DispatchHostPanel", () => {
   // 従来は本数しか出ておらず、その中身は`tmux ls`かops-dashboardでしか見られなかった（#1567）
   it("動いているセッションを番号とタイトルで出す", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} />);
-    expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
+    expect(screen.getByText("#1567 DeskMini上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
     expect(screen.getByText("issue-deck・実行中・たった今")).toBeTruthy();
   });
 
@@ -330,7 +330,7 @@ describe("DispatchHostPanel", () => {
     );
 
     const button = screen.getByLabelText(
-      "#1567 サブPC上のセッション表示とリソース使用率の表示機能をissue-deckで開く",
+      "#1567 DeskMini上のセッション表示とリソース使用率の表示機能をissue-deckで開く",
     );
     button.click();
     expect(onOpenIssue).toHaveBeenCalledWith("issue-1567");
@@ -348,7 +348,7 @@ describe("DispatchHostPanel", () => {
     );
 
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
+    expect(screen.getByText("#1567 DeskMini上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
   });
 
   // スマホのホーム画面など、遷移先を持たない置き方でも表示だけは従来どおり出す
@@ -369,7 +369,7 @@ describe("DispatchHostPanel", () => {
         ]}
       />,
     );
-    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("DeskMini")).toBeTruthy();
     expect(screen.getByText("mainpc")).toBeTruthy();
     expect(screen.getByText("#1")).toBeTruthy();
     expect(screen.getByText("#2")).toBeTruthy();
@@ -418,7 +418,7 @@ describe("DispatchHostPanel", () => {
       render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} compact />);
 
       expect(
-        screen.queryByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能"),
+        screen.queryByText("#1567 DeskMini上のセッション表示とリソース使用率の表示機能"),
       ).toBeNull();
     });
 
@@ -502,7 +502,7 @@ describe("DispatchHostPanel", () => {
         />,
       );
 
-      screen.getByRole("button", { name: "サブPCの実行状況を開く" }).click();
+      screen.getByRole("button", { name: "DeskMiniの実行状況を開く" }).click();
       expect(onOpenDetail).toHaveBeenCalledTimes(1);
     });
 
@@ -600,7 +600,7 @@ describe("DispatchHostPanel", () => {
       // 帯の下に敷いた文字（`サブPC`・`CPU`など）は幅を実物へ合わせるためだけのものなので、
       // まとめて`aria-hidden`の中へ入れる
       expect(screen.getByText("CPU").closest("[aria-hidden]")).toBeTruthy();
-      expect(screen.getByText("サブPC").closest("[aria-hidden]")).toBeTruthy();
+      expect(screen.getByText("DeskMini").closest("[aria-hidden]")).toBeTruthy();
     });
   });
 
@@ -1053,7 +1053,7 @@ describe("セッション終了（#4881）", () => {
   });
 
   it("終了を積めなかったときは理由を行に出す", async () => {
-    const onClose = vi.fn().mockResolvedValue({ ok: false, message: "サブPCがオフラインです。" });
+    const onClose = vi.fn().mockResolvedValue({ ok: false, message: "DeskMiniがオフラインです。" });
     render(
       <DispatchHostPanel
         hosts={[makeHost()]}
@@ -1065,7 +1065,7 @@ describe("セッション終了（#4881）", () => {
     await act(async () =>
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "セッション終了" }).click(),
     );
-    expect(screen.getByText("サブPCがオフラインです。")).toBeTruthy();
+    expect(screen.getByText("DeskMiniがオフラインです。")).toBeTruthy();
   });
 });
 
@@ -1140,7 +1140,7 @@ describe("リモートセッション（#4836）", () => {
   });
 
   it("終了を積めなかったときは理由を行の下に出す", async () => {
-    const onStop = vi.fn().mockResolvedValue({ ok: false, message: "サブPCがオフラインのため終了できません。" });
+    const onStop = vi.fn().mockResolvedValue({ ok: false, message: "DeskMiniがオフラインのため終了できません。" });
     render(
       <DispatchHostPanel
         hosts={[makeHost()]}
@@ -1151,7 +1151,7 @@ describe("リモートセッション（#4836）", () => {
     );
     act(() => screen.getByRole("button", { name: "myroomのリモートセッションを終了する" }).click());
     await act(async () => screen.getByRole("button", { name: "終了する" }).click());
-    expect(screen.getByText("サブPCがオフラインのため終了できません。")).toBeTruthy();
+    expect(screen.getByText("DeskMiniがオフラインのため終了できません。")).toBeTruthy();
   });
 
   it("終了中の行の終了ボタンは押せない・受け取り手が無ければボタンを出さない", () => {

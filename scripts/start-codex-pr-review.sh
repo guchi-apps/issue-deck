@@ -53,7 +53,7 @@ report_finish() {
 on_exit() {
   local code=$?
   if ((code != 0)); then
-    report_finish failed "${JOB_FAILURE_NOTE}（終了コード ${code}）。サブPCの実行ログ（tmuxセッション ${TMUX_SESSION_NAME:-不明}）を確認してください。"
+    report_finish failed "${JOB_FAILURE_NOTE}（終了コード ${code}）。DeskMiniの実行ログ（tmuxセッション ${TMUX_SESSION_NAME:-不明}）を確認してください。"
   fi
 }
 
@@ -164,7 +164,7 @@ run_review() {
       *) failure_message="Codexの出力から有効な判定（lgtm / needs-check / changes-requested）を読み取れませんでした。" ;;
     esac
     cat >"$output_file" <<EOF
-⚠️ Codexによるレビューを完了できなかったか、有効な判定を取得できませんでした。サブPCの実行ログを確認してください。
+⚠️ Codexによるレビューを完了できなかったか、有効な判定を取得できませんでした。DeskMiniの実行ログを確認してください。
 
 <!-- issue-deck-codex-review-verdict:failed sha=$head_sha -->
 $SOURCE_MARKER

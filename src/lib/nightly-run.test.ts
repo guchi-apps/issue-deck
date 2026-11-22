@@ -371,7 +371,7 @@ describe("resolveBulkReserveRejection", () => {
     expect(
       resolveBulkReserveRejection({ ...base, labels: [{ name: "25.artifact-required" }] }),
     ).toContain("デザインを提示");
-    expect(resolveBulkReserveRejection({ ...base, hasHost: false })).toContain("サブPC");
+    expect(resolveBulkReserveRejection({ ...base, hasHost: false })).toContain("ローカルのホスト");
   });
 });
 

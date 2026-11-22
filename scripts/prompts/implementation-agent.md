@@ -41,7 +41,7 @@ scripts/fetch-issue-images.sh "<画像URL>"
 
 **画像の配信は認証が必要で、URLを`WebFetch`・`curl`で直接読んでも401になります**（URLが公開
 リポジトリの本文に載るため、本人とAI以外には見せない作りにしてあります。#2967）。このスクリプトは
-サブPCの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境（`画像の取得先（APP_BASE_URL）か鍵（DISPATCH_SECRET）が見つかりません`と出る）
+DeskMiniの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境（`画像の取得先（APP_BASE_URL）か鍵（DISPATCH_SECRET）が見つかりません`と出る）
 だけは、画像を読めないものとして進めてください（鍵を探したり、別の方法で取得を試みたりしないでください）。
 
 ### 並行して動いているもの

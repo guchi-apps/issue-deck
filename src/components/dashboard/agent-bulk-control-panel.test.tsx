@@ -98,7 +98,7 @@ function openDetail(name: string) {
 }
 
 describe("AgentBulkControlPanel", () => {
-  it("申告しているサブPCが無ければ何も出さない", () => {
+  it("申告しているDeskMiniが無ければ何も出さない", () => {
     const { container } = render(<AgentBulkControlPanel dispatch={makeDispatch({ hosts: [] })} />);
     expect(container.firstChild).toBeNull();
   });
@@ -288,7 +288,7 @@ describe("AgentBulkControlPanel", () => {
   it("再開に失敗した理由は押した場所に出す", async () => {
     const resumeAgentSessions = vi
       .fn()
-      .mockResolvedValue({ ok: false, message: "サブPCがオフラインです" });
+      .mockResolvedValue({ ok: false, message: "DeskMiniがオフラインです" });
     render(
       <AgentBulkControlPanel
         dispatch={makeDispatch({
@@ -302,6 +302,6 @@ describe("AgentBulkControlPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Claude Codeを再開" }));
     fireEvent.click(await screen.findByRole("button", { name: "再開する" }));
 
-    expect(await screen.findByText("サブPCがオフラインです")).not.toBeNull();
+    expect(await screen.findByText("DeskMiniがオフラインです")).not.toBeNull();
   });
 });

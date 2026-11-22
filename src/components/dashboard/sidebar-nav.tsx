@@ -645,7 +645,7 @@ export function SidebarNavView({
               emphasis: previewRunning ? "attention" : "none",
               title: previewRunning
                 ? "確認環境が動いています"
-                : "developの最新をサブPCで動かして画面で確かめる",
+                : "developの最新をDeskMiniで動かして画面で確かめる",
             })}
         </ul>
       </div>
@@ -680,7 +680,7 @@ export function SidebarNavView({
           icon: Gauge,
           active: activePane === "usage",
           onClick: onSelectUsage,
-          title: "サブPCのローカルセッションが使ったトークンを見る",
+          title: "DeskMiniのローカルセッションが使ったトークンを見る",
         })}
       </ul>
     </nav>

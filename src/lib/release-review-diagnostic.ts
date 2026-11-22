@@ -119,7 +119,7 @@ export function readReleaseReviewDiagnostic(
 }
 
 const CAUSE_LABEL: Record<ReviewDiagnosticCause, string> = {
-  no_host: "実行できるサブPCがありません",
+  no_host: "実行できるローカルのホストがありません",
   target_missing: "対象のコミットを取得できませんでした",
   launch_failed: "AI CLIを起動できませんでした",
   auth_failed: "AIの認証に失敗しました",
@@ -130,21 +130,21 @@ const CAUSE_LABEL: Record<ReviewDiagnosticCause, string> = {
 };
 
 const CAUSE_ACTION: Record<ReviewDiagnosticCause, string> = {
-  no_host: "サブPCのオンライン状態とpollerの対応（全体レビュー・担当AI・リポジトリ登録）を確認してから、再実行してください。",
-  target_missing: "対象のコミットがサブPCから取得できていません。ネットワークとリポジトリの取得状況を確認してから、再実行してください。",
+  no_host: "ローカルのホストのオンライン状態とpollerの対応（全体レビュー・担当AI・リポジトリ登録）を確認してから、再実行してください。",
+  target_missing: "対象のコミットがDeskMiniから取得できていません。ネットワークとリポジトリの取得状況を確認してから、再実行してください。",
   launch_failed:
-    "サブPCでAI CLI（claude／codex）が実行できる状態か（インストール・実行権限・PATH）を確認してから、再実行してください。",
-  auth_failed: "サブPCのAI CLIのログイン状態を確認し、再ログインしてから再実行してください。",
+    "DeskMiniでAI CLI（claude／codex）が実行できる状態か（インストール・実行権限・PATH）を確認してから、再実行してください。",
+  auth_failed: "DeskMiniのAI CLIのログイン状態を確認し、再ログインしてから再実行してください。",
   timeout: "差分が大きいか、AIの応答が遅れています。時間をおいて再実行してください。繰り返す場合は差分を分けることを検討してください。",
   turn_limit:
-    "AIが確認を終える前に、1回の呼び出しのターン数の上限に達しました。完了したバッチは保存済みなので、まず再実行してください。繰り返す場合はサブPCの`ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS`を上げるか、`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`を下げてバッチを小さくしてください。",
+    "AIが確認を終える前に、1回の呼び出しのターン数の上限に達しました。完了したバッチは保存済みなので、まず再実行してください。繰り返す場合はDeskMiniの`ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS`を上げるか、`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`を下げてバッチを小さくしてください。",
   parse_failed: "AIの応答がJSONになっていませんでした。一時的なことが多いので、まず再実行してください。",
   unknown:
-    "コードへの指摘ではありません。サブPCの環境（AI CLI・ログイン・ディスク）を確認したうえで、再実行してください。",
+    "コードへの指摘ではありません。DeskMiniの環境（AI CLI・ログイン・ディスク）を確認したうえで、再実行してください。",
 };
 
 const TURN_LIMIT_REPEATED_ACTION = (maxTurns: number | null): string =>
-  `上限を引き上げて${maxTurns ? `（${maxTurns}ターン）` : ""}自動でやり直しても、AIが確認を終えられませんでした。同じ差分のまま再実行しても同じ結果になりやすいです。原因は、1バッチの差分が大きすぎるか、ターン数の上限が小さすぎることです。サブPCの\`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES\`を下げてバッチを小さくするか、\`ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS\`・\`ISSUE_DECK_RELEASE_REVIEW_RETRY_MAX_TURNS\`を上げてから再実行してください。`;
+  `上限を引き上げて${maxTurns ? `（${maxTurns}ターン）` : ""}自動でやり直しても、AIが確認を終えられませんでした。同じ差分のまま再実行しても同じ結果になりやすいです。原因は、1バッチの差分が大きすぎるか、ターン数の上限が小さすぎることです。DeskMiniの\`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES\`を下げてバッチを小さくするか、\`ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS\`・\`ISSUE_DECK_RELEASE_REVIEW_RETRY_MAX_TURNS\`を上げてから再実行してください。`;
 
 const STAGE_LABEL: Record<ReviewDiagnosticStage, string> = {
   prepare: "準備",

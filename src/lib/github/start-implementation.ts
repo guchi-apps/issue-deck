@@ -64,7 +64,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "previewRequired",
     label: "開発環境を起動",
     description:
-      "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます（サブPC実行ならtailnet経由でスマホからも開けます）",
+      "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます（DeskMini実行ならtailnet経由でスマホからも開けます）",
     githubLabel: PREVIEW_REQUIRED_LABEL,
   },
 ];

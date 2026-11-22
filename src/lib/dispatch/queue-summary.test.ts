@@ -418,7 +418,7 @@ describe("describeDispatchQueueStall", () => {
 
   it("上限に達しているホストがあれば理由を出す", () => {
     expect(describeDispatchQueueStall(queued, [host({ liveSessions: 12 })])).toContain(
-      "サブPC（12/12本）",
+      "DeskMini（12/12本）",
     );
   });
 
@@ -442,7 +442,7 @@ describe("describeDispatchQueueStall", () => {
   // 出さないと「順番待ちのまま進まない」としか見えず、pollerが落ちている状態と区別が付かない
   it("メモリ・SWAPの逼迫で見送っているホストがあれば理由を出す", () => {
     const reason = describeDispatchQueueStall(queued, [host({ launchHold: MEMORY_HOLD })]);
-    expect(reason).toContain("サブPC（メモリ 92%（上限 85%））");
+    expect(reason).toContain("DeskMini（メモリ 92%（上限 85%））");
     expect(reason).toContain("余力が戻ると自動で再開");
   });
 
@@ -497,7 +497,7 @@ describe("describeDispatchJobWaitReason", () => {
   // 本数の上限とは待っている人にできることが違うため、別の文で説明する（#2095）
   it("メモリ・SWAPの逼迫で見送っている場合はその理由を添える", () => {
     const reason = describeDispatchJobWaitReason(job(), [host({ launchHold: MEMORY_HOLD })]);
-    expect(reason).toContain("サブPCのメモリ 92%（上限 85%）のため、まだ起動できません");
+    expect(reason).toContain("DeskMiniのメモリ 92%（上限 85%）のため、まだ起動できません");
   });
 
   it("本数の上限にも達していれば、そちらを理由に添える", () => {

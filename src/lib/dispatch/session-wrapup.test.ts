@@ -106,7 +106,7 @@ describe("buildSessionWrapupCommentBody", () => {
 
   it("ホスト・tmuxセッション名・稼働時間と再開コマンドを載せる", () => {
     const body = buildSessionWrapupCommentBody(params);
-    expect(body).toContain("サブPCのローカルセッションが終了しましたが");
+    expect(body).toContain("DeskMiniのローカルセッションが終了しましたが");
     expect(body).toContain("- tmuxセッション: `issue-deck-issue-1119`");
     expect(body).toContain("- 稼働時間: 1時間20分");
     expect(body).toContain("```bash\nscripts/start-issue.sh 1119\n```");

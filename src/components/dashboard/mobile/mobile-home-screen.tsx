@@ -188,7 +188,7 @@ export function MobileHomeScreenView({
   */
   const dispatch = useDispatchState(true);
   /*
-    実行状況シートの開閉（#1933）。**ヘッダー右上のボタンとサブPCのカードで同じシートを開く**
+    実行状況シートの開閉（#1933）。**ヘッダー右上のボタンとDeskMiniのカードで同じシートを開く**
     ため、状態はここで持つ。開く口が2つになるだけで、中身は1つのまま
   */
   const [dispatchStatusOpen, setDispatchStatusOpen] = useState(false);
@@ -285,7 +285,7 @@ export function MobileHomeScreenView({
           }}
         >
           {/*
-            先頭のサブPCの様子（#1690）。盤面の件数は下のタイルへ統合した（#3650）。
+            先頭のDeskMiniの様子（#1690）。盤面の件数は下のタイルへ統合した（#3650）。
             ホストの様子はここへ戻したもので、#1638でヘッダーの実行状況シートへ移していた。
             **ホームは使用率だけのサマリ、ヘッダーのシートは動いているセッションとキュー全体
             （順番待ち・失敗・停止操作）**という切り分けにしてある（#1933でセッションの一覧を
@@ -293,7 +293,7 @@ export function MobileHomeScreenView({
           */}
           <div className="p-4">
             {/*
-              サブPCの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
+              DeskMiniの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
               セッション・スクリプトの版・「更新して再起動」はここには出さず、押して開く
               実行状況シートに任せる。従来はこの1枚だけで縦242pxを占め、メニューの1行目が
               画面の外にあった。
@@ -304,7 +304,7 @@ export function MobileHomeScreenView({
               繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ押した指が別の行に当たる。
               出すのは`isLoaded`が立つまでの1回だけで、20秒ごとの取り直しでは出さない
               （出すと20秒おきにカードが灰色に戻る）。枚数は`HOME_HOST_SKELETON_COUNT`（2枚）。台数が取得するまで
-              分からないため、いま申告しているMac miniとサブPCの2台に合わせる（1枚だと取得後に
+              分からないため、いま申告しているMac miniとDeskMiniの2台に合わせる（1枚だと取得後に
               2枚目の高さぶん下のボタンが落ちる。#5573）。
 
               **取得に失敗しても`isLoaded`は立ち、スケルトンは消える**（計画レビュー指摘2）。
@@ -561,7 +561,7 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       busy: false,
       title: input.previewRunning
         ? "確認環境が動いています"
-        : "developの最新をサブPCで動かして画面で確かめる",
+        : "developの最新をDeskMiniで動かして画面で確かめる",
       onClick: input.onSelectPreview,
     });
   }

@@ -45,12 +45,12 @@ import { cn } from "@/lib/utils";
  */
 /** 結果が無い状態ごとの説明（#4116）。「何が起きて、次に何をすればよいか」を1文で出す */
 const RUN_STATUS_DESCRIPTIONS: Record<Exclude<CodeReviewRunStatus, "reported" | "missing">, string> = {
-  queued: "サブPCが受け取るのを待っています。",
+  queued: "DeskMiniが受け取るのを待っています。",
   running:
-    "サブPCのセッションがリポジトリ全体を読んでいます。結果はこのIssueのコメントとして返ります。",
+    "DeskMiniのセッションがリポジトリ全体を読んでいます。結果はこのIssueのコメントとして返ります。",
   failed: "レビューは結果を返さずに終わりました。理由を確かめて再実行してください。",
   timeout:
-    "実行上限に達したか、サブPCからの生存報告が途絶えました（プロセスの消失・ホストの停止）。再実行してください。",
+    "実行上限に達したか、DeskMiniからの生存報告が途絶えました（プロセスの消失・ホストの停止）。再実行してください。",
   skipped: "レビューを起動しませんでした。理由を確かめて再実行してください。",
   canceled: "レビューは取り消されました。",
   unknown:

@@ -33,7 +33,7 @@ describe("CodexUsageCard", () => {
     expect(screen.queryByRole("meter", { name: "5時間の使用量" })).toBeNull();
     expect(screen.queryByText("最新の報告から15分以上経過しています")).toBeNull();
     expect(
-      screen.getByText("ops-dashboardから取得できないため、サブPCの転記（最終観測 8/30 15:00）を表示しています"),
+      screen.getByText("ops-dashboardから取得できないため、DeskMiniの転記（最終観測 8/30 15:00）を表示しています"),
     ).toBeTruthy();
   });
 
@@ -77,7 +77,7 @@ describe("CodexUsageCard", () => {
         notConfigured={false}
       />,
     );
-    expect(screen.queryByText(/サブPCの転記/)).toBeNull();
+    expect(screen.queryByText(/DeskMiniの転記/)).toBeNull();
   });
 
   it("週間枠の前に高さ合わせ用の空の枠を置かない（#3195）", () => {

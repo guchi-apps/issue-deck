@@ -12,7 +12,7 @@ import { buildManualStepSessionPlan } from "@/lib/manual-step-session-plan";
 
 const BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること
@@ -62,7 +62,7 @@ describe("buildManualStepSessionPlan", () => {
   it("対話が要るコマンドの手順は人に頼む", () => {
     const body = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 
 ## やること
 

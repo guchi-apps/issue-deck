@@ -231,7 +231,7 @@ describe("WorkflowStepBadge", () => {
     expect(steps.container.innerHTML).not.toContain("amber");
   });
 
-  it("サブPCのセッションが動いている間はバーを掃く", () => {
+  it("DeskMiniのセッションが動いている間はバーを掃く", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -292,7 +292,7 @@ describe("WorkflowStepBadge", () => {
     expect(liveSweep(stopped.container)).toBeNull();
   });
 
-  it("サブPC実行では「起動待ち」を出さない（#1262の判定を壊していない）", () => {
+  it("DeskMini実行では「起動待ち」を出さない（#1262の判定を壊していない）", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -329,10 +329,10 @@ describe("WorkflowStepBadge", () => {
     const stepText = container.querySelector(".truncate")?.textContent;
     expect(stepText).toBe("調査中(2分)");
     expect(stepText).not.toContain("計画検討中");
-    expect(stepText).not.toContain("サブPC");
+    expect(stepText).not.toContain("DeskMini");
     // 省いた情報はツールチップ（title）にそのまま残す
     expect(container.querySelector("[title]")?.getAttribute("title")).toContain(
-      "計画検討中（サブPC・調査中(2分)）",
+      "計画検討中（DeskMini・調査中(2分)）",
     );
   });
 
@@ -467,10 +467,10 @@ describe("QueueStepBadge", () => {
 
   it("待ちが進まない理由はツールチップに出す", () => {
     const { container } = render(
-      <QueueStepBadge queue={queueState()} waitReason="サブPCのセッションが上限です" />,
+      <QueueStepBadge queue={queueState()} waitReason="DeskMiniのセッションが上限です" />,
     );
     expect(container.querySelector("[title]")?.getAttribute("title")).toContain(
-      "サブPCのセッションが上限です",
+      "DeskMiniのセッションが上限です",
     );
   });
 });
@@ -489,7 +489,7 @@ describe("WorkflowStepBadgeの順番待ち", () => {
         now={NOW}
       />,
     );
-    expect(container.textContent).toContain("サブPC・順番待ち 2番目");
+    expect(container.textContent).toContain("DeskMini・順番待ち 2番目");
   });
 
   it("順番待ちはセッションの様子より優先する（前回の残骸を出さない）", () => {

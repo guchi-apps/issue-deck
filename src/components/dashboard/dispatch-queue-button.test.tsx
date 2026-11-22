@@ -446,7 +446,7 @@ describe("DispatchQueueButton のホスト表示", () => {
       tmuxSessionName: "issue-deck-issue-1567",
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1567,
-      issueTitle: "サブPC上のセッション表示",
+      issueTitle: "DeskMini上のセッション表示",
       issueId: null,
       state: "ALIVE",
       exitStatus: null,
@@ -495,10 +495,10 @@ describe("DispatchQueueButton のホスト表示", () => {
       [makeSession()],
     );
 
-    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("DeskMini")).toBeTruthy();
     expect(screen.getByText("セッション 1/12")).toBeTruthy();
     expect(screen.getByText("34%")).toBeTruthy();
-    expect(screen.getByText("#1567 サブPC上のセッション表示")).toBeTruthy();
+    expect(screen.getByText("#1567 DeskMini上のセッション表示")).toBeTruthy();
   });
 
   // 同じ「実行」でも経路が別で、出ていないことを止まっていると読まれないようにする

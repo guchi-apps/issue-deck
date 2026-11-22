@@ -507,7 +507,7 @@ async function commitScaffold(
     if (error instanceof GithubApiError && error.status === 401) throw error;
     console.error("[POST /api/new-app] 雛形をコミットできませんでした", error);
     warnings.push(
-      `雛形一式をコミットできませんでした（${error instanceof Error ? error.message : String(error)}）。初期化IssueはサブPCのローカルセッションで実装してください。`,
+      `雛形一式をコミットできませんでした（${error instanceof Error ? error.message : String(error)}）。初期化IssueはDeskMiniのローカルセッションで実装してください。`,
     );
     return null;
   }

@@ -57,7 +57,7 @@ vi.mock("@/lib/chat/investigation/codex-model", () => ({
 vi.mock("@/lib/chat/investigation/reply", () => ({
   describeUnavailable: (raw: string) => {
     const codex = /Codex\((\w+)\)/.exec(raw)?.[1];
-    if (codex === "not_logged_in") return { kind: "codex_not_logged_in", label: "サブPCのCodex CLIが未ログインです", next: "サブPCで `codex login` を済ませてください。" };
+    if (codex === "not_logged_in") return { kind: "codex_not_logged_in", label: "DeskMiniのCodex CLIが未ログインです", next: "DeskMiniで `codex login` を済ませてください。" };
     if (/HTTP 401/.test(raw)) return { kind: "auth_rejected", label: "AIの認証が拒否されました", next: "認証情報を確認してください。" };
     if (/時間切れ/.test(raw)) return { kind: "network", label: "AIとの通信に失敗しました", next: "少し待って再試行してください。" };
     return { kind: "other", label: "AIの調査を始められませんでした", next: "再試行してください。" };
@@ -502,7 +502,7 @@ describe("調査が成立しないときは自動作成しない（#4527）", ()
 
   it("Codex設定では共通のCodexセッションで調査し、失敗理由（未ログイン）を根拠不足に置き換えず設定を直す案内を返す", async () => {
     mocks.resolveChatExecution.mockResolvedValue({ mode: "codex", model: "gpt-5.5" });
-    const session = vi.fn().mockResolvedValue({ ok: false, reason: "Codex(not_logged_in) サブPCのCodex CLIがログインしていません" });
+    const session = vi.fn().mockResolvedValue({ ok: false, reason: "Codex(not_logged_in) DeskMiniのCodex CLIがログインしていません" });
     mocks.createCodexSession.mockReturnValue(session);
     mocks.handleChatMessage.mockImplementation(async (params: { investigationDeps?: { session: (i: unknown) => Promise<unknown> } }) => {
       await params.investigationDeps!.session({});

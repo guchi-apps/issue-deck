@@ -101,7 +101,7 @@ export function LocalSessionApprovalNotice({
   if (session === null) {
     return (
       <LocalSessionNotice session={null}>
-        このIssueはローカル（サブPCまたは手元）で対応中です。
+        このIssueはローカル（DeskMiniまたは手元）で対応中です。
         <strong className="font-medium">ここでの操作は走っているセッションには届きません</strong>
         （`11.local`が付いている間、無人実行も反応しません）。「確認待ちを外す」を押しても、
         コメントが記録として残り確認待ちの印が外れるだけです。
@@ -248,7 +248,7 @@ export function LocalSessionCommentNotice({
 }) {
   return (
     <LocalSessionNotice session={session}>
-      このIssueはローカル（サブPCまたは手元）で対応中です。
+      このIssueはローカル（DeskMiniまたは手元）で対応中です。
       <strong className="font-medium">
         ここへ書いたコメントは、走っているセッションには届きません
       </strong>

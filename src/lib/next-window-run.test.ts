@@ -274,7 +274,7 @@ describe("decideNextWindowRunLaunch", () => {
     expect(decision.action).toBe("skip");
     // サブPCの不調と区別できる理由を出す
     expect(decision.action === "skip" && decision.reason).toContain("週間枠の残りが17%");
-    expect(decision.action === "skip" && decision.reason).not.toContain("サブPC");
+    expect(decision.action === "skip" && decision.reason).not.toContain("DeskMini");
   });
 
   it("積んでから24時間で見送る（枠を取れないままでも残さない）", () => {

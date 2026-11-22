@@ -308,17 +308,17 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(onSelectQuickView).toHaveBeenCalledWith("release-pending");
   });
 
-  it("申告しているホストが無ければサブPCの様子を出さない", () => {
+  it("申告しているホストが無ければDeskMiniの様子を出さない", () => {
     renderHome();
 
-    expect(screen.queryByText("サブPC")).toBeNull();
+    expect(screen.queryByText("DeskMini")).toBeNull();
   });
 
-  it("申告しているホストがあれば、セッション本数つきでサブPCの様子を出す", () => {
+  it("申告しているホストがあれば、セッション本数つきでDeskMiniの様子を出す", () => {
     dispatchState = makeDispatch({ hosts: [makeHost()] });
     renderHome();
 
-    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("DeskMini")).toBeTruthy();
     expect(screen.getByText("セッション 3/12")).toBeTruthy();
   });
 
@@ -327,7 +327,7 @@ describe("MobileHomeScreen（#1690）", () => {
    * メニューがカード1枚ぶん繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ
    * 押した指が別の行に当たっていた。
    */
-  it("最初の取得が終わるまではサブPCのカードの代わりにスケルトンを置く", () => {
+  it("最初の取得が終わるまではDeskMiniのカードの代わりにスケルトンを置く", () => {
     dispatchState = makeDispatch({ isLoaded: false });
     const { container } = renderHome();
 
@@ -403,7 +403,7 @@ describe("MobileHomeScreen（#1690）", () => {
 
     expect(screen.queryByText("#1933 ホーム画面の実装状況表示を簡略化")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "サブPCの実行状況を開く" }));
+    fireEvent.click(screen.getByRole("button", { name: "DeskMiniの実行状況を開く" }));
 
     // ヘッダーのボタンと同じシートが開く（開いた中身にだけ出るキューの見出しで確かめる）
     expect(screen.getByRole("dialog", { name: "実行状況" })).toBeTruthy();

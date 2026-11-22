@@ -592,7 +592,7 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
   // 未処理のまま期限を過ぎたら、理由付きで止めて再試行を促す（送信待ちを無期限にしない）
   const requestedAt = row.resumeRequestedAt?.getTime() ?? now.getTime();
   if (now.getTime() - requestedAt > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
-    return failResume(row, "再開の指示がサブPCに取り込まれないまま期限を過ぎました。サブPCの稼働を確認して再試行してください", now);
+    return failResume(row, "再開の指示がDeskMiniに取り込まれないまま期限を過ぎました。DeskMiniの稼働を確認して再試行してください", now);
   }
   return row;
 }

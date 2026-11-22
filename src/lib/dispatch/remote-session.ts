@@ -123,7 +123,7 @@ async function settleStartingSessions(now: Date): Promise<void> {
       data: {
         status: "failed",
         failureMessage:
-          job.message ?? (job.status === "TIMEOUT" ? "サブPCが応答しませんでした。" : "起動できませんでした。"),
+          job.message ?? (job.status === "TIMEOUT" ? "DeskMiniが応答しませんでした。" : "起動できませんでした。"),
         endedAt: now,
       },
     });
@@ -317,7 +317,7 @@ export async function enqueueRemoteSessionKill(params: {
   }
   const host = await db.dispatchHost.findUnique({ where: { name: session.host } });
   if (!host || !isDispatchHostOnline(host.lastSeenAt, now) || host.remoteSessionCapable !== true) {
-    return { ok: false, reason: "host_offline", message: "サブPCがオフラインのため終了できません。" };
+    return { ok: false, reason: "host_offline", message: "DeskMiniがオフラインのため終了できません。" };
   }
   try {
     await db.dispatchJob.create({

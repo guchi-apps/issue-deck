@@ -135,7 +135,7 @@ export function CodeReviewDialog({
           repositoryFullName,
         })
       : rejection
-        ? "コードレビューを実行できるホストがありません（サブPCのpollerが動いているか確認してください）。"
+        ? "コードレビューを実行できるホストがありません（DeskMiniのpollerが動いているか確認してください）。"
         : null;
 
   function appendFocusPreset(preset: string) {
@@ -206,7 +206,7 @@ export function CodeReviewDialog({
         <DialogHeader>
           <DialogTitle>コードレビューを実行</DialogTitle>
           <DialogDescription>
-            サブPCで読み取り専用のセッションを立て、リポジトリ全体を読みます。結果はレビュー用に作るIssueのコメントとして返ります。
+            DeskMiniで読み取り専用のセッションを立て、リポジトリ全体を読みます。結果はレビュー用に作るIssueのコメントとして返ります。
           </DialogDescription>
           <p className="text-sm">
             <span className="text-muted-foreground">対象</span>{" "}

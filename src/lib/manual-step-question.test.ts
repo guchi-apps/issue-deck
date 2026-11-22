@@ -13,7 +13,7 @@ const BODY = [
   "",
   "## 前提条件",
   "",
-  "- 実行するデバイス: サブPC（`ssh subpc`）",
+  "- 実行するデバイス: DeskMini（`ssh subpc`）",
   "- カレントディレクトリ: `~/apps/issue-deck`",
   "- Gitブランチ: `develop`",
   "",
@@ -81,10 +81,10 @@ describe("進み具合（#2830）", () => {
     expect(found?.progress).toEqual({ done: 1, total: 2, remaining: 1, remainingByUser: 1 });
   });
 
-  it("サブPCで流せる手順は「あなたが実行」に数えない", () => {
+  it("DeskMiniで流せる手順は「あなたが実行」に数えない", () => {
     const body = BODY.replace(
       "- [ ] （VPS）`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する",
-      "- [ ] （サブPC）pollerを再起動する",
+      "- [ ] （DeskMini）pollerを再起動する",
     ).replace(
       'echo "GOOGLE_REFRESH_TOKEN=<控えたrefresh_token>" >> /apps/issue-deck/.env',
       "systemctl --user restart issue-deck-dispatch-poller.service",
@@ -201,11 +201,11 @@ describe("findManualStepForQuestion", () => {
     expect(found).toBeNull();
   });
 
-  it("サブPCの手順に埋める値が残っていれば、その表記を添えて理由にする", () => {
+  it("DeskMiniの手順に埋める値が残っていれば、その表記を添えて理由にする", () => {
     const body = [
       "## 前提条件",
       "",
-      "- 実行するデバイス: サブPC",
+      "- 実行するデバイス: DeskMini",
       "",
       "## やること",
       "",

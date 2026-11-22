@@ -273,8 +273,8 @@ describe("IssueStatusCard", () => {
     it("起動が成功してセッションが立っていれば、起動の行は出さない", () => {
       renderCard({ dispatchJob: makeLaunchJob(), issueSession: makeSession() });
 
-      expect(screen.queryByText(/サブPCで起動しました/)).toBeNull();
-      expect(screen.getByText(/サブPC・実行中/)).not.toBeNull();
+      expect(screen.queryByText(/DeskMiniで起動しました/)).toBeNull();
+      expect(screen.getByText(/DeskMini・実行中/)).not.toBeNull();
     });
 
     it("順番待ちのあいだは起動の行をそのまま出す", () => {
@@ -283,7 +283,7 @@ describe("IssueStatusCard", () => {
         issueSession: makeSession(),
       });
 
-      expect(screen.getByText(/サブPCで順番待ち/)).not.toBeNull();
+      expect(screen.getByText(/DeskMiniで順番待ち/)).not.toBeNull();
     });
   });
 
@@ -308,7 +308,7 @@ describe("IssueStatusCard", () => {
       });
 
       expect(screen.queryByText("ローカルで対応中")).toBeNull();
-      expect(screen.getByText(/サブPCで順番待ち/)).not.toBeNull();
+      expect(screen.getByText(/DeskMiniで順番待ち/)).not.toBeNull();
     });
 
     it("セッションが見えているならそちらに任せて出さない", () => {

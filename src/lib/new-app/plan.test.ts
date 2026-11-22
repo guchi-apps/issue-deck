@@ -218,7 +218,7 @@ describe("buildInitIssueBody", () => {
     expect(body).toContain("ホスト");
   });
 
-  it("雛形を置けなかったときは、従来どおりサブPCのローカルセッション前提で書く", () => {
+  it("雛形を置けなかったときは、従来どおりDeskMiniのローカルセッション前提で書く", () => {
     const body = buildInitIssueBody(spec(), REFS);
     expect(body).toContain("## 前提条件");
     expect(body).toContain(REFS.subpc!);
@@ -330,7 +330,7 @@ describe("buildDeployCheckIssueBody（#2252）", () => {
     expect(body).toContain(REFS.vpsManual!);
   });
 
-  it("サブPCのローカルセッションで実装する理由を書く", () => {
+  it("DeskMiniのローカルセッションで実装する理由を書く", () => {
     expect(body).toContain("initial-deploy-check");
     expect(body).toContain("無人実行からは読めません");
   });
@@ -422,9 +422,9 @@ describe("buildSubpcManualIssueBody", () => {
     ]);
   });
 
-  it("実行するデバイスがサブPCひとつに決まる", () => {
+  it("実行するデバイスがDeskMiniひとつに決まる", () => {
     const guide = parseManualStepGuide(body);
-    expect(guide?.where.defaultDevice).toBe("サブPC");
+    expect(guide?.where.defaultDevice).toBe("DeskMini");
   });
 
   it("フォルダ信頼だけを人が実行し、残りは手作業アシスタントが代行実行できる", () => {
@@ -558,8 +558,8 @@ describe("buildVpsManualIssueBody（ワークフローへ流す形・#2246）", 
     expect(body).not.toContain("Aレコードを追加");
   });
 
-  it("実行するデバイスはサブPCで、代行実行の対象になる", () => {
-    expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("サブPC");
+  it("実行するデバイスはDeskMiniで、代行実行の対象になる", () => {
+    expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("DeskMini");
     const plan = buildManualStepRunPlan(body, undefined, {
       host: READY_HOST,
       isManualStepIssue: true,

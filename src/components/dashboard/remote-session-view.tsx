@@ -30,7 +30,7 @@ import type { ConnectedRepository } from "@/types/repository";
 /** 「終了したセッション」に並べる件数。古いものは一覧（7日）から自然に落ちる */
 const HISTORY_LIMIT = 5;
 
-const DESCRIPTION = "リポジトリを選ぶと、サブPCでClaude Codeのセッションを立ち上げてClaude Codeアプリで開きます。";
+const DESCRIPTION = "リポジトリを選ぶと、DeskMiniでClaude Codeのセッションを立ち上げてClaude Codeアプリで開きます。";
 
 /** 起動先として選べるリポジトリ。ホストの申告が読めるまでは`dispatchRunnable`で代える */
 export function runnableRepositories(state: RemoteSessionState | null, repositories: ConnectedRepository[]): Set<string> {
@@ -150,7 +150,7 @@ export function RemoteSessionView({
                 {repo.name} <span className="text-xs text-muted-foreground">{repo.fullName.split("/")[0]}</span>
               </span>
               {!enabled ? (
-                <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">サブPC未登録</Badge>
+                <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">DeskMini未登録</Badge>
               ) : sessions.length > 0 ? (
                 <Badge variant="outline" className="shrink-0 border-transparent bg-emerald-500/15 text-[11px] text-emerald-700 dark:text-emerald-300">
                   {sessions.length}件稼働
@@ -180,7 +180,7 @@ export function RemoteSessionView({
       compact={!isDesktop}
     />
   ) : (
-    <p className="text-sm text-muted-foreground">起動できるリポジトリがありません。サブPCのpollerが動いているか確認してください。</p>
+    <p className="text-sm text-muted-foreground">起動できるリポジトリがありません。DeskMiniのpollerが動いているか確認してください。</p>
   );
 
   return (
@@ -282,8 +282,8 @@ function RepositoryDetail({
   /** 再開できない理由（できるならnull）。転記はそのセッションが動いていたホストにしか無いので、そのホストで判定する */
   const resumeBlocker = (session: RemoteSession): string | null => {
     const origin = state?.hosts.find((item) => item.name === session.host) ?? null;
-    if (!origin || !origin.online) return "サブPCがオフラインです。";
-    if (!origin.resumeCapable) return "サブPCのpollerが再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
+    if (!origin || !origin.online) return "DeskMiniがオフラインです。";
+    if (!origin.resumeCapable) return "DeskMiniのpollerが再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
     if (state && origin.activeCount >= state.maxPerHost) return "同時に動かせる本数に達しています。";
     return null;
   };
@@ -332,7 +332,7 @@ function RepositoryDetail({
             {host ? `ホスト ${formatDispatchHostName(host.name)}・モデルは設定の既定` : "起動できるホストがありません"}
           </span>
         </div>
-        {host && !host.online && <p className="text-xs text-destructive">サブPCがオフラインです。</p>}
+        {host && !host.online && <p className="text-xs text-destructive">DeskMiniがオフラインです。</p>}
         {limitReached && (
           <p className="text-xs text-destructive">
             同時に動かせるリモートセッションは{state?.maxPerHost}本までです。使っていないセッションを終了してください。
@@ -434,7 +434,7 @@ function RepositoryDetail({
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。終了したセッションは7日間「再開」から会話の続きとして起動し直せます。
+        セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでDeskMiniに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。終了したセッションは7日間「再開」から会話の続きとして起動し直せます。
       </p>
       <RemoteSessionStopDialog
         session={stopTarget}
@@ -483,7 +483,7 @@ function LaunchProgress({
   }
   const running = session?.status === "running";
   const steps = [
-    { label: "サブPCへ依頼を積みました", done: true },
+    { label: "DeskMiniへ依頼を積みました", done: true },
     { label: "セッションを立ち上げています", done: running },
     { label: "Claude Codeアプリで開きます", done: false },
   ];

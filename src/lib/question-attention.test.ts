@@ -9,7 +9,7 @@ type QuestionInput = Parameters<typeof resolveQuestionState>[0];
 
 function makeQuestion(overrides: Partial<QuestionInput> = {}): QuestionInput {
   return {
-    title: "[質問] サブPCのCPUを変えてよいか",
+    title: "[質問] DeskMiniのCPUを変えてよいか",
     qaAnswerPendingAt: null,
     hasUnreadComments: false,
     ...overrides,

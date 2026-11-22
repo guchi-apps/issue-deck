@@ -818,7 +818,7 @@ export function PullRequestDetail({
           </div>
         )}
 
-        {/* サブPCで走るAIレビュー（PR_REVIEW・#3990）の状態。develop向けの未マージPRだけ。指摘の根拠なので指摘タブへ置く */}
+        {/* DeskMiniで走るAIレビュー（PR_REVIEW・#3990）の状態。develop向けの未マージPRだけ。指摘の根拠なので指摘タブへ置く */}
         {activeTab === "findings" && isDevelopOpen && (
           <PullRequestAiReviewJobs
             repositoryFullName={pullRequest.repositoryFullName}

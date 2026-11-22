@@ -141,13 +141,13 @@ export function describeReviewRerun(
             : "pending",
       text:
         ops.status === "not_needed"
-          ? "サブPCの更新は不要"
+          ? "DeskMiniの更新は不要"
           : ops.status === "updated"
-            ? "サブPCは更新済み"
+            ? "DeskMiniは更新済み"
             : ops.status === "needed"
               ? ops.timing === "before_release"
-                ? "サブPCの更新が必要（公開前）"
-                : "サブPCの更新が必要（公開後でよい）"
+                ? "DeskMiniの更新が必要（公開前）"
+                : "DeskMiniの更新が必要（公開後でよい）"
               : "状態を確認できません",
     });
   }
@@ -159,7 +159,7 @@ export function describeReviewRerun(
   if (stage?.kind === "reevaluating" && stage.trigger === "ops") {
     return {
       kind: "wait",
-      lead: "サブPCのpollerが候補を含む版で動き出したため、運用状態に依存する項目を自動で再評価しています（開始待ちを含む）。確認済みの結果は再利用します。手動の操作は不要です。",
+      lead: "DeskMiniのpollerが候補を含む版で動き出したため、運用状態に依存する項目を自動で再評価しています（開始待ちを含む）。確認済みの結果は再利用します。手動の操作は不要です。",
       buttonLabel: "全体レビューを再実行（自動再評価中）",
       prerequisites,
       ops,
@@ -248,7 +248,7 @@ function describeOpsAuto(
   if (decision.action === "rerun") {
     return {
       status: "scheduled",
-      text: "サブPCは更新済みです。次の巡回（1分程度）で、運用状態に依存する項目を自動で再評価します。",
+      text: "DeskMiniは更新済みです。次の巡回（1分程度）で、運用状態に依存する項目を自動で再評価します。",
     };
   }
   if (decision.reason === "not_waiting_ops") return null;

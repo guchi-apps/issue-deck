@@ -82,7 +82,7 @@ export function resolvePrReviewGateState(job: PrReviewJobLike | null): PrReviewG
     case "TIMEOUT":
       return {
         state: "failed",
-        reason: job.message ?? "サブPCからの応答が途絶えたためタイムアウトしました。",
+        reason: job.message ?? "DeskMiniからの応答が途絶えたためタイムアウトしました。",
       };
     case "SKIPPED":
       return { state: "failed", reason: job.message ?? "レビューが見送られました。" };
@@ -112,10 +112,10 @@ export function describePrReviewGateState(state: PrReviewGateState): string {
       return "レビューのジョブが積まれていません。";
     case "pending":
       return state.phase === "queued"
-        ? "サブPCの受け取り待ちです。"
+        ? "DeskMiniの受け取り待ちです。"
         : state.phase === "claimed"
-          ? `サブPC（${state.host ?? "不明"}）が受け付けました。`
-          : `サブPC（${state.host ?? "不明"}）でレビューを実行中です。`;
+          ? `DeskMini（${state.host ?? "不明"}）が受け付けました。`
+          : `DeskMini（${state.host ?? "不明"}）でレビューを実行中です。`;
     case "done":
       return `レビューが完了しました（${state.verdict}）。`;
     case "failed":

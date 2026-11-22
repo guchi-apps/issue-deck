@@ -56,7 +56,7 @@ describe("PullRequestAiReviewJobsView", () => {
   it("失敗・タイムアウトは理由を本文として出す（起動前の失敗も同じ）", () => {
     render(
       <PullRequestAiReviewJobsView
-        jobs={[job({ status: "TIMEOUT", message: "サブPCからの応答が途絶えたためタイムアウトしました。" })]}
+        jobs={[job({ status: "TIMEOUT", message: "DeskMiniからの応答が途絶えたためタイムアウトしました。" })]}
         headSha={HEAD}
       />,
     );

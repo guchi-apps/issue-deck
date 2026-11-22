@@ -560,7 +560,7 @@ labels = ", ".join(sorted(label_names)) or "(なし)"
 
 # 汎用ランチャーは開発サーバーを起動しない（#1224）。「起動済み」と書くと嘘になる。
 preview_instructions = (
-    "このworktree用の開発サーバーは**起動していません**（サブPCではリポジトリ数ぶんの"
+    "このworktree用の開発サーバーは**起動していません**（DeskMiniではリポジトリ数ぶんの"
     "常駐を前提にできないため）。画面確認が必要になったら "
     f"`cd {worktree_dir} && {dev_command}` で起動してください。ポート`{dev_port}`は"
     "envファイルに設定済みなので、そのまま起動してよいです。\n\n"

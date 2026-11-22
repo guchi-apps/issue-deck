@@ -22,7 +22,7 @@ const BODY = `## この作業でできるようになること
 
 ## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること
@@ -87,9 +87,9 @@ describe("buildManualStepRunPlan", () => {
     expect(entry.rejection).toBe("no_command");
   });
 
-  it("サブPC・VPS以外で実行する手作業は、すべての項目が代行できない", () => {
+  it("DeskMini・VPS以外で実行する手作業は、すべての項目が代行できない", () => {
     const result = plan(
-      BODY.replace("実行するデバイス: **サブPC**", "実行するデバイス: **ブラウザ**"),
+      BODY.replace("実行するデバイス: **DeskMini**", "実行するデバイス: **ブラウザ**"),
     );
 
     expect(result.runnable).toBe(0);
@@ -98,7 +98,7 @@ describe("buildManualStepRunPlan", () => {
 
   // #2901。VPSはtailnet越しにサブPCから実行できるようになった
   it("VPSで実行する手作業は、申告のあるホストでだけ代行できる", () => {
-    const body = BODY.replace("実行するデバイス: **サブPC**", "実行するデバイス: **VPS**");
+    const body = BODY.replace("実行するデバイス: **DeskMini**", "実行するデバイス: **VPS**");
     expect(plan(body).runnable).toBeGreaterThan(0);
     expect(
       plan(body, {
@@ -131,7 +131,7 @@ describe("buildManualStepRunPlan", () => {
   it("チェックリストで書かれていない本文では、確認だけが並ぶ", () => {
     const body = `## 前提条件
 
-- 実行するデバイス: サブPC
+- 実行するデバイス: DeskMini
 
 ## やること
 
@@ -247,7 +247,7 @@ describe("対話が要るコマンドを含む項目", () => {
   describe("デバイスは手順ごとに見る", () => {
     const MIXED = `## 前提条件
 
-- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）
 
 ## やること
 
@@ -269,7 +269,7 @@ describe("対話が要るコマンドを含む項目", () => {
 
       expect(result.entries[0].device).toBe("ブラウザ");
       expect(result.entries[0].rejection).toBe("device_not_runnable");
-      expect(result.entries[1].device).toBe("サブPC");
+      expect(result.entries[1].device).toBe("DeskMini");
       expect(result.entries[1].rejection).toBeNull();
       expect(result.runnable).toBe(1);
       expect(result.blocked).toBe(1);
@@ -278,7 +278,7 @@ describe("対話が要るコマンドを含む項目", () => {
     // 端末が複数書かれた「実行するデバイス」で全手順が代行対象になっていたのが#2052の実害
     it("既定値が決まらない本文では、デバイスの無い手順を代行しない", () => {
       const result = plan(
-        MIXED.replace("- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）", "- 実行するデバイス: **ブラウザ** と **サブPC**"),
+        MIXED.replace("- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）", "- 実行するデバイス: **ブラウザ** と **DeskMini**"),
       );
 
       expect(result.entries[1].device).toBeNull();
@@ -350,13 +350,13 @@ describe("プレースホルダを含む項目", () => {
  */
 const SECRET_BODY_WITH_SIGNIN = `## 前提条件
 
-- 実行するデバイス: サブPC
+- 実行するデバイス: DeskMini
 
 ## やること
 
 - [ ] （ブラウザ）Signalyでチャンネルを作り、Webhook URLを控える
 
-- [ ] （サブPC）1Passwordへ入れてGitHubのsecretへ同期する
+- [ ] （DeskMini）1Passwordへ入れてGitHubのsecretへ同期する
 
     \`\`\`bash
     cd ~/apps/aide && eval $(op signin) && scripts/sync-github-secrets.sh --only AIDE_DAYSPAN_TOKEN
@@ -403,7 +403,7 @@ describe("1Passwordを扱う手作業", () => {
 /** 値を埋めるコマンド（#2403）。埋めるまでは代行できない */
 const PLACEHOLDER_BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 
 ## やること
 

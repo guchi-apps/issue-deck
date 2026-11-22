@@ -371,7 +371,7 @@ export function TopBar({
         新規
       </Button>
 
-      {/* サブPCで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
+      {/* DeskMiniで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
       <DispatchQueueButton onOpenIssue={onOpenIssue} />
 
       {/* 起動中のリモートセッションを開く・新しく起動する（#4991） */}

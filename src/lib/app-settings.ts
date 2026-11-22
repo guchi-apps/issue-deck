@@ -491,9 +491,9 @@ export const APP_AI_MODEL_OPTIONS = [
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）
   { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）・Anthropic API" },
-  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）・サブPCのCodex CLI" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）・サブPCのCodex CLI" },
-  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）・サブPCのCodex CLI" },
+  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）・DeskMiniのCodex CLI" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）・DeskMiniのCodex CLI" },
+  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）・DeskMiniのCodex CLI" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;

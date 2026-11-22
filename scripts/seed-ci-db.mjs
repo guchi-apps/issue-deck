@@ -235,7 +235,7 @@ function orderingManualStepBody(origin) {
     "",
     "## 前提条件",
     "",
-    "- 実行するデバイス: サブPC（`ssh subpc`）",
+    "- 実行するデバイス: DeskMini（`ssh subpc`）",
     "- カレントディレクトリ: 不要",
     "- Gitブランチ: 不要",
     "- 先に完了している必要があるIssue・PR: なし",
@@ -280,12 +280,12 @@ function manualStepSubpcSampleBody(origin) {
   return [
     "## この作業でできるようになること",
     "",
-    "- できるようになること: サブPCのチェックアウトが最新になり、新しいpollerが動く",
-    "- 実行するまでできないこと: developへ入れた変更がサブPC側に反映されない",
+    "- できるようになること: DeskMiniのチェックアウトが最新になり、新しいpollerが動く",
+    "- 実行するまでできないこと: developへ入れた変更がDeskMini側に反映されない",
     "",
     "## 前提条件",
     "",
-    "- 実行するデバイス: **サブPC**（メインPCからなら `ssh subpc`）",
+    "- 実行するデバイス: **DeskMini**（メインPCからなら `ssh subpc`）",
     "- カレントディレクトリ: `~/apps/issue-deck`",
     "- Gitブランチ: `develop`（本体チェックアウトがdevelopのため）",
     `- 先に完了している必要があるIssue・PR: #${origin} の変更が本番へ出た後`,
@@ -388,7 +388,7 @@ async function applyDevProfile(installation) {
     // サブPCで実行するもの（#1828。代行実行の「承認して実行」が出る唯一のサンプル）
     await upsertDummyIssue(firstRepository, {
       number: ISSUES_PER_REPOSITORY + 5,
-      title: "[手作業] サブPC: issue-deckのチェックアウトを更新する",
+      title: "[手作業] DeskMini: issue-deckのチェックアウトを更新する",
       state: "OPEN",
       labels: [{ name: "71.manual-step", color: "d876e3" }],
       body: manualStepSubpcSampleBody(released.number),
@@ -398,7 +398,7 @@ async function applyDevProfile(installation) {
     // これが無いと「実施順序」セクションも「このIssueの完了を待っているIssue」も出ない
     await upsertDummyIssue(firstRepository, {
       number: ISSUES_PER_REPOSITORY + 6,
-      title: "[手作業] サブPC: 新デプロイ先へ公開鍵を配る",
+      title: "[手作業] DeskMini: 新デプロイ先へ公開鍵を配る",
       state: "OPEN",
       labels: [{ name: "71.manual-step", color: "d876e3" }],
       body: orderingManualStepBody(ISSUES_PER_REPOSITORY + 7),
@@ -414,7 +414,7 @@ async function applyDevProfile(installation) {
   }
 
   console.log(
-    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 4 : 0}件（前提待ち・いま実行できる・サブPCで代行できる・一般Issueに待たれている 各1件）と、実施順序（#2003）を確かめる一般Issueを${hasManualStepSample ? 1 : 0}件追加しました。`,
+    `開発用プロファイル: リポジトリ${updatedRepositories.count}件に実行導線のフラグを立て、Issue${issues.length}件の進捗をカンバンの全列へ散らし、手作業Issueのサンプルを${hasManualStepSample ? 4 : 0}件（前提待ち・いま実行できる・DeskMiniで代行できる・一般Issueに待たれている 各1件）と、実施順序（#2003）を確かめる一般Issueを${hasManualStepSample ? 1 : 0}件追加しました。`,
   );
 }
 

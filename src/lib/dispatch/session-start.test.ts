@@ -10,7 +10,7 @@ describe("buildSessionStartedCommentBody", () => {
 
   it("ホスト名は地の文では日本語表記、明細では識別子のまま出す（#1416の使い分け）", () => {
     const body = buildSessionStartedCommentBody(params);
-    expect(body).toContain("サブPCのローカルセッションで対応を開始します");
+    expect(body).toContain("DeskMiniのローカルセッションで対応を開始します");
     expect(body).toContain("- ホスト: `subpc`");
   });
 

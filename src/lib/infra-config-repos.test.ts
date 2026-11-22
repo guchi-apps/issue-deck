@@ -38,9 +38,9 @@ echo ok
 }
 
 describe("resolveInfraConfigDevice", () => {
-  it("VPS・サブPCを読み分け、メインPCと不明はnullにする", () => {
+  it("VPS・DeskMiniを読み分け、メインPCと不明はnullにする", () => {
     expect(resolveInfraConfigDevice("VPS（`ssh vps`）")).toBe("vps");
-    expect(resolveInfraConfigDevice("サブPC")).toBe("subpc");
+    expect(resolveInfraConfigDevice("DeskMini")).toBe("subpc");
     expect(resolveInfraConfigDevice("subpc")).toBe("subpc");
     expect(resolveInfraConfigDevice("メインPC")).toBeNull();
     expect(resolveInfraConfigDevice("ブラウザ")).toBeNull();
@@ -49,8 +49,8 @@ describe("resolveInfraConfigDevice", () => {
 
   // 端末が1つに絞れない値は、どちらの実機か決められない（#2052）
   it("端末が複数書かれた値はnullにする", () => {
-    expect(resolveInfraConfigDevice("ブラウザとサブPC")).toBeNull();
-    expect(resolveInfraConfigDevice("VPSとサブPCの両方")).toBeNull();
+    expect(resolveInfraConfigDevice("ブラウザとDeskMini")).toBeNull();
+    expect(resolveInfraConfigDevice("VPSとDeskMiniの両方")).toBeNull();
   });
 });
 
@@ -72,9 +72,9 @@ describe("detectInfraConfigTargets", () => {
     expect(targets[0].stepText).toContain("VirtualHostを配置する");
   });
 
-  it("サブPCのログインシェル設定を、subpcリポジトリの置き場所へ対応付ける", () => {
+  it("DeskMiniのログインシェル設定を、subpcリポジトリの置き場所へ対応付ける", () => {
     const body = buildBody({
-      device: "サブPC",
+      device: "DeskMini",
       todo: `- [ ] PATHを追記する
 
     \`\`\`bash
@@ -130,9 +130,9 @@ describe("detectInfraConfigTargets", () => {
   });
 
   // 手順の文頭に端末を書けば、両方にあるパスでも1つに絞れる（#2052）
-  it("手順の文頭のデバイスで、VPS・サブPCの両方に当たるパスを切り分ける", () => {
+  it("手順の文頭のデバイスで、VPS・DeskMiniの両方に当たるパスを切り分ける", () => {
     const body = buildBody({
-      todo: `- [ ] （サブPC）ユニットを置く
+      todo: `- [ ] （DeskMini）ユニットを置く
 
     \`\`\`bash
     sudo cp 10-subpc-port.conf /etc/systemd/system/ssh.socket.d/10-subpc-port.conf
@@ -144,7 +144,7 @@ describe("detectInfraConfigTargets", () => {
     expect(targets[0].repo.repositoryFullName).toBe("guchi-apps/subpc");
   });
 
-  it("デバイスが読めず、VPS・サブPCの両方に当たるパスは切り出さない", () => {
+  it("デバイスが読めず、VPS・DeskMiniの両方に当たるパスは切り出さない", () => {
     const body = buildBody({
       todo: `- [ ] ユニットを置く
 
@@ -199,7 +199,7 @@ describe("detectInfraConfigTargets", () => {
 
   it("デバイスが分かっていれば、長いパスの対応を優先する", () => {
     const body = buildBody({
-      device: "サブPC",
+      device: "DeskMini",
       todo: `- [ ] ssh.socketのポートを変更する
 
     \`\`\`bash
@@ -305,7 +305,7 @@ describe("buildInfraConfigIssueDraft", () => {
 
   it("反映のされ方が既定と違う対応では、その但し書きを使う", () => {
     const netplanBody = buildBody({
-      device: "サブPC",
+      device: "DeskMini",
       todo: `- [ ] ネットワーク設定を修正する
 
     \`\`\`bash
@@ -317,7 +317,7 @@ describe("buildInfraConfigIssueDraft", () => {
       target,
       originRepositoryFullName: "guchi-apps/issue-deck",
       originNumber: 1,
-      originTitle: "[手作業] サブPC: ネットワーク設定を直す",
+      originTitle: "[手作業] DeskMini: ネットワーク設定を直す",
     });
 
     expect(draft.body).toContain("`netplan apply`と再起動は自動では行われない");

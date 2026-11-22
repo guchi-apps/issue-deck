@@ -26,7 +26,7 @@ const ctx = (overrides: Partial<ReleaseOpsContext> = {}): ReleaseOpsContext => (
   ...overrides,
 });
 
-const request = findOpsRequest(["host_compat: サブPCのpoller更新・再起動の証跡が未確認"]);
+const request = findOpsRequest(["host_compat: DeskMiniのpoller更新・再起動の証跡が未確認"]);
 
 describe("findOpsRequest", () => {
   it("更新・再起動を要求する文だけを拾う", () => {
@@ -36,7 +36,7 @@ describe("findOpsRequest", () => {
 
   it("pollerへの言及だけ・互換性の確認・更新済み・更新不要の記述は要求にしない", () => {
     expect(findOpsRequest(["pollerの互換性を確認した（旧pollerでも動作する）"])).toBeNull();
-    expect(findOpsRequest(["サブPCのpollerは更新済み"])).toBeNull();
+    expect(findOpsRequest(["DeskMiniのpollerは更新済み"])).toBeNull();
     expect(findOpsRequest(["方針はサーバー配布のためpollerの更新は不要"])).toBeNull();
     expect(findOpsRequest(["pollerの処理を読んだ"])).toBeNull();
     expect(findOpsRequest([null, "テストが未確認"])).toBeNull();
@@ -53,7 +53,7 @@ describe("assessReleaseOps", () => {
     expect(assessReleaseOps(null, ctx())).toBeNull();
   });
 
-  it("サーバー側だけで有効になる候補には、サブPCの更新を求めない", () => {
+  it("サーバー側だけで有効になる候補には、DeskMiniの更新を求めない", () => {
     const r = assessReleaseOps(request, ctx({ changedFiles: ["src/lib/a.ts", "docs/x.md"] }));
     expect(r).toMatchObject({ status: "not_needed", timing: null });
   });

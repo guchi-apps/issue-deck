@@ -118,7 +118,7 @@ describe("parseMemoComment", () => {
       "",
       "**新規cloneのローカル起動にはフォルダ信頼の確認が要る**",
       "",
-      "- 状況: サブPCで新しいリポジトリを開いたとき",
+      "- 状況: DeskMiniで新しいリポジトリを開いたとき",
       CANDIDATE_MARKER,
       "<!-- issue-deck-agent:implementer -->",
     ].join("\n");

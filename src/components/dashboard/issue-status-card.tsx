@@ -170,7 +170,7 @@ export function IssueStatusCard({
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3">
       {/* 同じことを2回言わせない（#2057）。確認待ちのバッジは真下の案内パネルが見出しで
-          言い、実行先（「サブPCで実行中」）は下のセッションの行が言う。どちらも出ないときだけ
+          言い、実行先（「DeskMiniで実行中」）は下のセッションの行が言う。どちらも出ないときだけ
           ステッパーが受け持つ */}
       {hasSteps && (
         <WorkflowStatusSteps

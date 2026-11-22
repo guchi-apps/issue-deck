@@ -87,11 +87,11 @@ describe("POST /api/dispatch/pr-review", () => {
     });
   });
 
-  it("実行できるサブPCが無ければ409で理由を返す（Actionsが30分待たずに失敗できる）", async () => {
-    requestPrReviewJob.mockResolvedValue({ ok: false, rejection: "no_host", message: "実行できるサブPCがありません" });
+  it("実行できるDeskMiniが無ければ409で理由を返す（Actionsが30分待たずに失敗できる）", async () => {
+    requestPrReviewJob.mockResolvedValue({ ok: false, rejection: "no_host", message: "実行できるDeskMiniがありません" });
     const response = await post(valid);
     expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ state: "failed", reason: "実行できるサブPCがありません" });
+    expect(await response.json()).toMatchObject({ state: "failed", reason: "実行できるDeskMiniがありません" });
   });
 
   it("状態の取得は積まずに、最新のジョブの状態を返す（baseShaは不要）", async () => {

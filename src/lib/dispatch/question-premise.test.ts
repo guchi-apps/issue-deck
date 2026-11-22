@@ -20,7 +20,7 @@ function comment(
 
 const PLAN = "## 要約\n\n**内訳を直せるようにする**\n\n<!-- issue-deck-agent:planner -->";
 const REPORT = "実装が終わりました\n\n<!-- issue-deck-agent:implementer -->";
-const GUIDE = "🖥️ **サブPCのローカルセッションで対応を開始します。**\n\n<!-- issue-deck-agent:guide -->";
+const GUIDE = "🖥️ **DeskMiniのローカルセッションで対応を開始します。**\n\n<!-- issue-deck-agent:guide -->";
 
 describe("findQuestionPremise", () => {
   it("エージェントが書いた最新のコメントを前提として返す", () => {

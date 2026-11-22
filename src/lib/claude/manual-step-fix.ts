@@ -239,7 +239,7 @@ export function buildManualStepFixPrompt(input: ManualStepFixInput): string {
 ${input.instruction}
 
 - **改行を含まない1行**で、${MANUAL_STEP_INSTRUCTION_MAX_LENGTH}文字以内にしてください（チェックボックス \`- [ ]\` は含めません）
-- **文頭のデバイスの印（\`（ブラウザ）\`・\`（サブPC）\`など）は元のまま残してください**
+- **文頭のデバイスの印（\`（ブラウザ）\`・\`（DeskMini）\`など）は元のまま残してください**
 - **やること自体は変えないでください。** 変えるのは、実物と食い違っている呼び名・場所・操作の言い方だけです
 - 実行時の出力・画面から読み取った値（トークン・パスワード等）を書き込まないでください`
       : null,
@@ -277,7 +277,7 @@ ${input.where.device ?? "作業する端末"}の前におり、「${input.issueT
 
 - \`kind\`が \`manual\` か \`retry\` のときは**必ず1件以上**書いてください（最大${MANUAL_STEP_FIX_STEPS_MAX_COUNT}件）
 ${fixableKinds.length === 0 ? "" : `- \`kind\`が ${fixableKinds.join(" か ")} のときは、**画面のボタンで直る分は書かず**、それでも人がやることが残る場合だけ書いてください（無ければ空配列）\n`}- 1件は**改行を含まない1行**で、${MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH}文字以内。命令形で「何をするか」を書いてください
-- **どこでやるかを文頭に**\`（ローカル）\`\`（ローカル・全ホスト）\`\`（メインPC）\`\`（VPS）\`\`（ブラウザ）\`のいずれかで書いてください（ローカルはサブPC・Mac miniのどちらでもよい手順。各ホストの設定を揃える手順だけ「ローカル・全ホスト」）
+- **どこでやるかを文頭に**\`（ローカル）\`\`（ローカル・全ホスト）\`\`（メインPC）\`\`（VPS）\`\`（ブラウザ）\`のいずれかで書いてください（ローカルはDeskMini・Mac miniのどちらでもよい手順。各ホストの設定を揃える手順だけ「ローカル・全ホスト」）
 - その場で打てるコマンドがあるものは \`steps[].command\` へ入れてください（無ければnull）。コードフェンスを含めず、対話的な入力を求めるコマンド・確認なしで広範囲を消すコマンド（\`rm -rf\`など）にしないでください
 - **原因を特定できなかった場合は、「何を調べれば分かるか」を手順にしてください。** 状況を集めるコマンドを1件目に置き、最後の1件は「その出力を『うまくいかない』の貼り付け欄に貼って、もう一度『原因を調べる』を押す」にしてください
 - 出力・画面から読み取った値（トークン・パスワード等）を書き込まないでください
@@ -286,7 +286,7 @@ ${fixableKinds.length === 0 ? "" : `- \`kind\`が ${fixableKinds.join(" か ")} 
 
 前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
 
-{"kind": ${[canFixCommand ? '"command"' : null, canFixInstruction ? '"instruction"' : null, '"retry"', '"manual"'].filter(Boolean).join(" | ")}, "cause": "何が起きたのかを日本語で1〜3文", "command": "コマンドの修正案（kindがcommandのときだけ。それ以外はnull）", "instruction": "手順の説明文の直し案（kindがinstructionのときだけ。それ以外はnull）", "advice": "補足があれば1〜2文（stepsに書いたことを繰り返さない。無ければnull）", "steps": [{"text": "（サブPC）この後にやること1件を1行で", "command": "そこで打つコマンド（無ければnull）"}]}`;
+{"kind": ${[canFixCommand ? '"command"' : null, canFixInstruction ? '"instruction"' : null, '"retry"', '"manual"'].filter(Boolean).join(" | ")}, "cause": "何が起きたのかを日本語で1〜3文", "command": "コマンドの修正案（kindがcommandのときだけ。それ以外はnull）", "instruction": "手順の説明文の直し案（kindがinstructionのときだけ。それ以外はnull）", "advice": "補足があれば1〜2文（stepsに書いたことを繰り返さない。無ければnull）", "steps": [{"text": "（DeskMini）この後にやること1件を1行で", "command": "そこで打つコマンド（無ければnull）"}]}`;
 }
 
 type AnthropicMessageResponse = {

@@ -239,7 +239,7 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
   });
 
   it("推奨を作れなかった指摘には理由を出し、取り直せる（#5268）", async () => {
-    const reason = "Codex CLIで実行できませんでした: サブPCがジョブを受け取りませんでした（Claudeへは切り替えていません）";
+    const reason = "Codex CLIで実行できませんでした: DeskMiniがジョブを受け取りませんでした（Claudeへは切り替えていません）";
     const calls = mockFetch({
       "/api/repositories/release/review-recommendations": { body: { ...recommendations, failures: { "R-0000bb": reason } } },
     });

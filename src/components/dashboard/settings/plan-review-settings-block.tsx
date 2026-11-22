@@ -79,7 +79,7 @@ export function PlanReviewSettingsBlock({
         <h3 id="plan-review-settings-title" className="font-medium">計画レビュー</h3>
         <InfoHint label="計画レビュー">
           ローカルセッションが計画を投稿した後の自動計画レビューに使うAIです。通常は全体のClaude／Codex切替に従い、
-          ClaudeならサブPCのClaude Codeと「Claude用モデル」、CodexならサブPCのCodex CLIと「Codex用モデル」で動きます。
+          ClaudeならDeskMiniのClaude Codeと「Claude用モデル」、CodexならDeskMiniのCodex CLIと「Codex用モデル」で動きます。
           Issue詳細から手動で始める単独レビューには影響せず、実行中のレビューは途中で変わりません（次の新規レビューから適用）。
         </InfoHint>
       </div>
