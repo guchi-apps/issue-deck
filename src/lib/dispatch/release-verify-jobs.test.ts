@@ -82,6 +82,13 @@ describe("requestReleaseVerifyJob", () => {
     expect(jobCreate).toHaveBeenCalled();
   });
 
+  it("MySQLを要る検証は、subpc以外（macmini）へ振らずno_hostで断る（#5561）", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "macmini", repositories: JSON.stringify(["guchi-apps/asset-manager"]) })]);
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/asset-manager" }, NOW);
+    expect(result).toMatchObject({ ok: false, rejection: "no_host" });
+    expect(jobCreate).not.toHaveBeenCalled();
+  });
+
   it("根拠付きの対象外（アーカイブ等）だけがnot_applicableになる", async () => {
     const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/trainroute" }, NOW);
     expect(result).toMatchObject({ ok: true, outcome: "not_applicable" });

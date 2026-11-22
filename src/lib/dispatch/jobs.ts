@@ -10,7 +10,7 @@ import {
 } from "@/lib/app-settings";
 import type { ModelPickRecord } from "@/lib/claude/model-pick-record";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
-import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
+import { buildIntegrationCommands, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { db } from "@/lib/db";
 import {
   buildCodexPairingActiveKey,
@@ -230,7 +230,7 @@ function toJobView(
     ...(job.kind === "RELEASE_VERIFY"
       ? {
           releaseVerify: {
-            commands: [...(getReleaseVerificationConfig(job.repositoryFullName).integrationCommands ?? [])],
+            commands: buildIntegrationCommands(job.repositoryFullName),
             macBuildCheck: getReleaseVerificationConfig(job.repositoryFullName).macBuildCheck === true,
           },
         }

@@ -26,6 +26,20 @@ test("失敗の種別を区別する", () => {
   expect(kind("pnpm run build:ci", 2)).toBe("test_failed");
 });
 
+test("失敗出力が接続不達・コマンド無しなら、test_failedでなくsetup_missingに分類する（#5561）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "evidence-"));
+  const out = path.join(root, "out.txt");
+  const kind = (text, cmd = "npm run verify:build") => {
+    writeFileSync(out, text);
+    return sh(`evidence_classify_step '${cmd}' 1 '${out}'`, root);
+  };
+  expect(kind("Error: P1001: Can't reach database server at `127.0.0.1:3306`")).toBe("setup_missing");
+  expect(kind("connect ECONNREFUSED 127.0.0.1:3306")).toBe("setup_missing");
+  expect(kind("bash: mysqld: command not found")).toBe("setup_missing");
+  expect(kind("AssertionError: expected 1 to be 2")).toBe("test_failed");
+  expect(kind("npm ERR! network", "npm ci")).toBe("dependency_install_failed");
+});
+
 test("証跡が無い・SHAが違うときは未実施として渡し、不合格にしない", () => {
   const root = mkdtempSync(path.join(tmpdir(), "evidence-"));
   const none = sh(`evidence_prompt_text o/r 1 ${BASE} ${HEAD}`, root);

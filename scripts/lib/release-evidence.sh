@@ -72,10 +72,11 @@ evidence_redact_shape() {
   fi
 }
 
-# evidence_classify_step <コマンド> <終了コード>: 失敗の種別を標準出力へ
+# evidence_classify_step <コマンド> <終了コード> [出力ファイル]: 失敗の種別を標準出力へ
 #   dependency_install_failed / setup_missing / timeout / test_failed
+# 出力ファイルがあれば、接続不達・コマンド無しの文言（環境の不足）を`test_failed`にせず`setup_missing`へ寄せる（#5561）
 evidence_classify_step() {
-  local command="$1" code="$2"
+  local command="$1" code="$2" output_file="${3:-}"
   case "$code" in
     124 | 137) printf 'timeout'; return ;;
     126 | 127) printf 'setup_missing'; return ;;
@@ -83,6 +84,12 @@ evidence_classify_step() {
   if [[ "$command" =~ (^|[[:space:]\&\;])(pnpm|npm|yarn|bun)[[:space:]]+(install|ci|i)([[:space:]]|$) ||
     "$command" =~ pip[[:space:]]+install ]]; then
     printf 'dependency_install_failed'
+    return
+  fi
+  if [[ -n "$output_file" && -r "$output_file" ]] &&
+    tail -n 200 "$output_file" | tr -d '\000' |
+      grep -Eq "P1001|Can't reach database server|ECONNREFUSED|command not found|Connection refused"; then
+    printf 'setup_missing'
     return
   fi
   printf 'test_failed'

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isIntegrationEnvironmentFailure } from "@/lib/release-integration-environment";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 import { BLOCKING_POLICY_LINES, RELEASE_REVIEW_CHECK_ITEMS, RELEASE_REVIEW_CHECKLIST_VERSION } from "@/lib/release-review-checklist";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
@@ -242,7 +243,7 @@ const EXECUTION_FAILURE_PATTERNS: ReadonlyArray<RegExp> = [
 export function classifyIntegrationFailure(text: string | null | undefined): "execution" | "code" | "unknown" {
   const body = (text ?? "").trim();
   if (body === "") return "unknown";
-  if (EXECUTION_FAILURE_PATTERNS.some((pattern) => pattern.test(body))) return "execution";
+  if (isIntegrationEnvironmentFailure(body) || EXECUTION_FAILURE_PATTERNS.some((pattern) => pattern.test(body))) return "execution";
   if (/(?:test|テスト|build|ビルド|lint|型チェック|tsc|conflict|競合|failed|FAIL)/i.test(body)) return "code";
   return "unknown";
 }
