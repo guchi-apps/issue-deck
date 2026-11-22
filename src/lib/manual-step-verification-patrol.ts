@@ -95,16 +95,22 @@ export async function runManualStepVerificationPatrol(now: Date = new Date()): P
   const hosts = await listPatrolHosts(now);
   const host = hosts[0] ?? null;
   if (host === null) return;
+  // VPSの確認コマンドは、優先順の先頭に限らずVPS対応のオンラインhostがあれば流せる（#5586）
+  const vpsHostNames = hosts
+    .filter((entry) => entry.manualStepVpsCapable === true)
+    .map((entry) => entry.name);
 
   lastCandidateSearchAtMs = now.getTime();
   const target = await findNextPatrolTarget(
     now,
-    host.manualStepVpsCapable === true,
+    vpsHostNames,
     hosts.map((entry) => entry.name),
   );
   if (target === null) return;
-  // 全ホストで揃える手作業は、未適用のオンラインのホストへ積む（#5568）。それ以外は優先順の先頭
-  const patrolHost = target.hostName ?? host.name;
+  // 全ホストで揃える手作業は、未適用のオンラインのホストへ積む（#5568）。それ以外は優先順の先頭。
+  // VPSの手順はVPS対応のhostへ積む（#5586）
+  const patrolHost =
+    target.hostName ?? (target.runTarget === "vps" ? vpsHostNames[0] : undefined) ?? host.name;
 
   const started = await db.manualStepVerificationCheck.upsert({
     where: {
@@ -480,6 +486,7 @@ type PatrolTarget = {
   issueNumber: number;
   /** 全ホストで揃える手作業の、積む先に選んだ未適用のホスト（#5568）。無ければ優先順の先頭 */
   hostName?: string;
+  runTarget?: string;
 };
 
 /**
@@ -491,8 +498,8 @@ type PatrolTarget = {
  */
 async function findNextPatrolTarget(
   now: Date,
-  /** 積む先のホストがVPSの確認コマンドを流せるか（#2901） */
-  vpsCapable: boolean,
+  /** VPSの確認コマンドを流せるオンラインのホスト名（優先順。#2901・#5586） */
+  vpsHostNames: readonly string[],
   /** 積む先になれるホスト名（優先順。#5568） */
   onlineHostNames: readonly string[],
 ): Promise<PatrolTarget | null> {
@@ -512,9 +519,11 @@ async function findNextPatrolTarget(
 
   // **VPSの確認コマンドは、そこへ到達できるホストが居るときだけ候補にする**（#2901）。
   // 積んでも`manual_step_vps_unsupported`で弾かれ、巡回の記録だけが失敗として残る
+  const runTargets = new Map<number, string>();
   const candidates = issues.filter((issue) => {
     const target = resolveManualStepPatrolTarget(issue.body, true, toPatrolAuthor(issue));
-    return target.patrollable && (target.runTarget !== "vps" || vpsCapable);
+    if (target.patrollable) runTargets.set(issue.number, String(target.runTarget));
+    return target.patrollable && (target.runTarget !== "vps" || vpsHostNames.length > 0);
   });
   if (candidates.length === 0) return null;
 
@@ -573,7 +582,7 @@ async function findNextPatrolTarget(
     if (busy.has(key)) continue;
     const pendingHost = pickPendingManualStepHost(
       applications.get(`${issue.repository.fullName}#${issue.number}`) ?? [],
-      onlineHostNames,
+      runTargets.get(issue.number) === "vps" ? vpsHostNames : onlineHostNames,
     );
     const last = checkedAt.get(key);
     if (last && now.getTime() - last.getTime() < PATROL_INTERVAL_MS) {
@@ -584,6 +593,7 @@ async function findNextPatrolTarget(
     return {
       repositoryFullName: issue.repository.fullName,
       issueNumber: issue.number,
+      runTarget: runTargets.get(issue.number),
       ...(pendingHost === null ? {} : { hostName: pendingHost }),
     };
   }

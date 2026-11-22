@@ -192,6 +192,22 @@ describe("runManualStepVerificationPatrol", () => {
     );
   });
 
+  it("VPSの確認コマンドは、優先順2位以下でもVPS対応のオンラインホストへ積む（#5586）", async () => {
+    issueFindMany.mockResolvedValue([
+      issueRow({ body: BODY.replace("**DeskMini**（`ssh subpc`）", "VPS") }),
+    ]);
+    dispatchHostFindMany.mockResolvedValue([
+      { name: "subpc", manualStepCapable: true, manualStepVpsCapable: null, lastSeenAt: NOW },
+      { name: "macmini", manualStepCapable: true, manualStepVpsCapable: true, lastSeenAt: NOW },
+    ]);
+
+    await patrol.runManualStepVerificationPatrol(NOW);
+
+    expect(enqueueManualStepJob).toHaveBeenCalledWith(
+      expect.objectContaining({ hostName: "macmini" }),
+    );
+  });
+
   it("代行実行を申告して応答しているホストが居なければ何もしない", async () => {
     dispatchHostFindMany.mockResolvedValue([
       { name: "subpc", manualStepCapable: true, lastSeenAt: new Date("2026-08-19T00:00:00.000Z") },
