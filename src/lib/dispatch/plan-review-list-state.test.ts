@@ -60,31 +60,31 @@ describe("resolvePlanReviewListState", () => {
     ).toBe("creating");
   });
 
-  it("猶予内でも、採否が決まっていれば提示済（#3648）", () => {
+  it("猶予内でも、採否が決まっていればnull（提示済の状態は持たない。#3648・#5571）", () => {
     expect(
       resolvePlanReviewListState({
         ...base,
         jobs: [job({ finishedAt: "2026-09-29T11:57:00Z", planReviewDecidedAt: "2026-09-29T11:59:00Z" })],
         labels: planLabels,
       }),
-    ).toBe("presented");
+    ).toBeNull();
   });
 
-  it("猶予後で承認待ちなら提示済", () => {
-    expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBe("presented");
+  it("猶予後で承認待ちでもnull（#5571）", () => {
+    expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBeNull();
   });
 
-  it("承認待ちでなければnull", () => {
+  it("承認待ちでなくてもnull", () => {
     expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: [] })).toBeNull();
   });
 
-  it.each(["FAILED", "SKIPPED", "TIMEOUT", "CANCELED"] as const)("%sは提示済にしない", (status) => {
+  it.each(["FAILED", "SKIPPED", "TIMEOUT", "CANCELED"] as const)("%sはnullにする", (status) => {
     expect(
       resolvePlanReviewListState({ ...base, jobs: [job({ status })], labels: planLabels }),
     ).toBeNull();
   });
 
-  it("計画リクエストより古いジョブは提示済にしない", () => {
+  it("計画リクエストより古いジョブはnullにする", () => {
     expect(
       resolvePlanReviewListState({
         ...base,
@@ -95,8 +95,8 @@ describe("resolvePlanReviewListState", () => {
     ).toBeNull();
   });
 
-  it("計画リクエストが消えていれば（期限切れ後）ジョブの存在だけで提示済", () => {
-    expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBe("presented");
+  it("計画リクエストが消えていれば（期限切れ後）ジョブがあってもnull", () => {
+    expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBeNull();
   });
 });
 
@@ -133,7 +133,6 @@ describe("isPlanReviewListStateHolding", () => {
     ["queued", true],
     ["creating", true],
     ["queued_overdue", false],
-    ["presented", false],
     [null, false],
   ] as const)("%sは%s", (state, expected) => {
     expect(isPlanReviewListStateHolding(state)).toBe(expected);
