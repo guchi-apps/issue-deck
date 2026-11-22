@@ -605,3 +605,47 @@ describe("DispatchQueueButton の更新インジケーター（#1773）", () => 
     expect(button.className).toContain("text-amber-700");
   });
 });
+
+describe("DispatchQueueButton の順番待ちのホスト別表示と移動（#5589）", () => {
+  it("順番待ちは待っているホストのカードの中に出て、もう一方のホストへ移せる", async () => {
+    const reassign = vi.fn().mockResolvedValue({ ok: true });
+    const dispatch = {
+      ...makeDispatch([
+        makeJob({ id: "job-1", issueNumber: 1701, status: "QUEUED", finishedAt: null }),
+      ]),
+      hosts: [makeHost({ name: "subpc" }), makeHost({ name: "macmini" })],
+      reassign,
+    } as unknown as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    // 外側ではなく、待っている`subpc`のカード（rounded-md border）の内側にある
+    const heading = screen.getByText("順番待ち");
+    expect(heading.closest(".rounded-md.border")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("#1701のジョブをMac miniへ移す"));
+    expect(reassign).toHaveBeenCalledWith("job-1", "macmini");
+  });
+
+  it("引き継ぎ起動の行には移すボタンを出さない", async () => {
+    const dispatch = {
+      ...makeDispatch([
+        makeJob({
+          id: "job-1",
+          issueNumber: 1702,
+          status: "QUEUED",
+          finishedAt: null,
+          handoffFrom: "codex",
+        }),
+      ]),
+      hosts: [makeHost({ name: "subpc" }), makeHost({ name: "macmini" })],
+      reassign: vi.fn(),
+    } as unknown as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    expect(screen.queryByLabelText(/へ移す/)).toBeNull();
+  });
+});

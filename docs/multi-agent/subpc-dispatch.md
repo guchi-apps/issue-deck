@@ -2343,6 +2343,26 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 - 消した失敗はIssue詳細のジョブ状態表示（`dispatch-job-status.tsx`）からも同時に消える。
   どちらも`GET /api/dispatch`の同じ`jobs`を読んでいるため
 
+### 順番待ちはホストのカードの中に出て、別のホストへ移せる（#5589）
+
+実行状況の「順番待ち」は、**待っているホスト（`DispatchJob.targetHost`）のカードの内側の下**に出る
+（従来は全ホスト共通の枠の外で、MacminiとDeskMiniのどちらで待っているか分からなかった）。
+進まない理由（セッション上限・メモリ逼迫・オフライン）もそのカードへ出す。ホストの一覧に載っていない
+ホスト宛てのジョブだけは、従来どおり外側の節に残す。スマホのコンパクトカードには件数だけ出す。
+
+各行の「<他ホスト>へ移す」（`POST /api/dispatch/<id>/reassign`、本文`{ "toHostName": "…" }`）は、
+**人が押した1回の操作だけ**で、自動の振り替えは作らない。払い出しは`targetHost`が自分のジョブだけを
+取るので、`targetHost`を書き換えるだけで移る（順番は移し先の末尾・優先度は0へ戻す）。
+
+- **移せるのは`kind=LAUNCH`かつ`handoffFrom`なしの`QUEUED`だけ。** コードレビュー・手作業・レビュー
+  修正は移し先の申告（`*Capable`）が別に要り、引き継ぎ起動は元セッションのあるホストのtmuxから
+  要約を書き出す作りで、別ホストでは元セッションが見つからない。サーバー（`reassignDispatchJob`）が
+  弾き、画面（`resolveJobReassignOptions`）はその行にボタンを出さない
+- **移し先の可否は積む時と同じ判定**（`jobs.ts`の`checkLaunchTarget`。ホストの存在・オンライン・
+  登録リポジトリ・エージェント対応・一時停止）。`enqueueDispatchJob`から切り出して共有している。
+  移し先が使えないときは、画面では押せない状態にして理由をツールチップに出す
+- 更新は`status=QUEUED`と元の`targetHost`を条件にした`updateMany`で、払い出し・取り消しと競合したら失敗を返す
+
 ### 順番待ちは「先頭へ上げる」だけができる（#1541）
 
 キューは`createdAt`の昇順で流れる＝**積んだ順**で、これは「順に実行してほしい」という要求
@@ -2637,6 +2657,7 @@ poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaude
 | `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`のセッションを立てるジョブのみ。#1541） |
+| `POST /api/dispatch/<id>/reassign` | ログインセッション | 順番待ちの起動ジョブを別のホストへ移す（`LAUNCH`・引き継ぎなしの`QUEUED`のみ。#5589） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・セッションの本数と上限・リソース使用率も申告する） |

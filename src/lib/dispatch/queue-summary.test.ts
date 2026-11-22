@@ -8,7 +8,11 @@ import {
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
   describeDispatchSessionLoad,
+  countQueuedJobsByHost,
+  resolveJobReassignOptions,
   selectHostCodexPairingJob,
+  selectHostQueuedJobs,
+  selectQueuedJobsWithoutHost,
   selectHostSelfUpdateJob,
   selectHostSessions,
   summarizeDispatchQueue,
@@ -616,5 +620,46 @@ describe("selectHostCodexPairingJob", () => {
 
   it("そのホストのペアリングが無ければnull", () => {
     expect(selectHostCodexPairingJob([job({ kind: "LAUNCH" })], "subpc")).toBeNull();
+  });
+});
+
+describe("順番待ちのホスト別表示と移し先（#5589）", () => {
+  const mac = host({ name: "macmini" });
+  const desk = host({ name: "deskmini" });
+
+  it("ホスト別に順番待ちを抜き出し、件数を数え、カードが無いホスト宛ては外側に残す", () => {
+    const queued = [
+      job({ id: "a", targetHost: "macmini" }),
+      job({ id: "b", targetHost: "deskmini" }),
+      job({ id: "c", targetHost: "gone" }),
+    ];
+    expect(selectHostQueuedJobs(queued, "macmini").map((j) => j.id)).toEqual(["a"]);
+    expect(countQueuedJobsByHost(queued)).toEqual({ macmini: 1, deskmini: 1, gone: 1 });
+    expect(selectQueuedJobsWithoutHost(queued, [mac, desk]).map((j) => j.id)).toEqual(["c"]);
+  });
+
+  it("起動ジョブは他のホストを移し先の候補にする", () => {
+    const result = resolveJobReassignOptions(job({ targetHost: "macmini" }), [mac, desk]);
+    expect(result.blockedReason).toBeNull();
+    expect(result.targets).toEqual([
+      { hostName: "deskmini", label: expect.any(String), blockedReason: null },
+    ]);
+  });
+
+  it("起動以外・引き継ぎ起動は移せない", () => {
+    expect(
+      resolveJobReassignOptions(job({ kind: "CODE_REVIEW" }), [mac, desk]).blockedReason,
+    ).not.toBeNull();
+    expect(
+      resolveJobReassignOptions(job({ handoffFrom: "codex" }), [mac, desk]).blockedReason,
+    ).not.toBeNull();
+  });
+
+  it("移し先がオフライン・リポジトリ未登録なら候補ごと理由を返す", () => {
+    const offline = host({ name: "deskmini", online: false });
+    const noRepo = host({ name: "deskmini", repositories: [] });
+    const j = job({ targetHost: "macmini" });
+    expect(resolveJobReassignOptions(j, [mac, offline]).targets[0].blockedReason).not.toBeNull();
+    expect(resolveJobReassignOptions(j, [mac, noRepo]).targets[0].blockedReason).not.toBeNull();
   });
 });
