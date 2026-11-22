@@ -57,11 +57,14 @@ export function IssueAttentionLine({
   attention,
   className,
   compact = false,
+  trailing,
 }: {
   attention: IssueAttention;
   className?: string;
-  /** 一覧の行など、次の行動を1〜2行に収めたいとき */
+  /** 一覧の行など、説明文を出さず状態バッジだけにしたいとき（#5581） */
   compact?: boolean;
+  /** compactのとき、説明文の代わりに右側へ出すもの（モデル・実行ホスト） */
+  trailing?: React.ReactNode;
 }) {
   const Icon = ICONS[attention.kind];
   return (
@@ -85,9 +88,11 @@ export function IssueAttentionLine({
         />
         {attention.label}
       </span>
-      <span className={cn("min-w-0 break-words text-foreground", compact && "line-clamp-2")}>
-        {attention.nextAction}
-      </span>
+      {compact ? (
+        trailing && <span className="ml-auto flex min-w-0 items-center">{trailing}</span>
+      ) : (
+        <span className="min-w-0 break-words text-foreground">{attention.nextAction}</span>
+      )}
     </div>
   );
 }

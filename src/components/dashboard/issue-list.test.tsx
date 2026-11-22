@@ -429,21 +429,27 @@ function makeDispatch(
   } as unknown as DispatchStateHandle;
 }
 
-describe("Issue一覧の実装エージェント表示（#2581）", () => {
-  it("CodexセッションのIssueにCodexバッジを表示する", () => {
-    renderList({ dispatch: makeDispatch([makeSession({ codexThreadKnown: false })]) });
-    expect(screen.getByText("Codex")).toBeTruthy();
-  });
-
-  it("Claude CodeセッションのIssueにClaudeバッジを表示する", () => {
-    renderList({ dispatch: makeDispatch([makeSession({ codexThreadKnown: null })]) });
-    expect(screen.getByText("Claude")).toBeTruthy();
-  });
-
-  it("セッションが無いIssueにはエージェントバッジを表示しない", () => {
-    renderList({ dispatch: makeDispatch([]) });
-    expect(screen.queryByText("Codex")).toBeNull();
+describe("Issue一覧のモデル・実行ホスト表示（#5581）", () => {
+  it("モデル名と実行ホストを出し、Claude・Codexの文字バッジは出さない", () => {
+    renderList({
+      dispatch: makeDispatch([
+        makeSession({ codexThreadKnown: null, models: ["claude-opus-5-5"], host: "subpc" }),
+      ]),
+    });
+    expect(screen.getByText("Opus 5.5")).toBeTruthy();
+    expect(screen.getByText("・サブPC")).toBeTruthy();
     expect(screen.queryByText("Claude")).toBeNull();
+    expect(screen.queryByText("Codex")).toBeNull();
+  });
+
+  it("モデルがまだ分からないときは「モデル確認中」を出す", () => {
+    renderList({ dispatch: makeDispatch([makeSession({ codexThreadKnown: false, models: [] })]) });
+    expect(screen.getByText("モデル確認中")).toBeTruthy();
+  });
+
+  it("セッションが無いIssueにはモデル表示を出さない", () => {
+    renderList({ dispatch: makeDispatch([]) });
+    expect(document.querySelector("[data-session-runtime]")).toBeNull();
   });
 });
 
