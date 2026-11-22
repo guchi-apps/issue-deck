@@ -14,6 +14,10 @@ import { useState } from "react";
 
 import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import {
+  isManualStepAppliedOnAllHosts,
+  type ManualStepHostApplication,
+} from "@/lib/manual-step-host-application";
+import {
   WORK_STATUS_VIEW,
   WORK_TONE_CLASS,
   WorkPurposeAndCriteria,
@@ -94,6 +98,7 @@ export function ManualStepPanel({
   prerequisiteSummary,
   dependents,
   verifiedAt,
+  hostApplications,
   comments,
   configTargets,
   onCreateConfigIssue,
@@ -117,6 +122,8 @@ export function ManualStepPanel({
   dependents?: IssueDependent[];
   /** 定期巡回で`## 完了の確認方法`のコマンドがすべて通った日時（ISO8601。#2008） */
   verifiedAt?: string | null;
+  /** ローカルの全ホストで揃える手作業の、ホストごとの適用状況（#5568）。対象外はnull・未定義 */
+  hostApplications?: readonly ManualStepHostApplication[] | null;
   /** Issueのコメント。セッションの事前調査・完了検証の報告を読む（#4315） */
   comments?: readonly IssueComment[];
   /** 実機のファイルを書き換える手順のうち、管理リポジトリで管理されているもの（#2021） */
@@ -158,6 +165,9 @@ export function ManualStepPanel({
   const supplements = (
     <>
       {blocking && prerequisitesNode}
+      {hostApplications && hostApplications.length > 0 && (
+        <ManualStepHostApplicationNotice applications={hostApplications} />
+      )}
       {/* 実機を直接書き換える手順は、リポジトリ経由へ寄せられる（#2021） */}
       {onCreateConfigIssue && configTargets && configTargets.length > 0 && (
         <InfraConfigNotice
@@ -753,6 +763,42 @@ function VerificationResult({
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * ローカルの全ホストで揃える手作業の、ホストごとの適用状況（#5568）。
+ *
+ * **全ホストで確認が通るまで完了にしない**ことを、未適用のホスト名つきで見せる。
+ * オフラインのホストは「未適用」のまま残り、戻ったときの実行対象になる。
+ */
+function ManualStepHostApplicationNotice({
+  applications,
+}: {
+  applications: readonly ManualStepHostApplication[];
+}) {
+  const allApplied = isManualStepAppliedOnAllHosts(applications);
+  return (
+    <p
+      className={cn(
+        "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-xs",
+        allApplied
+          ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+          : "border-amber-500/40 bg-amber-500/5 text-amber-800 dark:text-amber-300",
+      )}
+    >
+      <span className="font-medium">ローカルの全ホストで揃える手順:</span>
+      {applications.map((entry) => (
+        <span key={entry.host} className="whitespace-nowrap">
+          {formatDispatchHostName(entry.host)} {entry.applied ? "済" : "未適用"}
+        </span>
+      ))}
+      {!allApplied && (
+        <span className="text-muted-foreground">
+          全ホストで確認が通るまで完了にしません（オフラインのホストは戻ったときに実行します）。
+        </span>
+      )}
+    </p>
   );
 }
 

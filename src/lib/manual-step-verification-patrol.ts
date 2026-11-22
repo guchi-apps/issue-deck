@@ -11,6 +11,13 @@ import { enqueueManualStepJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { extractVerificationCommands, type ManualStepCommand } from "@/lib/manual-step-command";
 import {
+  describeManualStepHostApplications,
+  isManualStepAppliedOnAllHosts,
+  listManualStepHostApplications,
+  pickPendingManualStepHost,
+  type ManualStepHostApplication,
+} from "@/lib/manual-step-host-application";
+import {
   resolveManualStepPatrolTarget,
   type ManualStepPatrolAuthor,
 } from "@/lib/manual-step-verification";
@@ -85,12 +92,19 @@ export async function runManualStepVerificationPatrol(now: Date = new Date()): P
 
   if (now.getTime() - lastCandidateSearchAtMs < CANDIDATE_SEARCH_INTERVAL_MS) return;
 
-  const host = await pickPatrolHost(now);
+  const hosts = await listPatrolHosts(now);
+  const host = hosts[0] ?? null;
   if (host === null) return;
 
   lastCandidateSearchAtMs = now.getTime();
-  const target = await findNextPatrolTarget(now, host.manualStepVpsCapable === true);
+  const target = await findNextPatrolTarget(
+    now,
+    host.manualStepVpsCapable === true,
+    hosts.map((entry) => entry.name),
+  );
   if (target === null) return;
+  // 全ホストで揃える手作業は、未適用のオンラインのホストへ積む（#5568）。それ以外は優先順の先頭
+  const patrolHost = target.hostName ?? host.name;
 
   const started = await db.manualStepVerificationCheck.upsert({
     where: {
@@ -102,9 +116,9 @@ export async function runManualStepVerificationPatrol(now: Date = new Date()): P
     create: {
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
-      ...patrolStartValues(host.name, now),
+      ...patrolStartValues(patrolHost, now),
     },
-    update: patrolStartValues(host.name, now),
+    update: patrolStartValues(patrolHost, now),
   });
   await syncCheck(started, now);
 }
@@ -194,6 +208,10 @@ export async function recordManualStepVerificationPass(params: {
 
   const matched = commands.map((entry) => latestByCommand.get(entry.command));
   if (matched.some((entry) => entry === undefined)) return false;
+  // 全ホストで揃える手作業は、全ホストで通るまで「確認がすべて通った」にしない（#5568）
+  if ((await describeUnappliedHosts(params.repositoryFullName, params.issueNumber)) !== null) {
+    return false;
+  }
 
   // **揃った時刻は「最後の1件が通った時刻」**。画面はこれを出すので、いちばん古い成功では
   // 新しく見えすぎ、`now`では実行していない時刻を出すことになる
@@ -357,6 +375,12 @@ async function syncCheck(
   const doneLines = parseDoneLines(current.doneLines);
   const next = target.find((command) => !doneLines.has(command.stepLine));
   if (next === undefined) {
+    // 全ホストで揃える手作業は、**全ホストで確認が通るまで「完了済みの可能性」にしない**（#5568）。
+    // 未適用のホストは次の巡回でオンラインになっていれば確かめる
+    const hostGate = await describeUnappliedHosts(current.repositoryFullName, current.issueNumber);
+    if (hostGate !== null) {
+      return finishCheck(current, "UNAVAILABLE", `このホストでは通りましたが、${hostGate}`, now);
+    }
     // **ここが「完了済みの可能性」。** 全部が終了コード0で終わったというだけで、完了ではない
     return finishCheck(current, "PASSED", null, now);
   }
@@ -437,19 +461,26 @@ async function finishCheck(
   });
 }
 
-/** 積む先のホスト。**代行実行を申告していて応答しているホスト**が居なければ巡回しない */
-async function pickPatrolHost(
+/**
+ * 積む先になれるホストを優先順→名前順に並べて返す。**代行実行を申告していて応答しているホスト**だけで、
+ * 1台も居なければ空（巡回しない）。順序は決定的にする（#5568。順序の無い`findMany`のままだと
+ * 巡回のたびにホストが変わる）
+ */
+async function listPatrolHosts(
   now: Date,
-): Promise<{ name: string; manualStepVpsCapable: boolean | null } | null> {
+): Promise<{ name: string; manualStepVpsCapable: boolean | null }[]> {
   const hosts = await db.dispatchHost.findMany({ where: { manualStepCapable: true } });
-  // 優先順→名前順で決定的に選ぶ（#5568）。順序の無い`findMany`のままだと巡回のたびにホストが変わる
-  const online = sortDispatchHostsByPriority(hosts).find((host) =>
-    isDispatchHostOnline(host.lastSeenAt, now),
-  );
-  return online ? { name: online.name, manualStepVpsCapable: online.manualStepVpsCapable } : null;
+  return sortDispatchHostsByPriority(hosts)
+    .filter((host) => isDispatchHostOnline(host.lastSeenAt, now))
+    .map((host) => ({ name: host.name, manualStepVpsCapable: host.manualStepVpsCapable }));
 }
 
-type PatrolTarget = { repositoryFullName: string; issueNumber: number };
+type PatrolTarget = {
+  repositoryFullName: string;
+  issueNumber: number;
+  /** 全ホストで揃える手作業の、積む先に選んだ未適用のホスト（#5568）。無ければ優先順の先頭 */
+  hostName?: string;
+};
 
 /**
  * 次に巡回するIssueを1件選ぶ。
@@ -462,6 +493,8 @@ async function findNextPatrolTarget(
   now: Date,
   /** 積む先のホストがVPSの確認コマンドを流せるか（#2901） */
   vpsCapable: boolean,
+  /** 積む先になれるホスト名（優先順。#5568） */
+  onlineHostNames: readonly string[],
 ): Promise<PatrolTarget | null> {
   const issues = await db.issue.findMany({
     where: { state: "OPEN", labels: { some: { name: MANUAL_STEP_LABEL } } },
@@ -522,12 +555,37 @@ async function findNextPatrolTarget(
     ...activeJobs.flatMap((job) => (job.activeKey === null ? [] : [stripJobKind(job.activeKey)])),
   ]);
 
+  // 全ホストで揃える手作業は、未適用のホストごとに確かめる（#5568）
+  const applications = await listManualStepHostApplications(
+    candidates.map((issue) => ({
+      repositoryFullName: issue.repository.fullName,
+      number: issue.number,
+      body: issue.body,
+    })),
+  );
+  const lastHostByKey = new Map(checks.map((check) => [
+    buildDispatchActiveKey(check.repositoryFullName, check.issueNumber),
+    check.targetHost,
+  ]));
+
   for (const issue of candidates) {
     const key = buildDispatchActiveKey(issue.repository.fullName, issue.number);
     if (busy.has(key)) continue;
+    const pendingHost = pickPendingManualStepHost(
+      applications.get(`${issue.repository.fullName}#${issue.number}`) ?? [],
+      onlineHostNames,
+    );
     const last = checkedAt.get(key);
-    if (last && now.getTime() - last.getTime() < PATROL_INTERVAL_MS) continue;
-    return { repositoryFullName: issue.repository.fullName, issueNumber: issue.number };
+    if (last && now.getTime() - last.getTime() < PATROL_INTERVAL_MS) {
+      // 間隔の内でも、前回と**別の**未適用ホストがオンラインなら確かめる。同じホストは1日1回まで
+      // （確認が通らないホストを10分ごとに流し続けない）
+      if (pendingHost === null || pendingHost === lastHostByKey.get(key)) continue;
+    }
+    return {
+      repositoryFullName: issue.repository.fullName,
+      issueNumber: issue.number,
+      ...(pendingHost === null ? {} : { hostName: pendingHost }),
+    };
   }
   return null;
 }
@@ -541,6 +599,31 @@ async function findNextPatrolTarget(
 function stripJobKind(activeKey: string): string {
   const separator = activeKey.indexOf(":");
   return separator === -1 ? activeKey : activeKey.slice(separator + 1);
+}
+
+/**
+ * 全ホストで揃える手作業なのに、未適用のホストが残っているときの説明（#5568）。
+ * 対象でない（全ホストの印が無い）・全ホストで済んでいるときは`null`
+ */
+async function describeUnappliedHosts(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<string | null> {
+  const applications = await loadHostApplications(repositoryFullName, issueNumber);
+  if (applications === null || isManualStepAppliedOnAllHosts(applications)) return null;
+  return `全ホストでは未適用です（${describeManualStepHostApplications(applications)}）。`;
+}
+
+async function loadHostApplications(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<ManualStepHostApplication[] | null> {
+  const issue = await loadManualStepIssue(repositoryFullName, issueNumber);
+  if (issue === null) return null;
+  const map = await listManualStepHostApplications([
+    { repositoryFullName, number: issueNumber, body: issue.body },
+  ]);
+  return map.get(`${repositoryFullName}#${issueNumber}`) ?? null;
 }
 
 /** 巡回する確認コマンドを本文から取り直す。対象から外れていれば`null` */

@@ -321,6 +321,8 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
     // 「カレントディレクトリ」より先に「ディレクトリ」を見ないよう、長い語から順に判定する
     if (where.device === null && label.includes("デバイス")) {
       where.device = value;
+      // `cleanWhereValue`は末尾の括弧書きを落とすため、「全ホスト」の印は生の値から読む（#5568）
+      where.allHosts = hasAllHostsMarker(normalizeInline(item[1].slice(separator.index + 1)));
       where.connect = extractConnectCommand(item[1].slice(separator.index + 1));
     }
     else if (where.directory === null && label.includes("ディレクトリ")) where.directory = value;
@@ -330,7 +332,6 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
   // 端末が2つ以上書かれていたら既定値は決まらない（#2052）。0個・1個のときは書かれた値を
   // そのまま既定値にする——`本番VPS`のような書き方を、正式名へ丸めずチップにも理由文にも出す
   where.defaultDevice = matchManualStepDeviceNames(where.device).length >= 2 ? null : where.device;
-  where.allHosts = hasAllHostsMarker(where.device);
 
   return where;
 }
