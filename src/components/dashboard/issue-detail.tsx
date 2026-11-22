@@ -1163,6 +1163,7 @@ export function IssueDetail({
                   prerequisiteSummary={manualStepPrerequisites.summary}
                   dependents={manualStepPrerequisites.dependents}
                   verifiedAt={issue.manualStepVerifiedAt}
+                  hostApplications={issue.manualStepHostApplications}
                   comments={comments}
                   configTargets={infraConfigTargets}
                   onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}

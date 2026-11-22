@@ -49,6 +49,8 @@ import {
   describeManualStepExecutionRejection,
   resolveManualStepExecutionRejection,
   resolveManualStepHost,
+  resolveDefaultManualStepSessionHost,
+  sortDispatchHostsByPriority,
   CODEX_LIMITATIONS,
   DEFAULT_DISPATCH_AGENT,
   describeDispatchAgent,
@@ -2108,5 +2110,40 @@ describe("退避指示の対応判定（#4408）", () => {
   });
   it("対応申告なら退避付き指示を許可する", () => {
     expect(resolveSessionControlRejection({ host: { online: true, instructionCapable: true, sessionControlCapable: true, stashInputCapable: true }, session: { state: "ALIVE", codexThreadKnown: null }, kind: "INSTRUCTION", stashInput: true, hasActiveControlJob: false })).toBeNull();
+  });
+});
+
+describe("ホストの選び方は決定的（#5568）", () => {
+  const host = (name: string, priority?: number | null) =>
+    ({
+      name,
+      priority,
+      online: true,
+      manualStepCapable: true,
+      manualStepSessionCapable: true,
+    }) as unknown as Parameters<typeof resolveManualStepHost>[0][number];
+
+  it("優先順→ホスト名の順に並べる。未申告は最後尾", () => {
+    const sorted = sortDispatchHostsByPriority([
+      host("subpc"),
+      host("macmini", 5),
+      host("zeta", 1),
+    ]);
+    expect(sorted.map((h) => h.name)).toEqual(["zeta", "macmini", "subpc"]);
+  });
+
+  it("入力の並びが違っても同じホストを選ぶ（1台でよい手順・手作業セッション）", () => {
+    const a = [host("subpc"), host("macmini")];
+    const b = [host("macmini"), host("subpc")];
+    expect(resolveManualStepHost(a)?.name).toBe("macmini");
+    expect(resolveManualStepHost(b)?.name).toBe("macmini");
+    expect(resolveDefaultManualStepSessionHost(a)?.name).toBe("macmini");
+    expect(resolveDefaultManualStepSessionHost(b)?.name).toBe("macmini");
+  });
+
+  it("優先順を申告したホストを先に選び、オフラインは飛ばす", () => {
+    const hosts = [host("macmini", 2), { ...host("subpc", 1), online: false }];
+    expect(resolveManualStepHost(hosts)?.name).toBe("macmini");
+    expect(resolveManualStepHost([host("macmini", 2), host("subpc", 1)])?.name).toBe("subpc");
   });
 });

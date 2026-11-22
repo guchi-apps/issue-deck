@@ -776,6 +776,8 @@ export type DispatchHostView = {
    * `failed`で返すため、配ると押した起動が失われる。
    */
   manualStepSessionCapable: boolean | null;
+  /** 手作業の担当ホストの優先順（#5568）。小さい方が先。未申告は最後尾 */
+  priority?: number | null;
   /**
    * develop向けPRのAIレビュー（#3990）を実行できるか。**`null`・未定義は「できない」**
    * （古いpollerは未知の種別を`failed`で返すため、配るとレビューが必ず失敗として残る）。
@@ -1579,7 +1581,11 @@ export function resolveManualStepSessionRejection(params: {
 export function resolveDefaultManualStepSessionHost(
   hosts: readonly DispatchHostView[],
 ): DispatchHostView | null {
-  return hosts.find((host) => host.online && host.manualStepSessionCapable === true) ?? null;
+  return (
+    sortDispatchHostsByPriority(hosts).find(
+      (host) => host.online && host.manualStepSessionCapable === true,
+    ) ?? null
+  );
 }
 
 /**
@@ -2444,7 +2450,23 @@ export function resolveDefaultDispatchHost(params: {
 export function resolveManualStepHost(
   hosts: readonly DispatchHostView[],
 ): DispatchHostView | null {
-  return hosts.find((host) => host.online && host.manualStepCapable === true) ?? hosts[0] ?? null;
+  const sorted = sortDispatchHostsByPriority(hosts);
+  return sorted.find((host) => host.online && host.manualStepCapable === true) ?? sorted[0] ?? null;
+}
+
+/**
+ * 同じ条件を満たすホストが複数あるときの並び順を**決定的**にする（#5568）。
+ * 優先順（`priority`。小さい方が先。未申告は最後尾）→ホスト名。申告の到着順や`findMany`の
+ * 返り順に左右されると、サブPCとMac miniの両方がオンラインのときに毎回違うホストで実行される。
+ */
+export function sortDispatchHostsByPriority<T extends { name: string; priority?: number | null }>(
+  hosts: readonly T[],
+): T[] {
+  return [...hosts].sort(
+    (a, b) =>
+      (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER) ||
+      a.name.localeCompare(b.name),
+  );
 }
 
 /**

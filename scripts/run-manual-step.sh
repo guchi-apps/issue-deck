@@ -29,6 +29,12 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# macOS（Mac mini）ではPATHの並びを補正する（GNU版の`date`・`stat`・`timeout`を先頭へ。#5568・#5538）。
+# **`bash -lc`はmacOSでPATHを並べ替える**ため、ここで先頭へ戻さないと代行コマンドが別の版で走る
+# shellcheck source=scripts/lib/os-compat.sh
+source "$SCRIPT_DIR/lib/os-compat.sh"
+
 CONFIG_FILE="${DISPATCH_CONFIG_FILE:-$HOME/.config/issue-deck/dispatch.env}"
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090

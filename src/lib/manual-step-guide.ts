@@ -55,10 +55,21 @@ export type ManualStepGuideStep = {
    * 同じ壊れ方を手順単位で作り直すことになる。
    */
   device: string | null;
+  /**
+   * ローカルの**全ホスト**で揃える手順か（#5568）。`（ローカル・全ホスト）`のように、
+   * 括弧書きに「全ホスト」が添えられているときだけtrue。各ホストのローカルの状態を変える
+   * 手順（`.env`・launchd/systemd・ツール導入など）は、1台で実行しても担当が切り替わると
+   * もう片方で失敗するため、ホストごとに実行と確認を行う。
+   */
+  allHosts: boolean;
 };
 
 /**
- * 手作業の実行先として本文に書ける端末（#2052）。**この4つ以外はデバイスとして読まない。**
+ * 手作業の実行先として本文に書ける端末（#2052）。**この名前以外はデバイスとして読まない。**
+ *
+ * **ローカル（#5568）**: 常時起動のローカルのホスト（サブPC・Mac mini）はどちらでも実行できる。
+ * `サブPC`・`Mac mini`・`ローカル`はいずれも「ローカルのどれか」を指し、特定の機体に限定しない
+ * （既存Issueの`（サブPC）`はそのまま読める）。実行先の判定は`isManualStepLocalDevice`へ寄せる。
  *
  * ここが唯一の正で、本文の書式検査（`manual-step-body-check.ts`）も同じ定義を使う。
  * 別々に持つと、検査を通った書き方を画面が読めない（その逆も）が必ず出る。
@@ -68,7 +79,26 @@ export const MANUAL_STEP_DEVICE_NAMES = [
   { label: "メインPC", needles: ["メインpc", "mainpc"] },
   { label: "VPS", needles: ["vps"] },
   { label: "ブラウザ", needles: ["ブラウザ"] },
+  { label: "ローカル", needles: ["ローカル"] },
+  { label: "Mac mini", needles: ["macmini"] },
 ] as const;
+
+/** ローカルのホスト（サブPC・Mac mini）を指す端末名。実行先`local`（通信値`subpc`）へ読む */
+const LOCAL_DEVICE_LABELS: readonly string[] = ["サブPC", "ローカル", "Mac mini"];
+
+/** `matchManualStepDeviceNames`の結果が、ローカルのホストを指す1つの端末名か */
+export function isManualStepLocalDeviceLabel(label: string | null | undefined): boolean {
+  return label !== null && label !== undefined && LOCAL_DEVICE_LABELS.includes(label);
+}
+
+/**
+ * 端末の書き方に「全ホスト」が添えられているか（`（ローカル・全ホスト）`）。
+ * **書かれた語だけを見る**。散文からは推測しない（端末名と同じ作法）。
+ */
+export function hasAllHostsMarker(value: string | null): boolean {
+  if (value === null) return false;
+  return /全ホスト|全台|すべてのホスト|全てのホスト/.test(value);
+}
 
 /**
  * 端末名の照合用に、装飾・空白・区切りを落として小文字へ寄せる。
@@ -133,6 +163,8 @@ export type ManualStepGuideWhere = {
    * 推測した接続先を出すと、それが正しいかを確かめる手間が増える。
    */
   connect: string | null;
+  /** 「実行するデバイス」に`全ホスト`が添えられているか（#5568）。手順の文頭の印が無い手順の既定値 */
+  allHosts: boolean;
 };
 
 export type ManualStepGuide = {
@@ -272,6 +304,7 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
     directory: null,
     branch: null,
     connect: null,
+    allHosts: false,
   };
   if (!section) return where;
 
@@ -288,6 +321,8 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
     // 「カレントディレクトリ」より先に「ディレクトリ」を見ないよう、長い語から順に判定する
     if (where.device === null && label.includes("デバイス")) {
       where.device = value;
+      // `cleanWhereValue`は末尾の括弧書きを落とすため、「全ホスト」の印は生の値から読む（#5568）
+      where.allHosts = hasAllHostsMarker(normalizeInline(item[1].slice(separator.index + 1)));
       where.connect = extractConnectCommand(item[1].slice(separator.index + 1));
     }
     else if (where.directory === null && label.includes("ディレクトリ")) where.directory = value;
@@ -309,14 +344,14 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
  */
 const STEP_DEVICE_PATTERN = /^[（(［[]\s*([^）)］\]\n]+?)\s*[）)］\]]/;
 
-/** @returns `[デバイス名, 印の文字数]`。デバイスとして読めなければ`[null, 0]` */
-function parseStepDevice(head: string): [string | null, number] {
+/** @returns `[デバイス名, 印の文字数, 全ホストか]`。デバイスとして読めなければ`[null, 0, false]` */
+function parseStepDevice(head: string): [string | null, number, boolean] {
   const leading = /^[*`\s]*/.exec(head)?.[0].length ?? 0;
   const match = STEP_DEVICE_PATTERN.exec(head.slice(leading));
-  if (!match) return [null, 0];
+  if (!match) return [null, 0, false];
   const names = matchManualStepDeviceNames(match[1]);
-  if (names.length !== 1) return [null, 0];
-  return [names[0], leading + match[0].length];
+  if (names.length !== 1) return [null, 0, false];
+  return [names[0], leading + match[0].length, hasAllHostsMarker(match[1])];
 }
 
 /**
@@ -394,7 +429,14 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     return {
       intro: null,
       steps: [
-        { line: null, checked: false, markdown, text: firstLineText(markdown), device: null },
+        {
+          line: null,
+          checked: false,
+          markdown,
+          text: firstLineText(markdown),
+          device: null,
+          allHosts: false,
+        },
       ],
     };
   }
@@ -405,13 +447,14 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     const head = section.lines[mark.index].replace(TASK_LINE_PATTERN, "").trim();
     const rest = blockMarkdown(section.lines.slice(mark.index + 1, end), mark.indent);
     const markdown = rest === "" ? head : `${head}\n\n${rest}`;
-    const [device, marker] = parseStepDevice(head);
+    const [device, marker, allHosts] = parseStepDevice(head);
     return {
       line: section.startLine + mark.index,
       checked: mark.checked,
       markdown,
       text: normalizeInline(head.slice(marker)),
       device,
+      allHosts,
     };
   });
 
@@ -485,7 +528,14 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
   const empty: ManualStepGuide = {
     hasTemplate: false,
     outcome: null,
-    where: { device: null, defaultDevice: null, directory: null, branch: null, connect: null },
+    where: {
+      device: null,
+      defaultDevice: null,
+      directory: null,
+      branch: null,
+      connect: null,
+      allHosts: false,
+    },
     todoIntro: null,
     steps: [],
     verification: null,

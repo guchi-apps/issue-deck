@@ -61,6 +61,9 @@ SCRIPT_DIR="$ROOT/scripts"
 ORIGINAL_ARGS=(${@+"$@"})
 
 # 対応表の解決・検証は受け口・pollerと共有する（判定を二重に持たない）。
+# macOS（Mac mini）ではPATHの並びを補正する（GNU版の`date`・`stat`・`timeout`を先頭へ。#5568・#5538）
+# shellcheck source=scripts/lib/os-compat.sh
+source "$SCRIPT_DIR/lib/os-compat.sh"
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/personal-config-sync.sh
@@ -181,7 +184,7 @@ HOST_CAPABILITIES="$(format_session_capabilities 2>/dev/null)" ||
 export HOST_CAPABILITIES
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
-python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REPO_DIR" "$(hostname)" "$LAUNCHER_SCRIPTS_DIR/submit-question.sh" \
+python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REPO_DIR" "${DISPATCH_HOST_NAME:-$(hostname -s)}" "$LAUNCHER_SCRIPTS_DIR/submit-question.sh" \
   >"$PROMPT_FILE" <<'PY'
 import json
 import os

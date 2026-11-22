@@ -908,6 +908,17 @@ remote_session_idle_ended_json() {
 #
 # `gh`を必須にしているのは、**実行するコマンドがGitHub上の手作業Issueの本文に書かれたものか**を
 # サブPC側でも確かめるため（issue-deck側の照合だけに頼らない多層防御）。
+# 手作業の代行・巡回でこのホストを選ぶ優先順（#5568）。`DISPATCH_HOST_PRIORITY`（0以上の整数。
+# 小さい方が先）をそのまま申告し、未設定・不正値は`null`（最後尾。同順位はホスト名順）。
+# **サーバー側の選び方を決定的にするための材料**で、ここでは判定しない。
+host_priority_json() {
+  if [[ "${DISPATCH_HOST_PRIORITY:-}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$DISPATCH_HOST_PRIORITY"
+  else
+    printf 'null'
+  fi
+}
+
 manual_step_capable() {
   if [[ -f "$MANUAL_STEP_RUNNER" ]] && command -v gh >/dev/null 2>&1; then
     printf 'true'
@@ -1564,6 +1575,7 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson manualStepVps "$MANUAL_STEP_VPS_CAPABLE" \
     --argjson manualStepSession "$(manual_step_session_capable)" \
+    --argjson priority "$(host_priority_json)" \
     --argjson remoteSession "$(remote_session_capable)" \
     --argjson remoteSessions "$(remote_session_list_json)" \
     --argjson remoteSessionsIdleEnded "$(remote_session_idle_ended_json)" \
@@ -1587,7 +1599,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, priority: $priority, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
