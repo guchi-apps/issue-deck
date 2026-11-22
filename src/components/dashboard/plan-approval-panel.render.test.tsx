@@ -444,8 +444,13 @@ describe("PlanApprovalPanel", () => {
     expect(screen.queryByText("1を直せばよい")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /推奨の理由とレビュー要約/ }));
     expect(screen.getByText("1を直せばよい")).toBeTruthy();
-    expect(screen.getByText("5本のテストが落ちる")).toBeTruthy();
+    // 指摘は要約（指摘＋提案）だけが出ていて、根拠は詳細を開くまで隠れている（#5579）
+    expect(screen.getByTestId("finding-summary-1").textContent).toBe("5本のテストが落ちる 変更対象に加える");
     expect(screen.queryByText("a.ts:1")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /詳細を開く/ }));
+    expect(screen.getByText("5本のテストが落ちる")).toBeTruthy();
+    expect(screen.getByText("a.ts:1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /詳細を閉じる/ }));
     // 反映させる指摘が残っている間は、承認より出し直しを主ボタンにする
     expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("outline");
 
