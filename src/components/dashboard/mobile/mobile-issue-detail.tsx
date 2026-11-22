@@ -12,7 +12,6 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
-  Play,
   RotateCcw,
   TerminalSquare,
   Trash2,
@@ -56,6 +55,7 @@ import {
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartSplitTrigger } from "@/components/dashboard/start-split-trigger";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -308,6 +308,9 @@ export function MobileIssueDetail({
     setError: setDeleteError,
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // 「実装を開始」分割ボタン（#5569）。▼で選んだ実行先を選択済みにしてダイアログを開く
+  const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
+  const [startPresetHost, setStartPresetHost] = useState<string | null>(null);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   // 保留を選んだ時点で操作メニューも閉じる（#2458）。「いまは実施しない」はメニューを
@@ -1113,12 +1116,24 @@ export function MobileIssueDetail({
                 defaultDispatchAgent={defaultDispatchAgent}
                 dispatchFailoverEnabled={dispatchFailoverEnabled}
                 dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                renderTrigger={(isSubmitting) => (
-                  <Button className="w-full" disabled={isSubmitting}>
-                    {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                    {startLabel}
-                  </Button>
-                )}
+                open={isStartDialogOpen}
+                onOpenChange={setIsStartDialogOpen}
+                presetHost={startPresetHost}
+              />
+            )}
+            {showStartDialog && (
+              <StartSplitTrigger
+                fullWidth
+                label={startLabel}
+                hostNames={dispatch.hosts.map((host) => host.name)}
+                onStartDefault={() => {
+                  setStartPresetHost(null);
+                  setIsStartDialogOpen(true);
+                }}
+                onStartOnHost={(hostName) => {
+                  setStartPresetHost(hostName);
+                  setIsStartDialogOpen(true);
+                }}
               />
             )}
 

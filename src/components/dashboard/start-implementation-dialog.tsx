@@ -260,6 +260,8 @@ type StartImplementationDialogProps = {
   /** 呼び出し側で開閉状態を制御したい場合に指定する（Issue作成画面での利用を想定） */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** 開いたときに選択済みにする実行先ホスト名（分割ボタンの▼から選んだ場合。#5569）。省略時は既定 */
+  presetHost?: string | null;
   /** ホスト・次枠・コピーの実行先を選ぶ欄を表示する（既定true）。 */
   includeDispatchTargets?: boolean;
   /**
@@ -306,6 +308,7 @@ export function StartImplementationDialog({
   renderTrigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
+  presetHost = null,
   includeDispatchTargets = true,
   dispatch: injectedDispatch,
   comments = [],
@@ -430,6 +433,11 @@ export function StartImplementationDialog({
    * 「外したのに削除が効かない」という実害になるため、一度でも触ったら以後は再適用しない。
    */
   const artifactRequiredTouchedRef = useRef(false);
+  /** 開く瞬間の`presetHost`だけを読む（開いている間の変化で選択をやり直さない） */
+  const presetHostRef = useRef(presetHost);
+  useEffect(() => {
+    presetHostRef.current = presetHost;
+  }, [presetHost]);
   /** 使用者がエージェントを選び直したら、非同期の使用量取得で既定を上書きしない。 */
   const agentTouchedRef = useRef(false);
 
@@ -443,7 +451,7 @@ export function StartImplementationDialog({
     // 「触った」フラグも開くたびにリセットする（前回開いたときの操作を持ち越さない）
     artifactRequiredTouchedRef.current = false;
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
-    setTarget(undefined);
+    setTarget(presetHostRef.current ? { kind: "host", host: presetHostRef.current } : undefined);
     setStartedTarget(null);
     agentTouchedRef.current = false;
     setAgent(defaultDispatchAgent);
