@@ -1,5 +1,6 @@
 import type { DispatchJob } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { parseReleaseMacReport, recordReleaseMacResult } from "@/lib/release-mac-verification";
 import { db } from "@/lib/db";
 import {
@@ -46,7 +47,7 @@ async function pickReleaseVerifyHost(repositoryFullName: string, now: Date): Pro
     orderBy: { name: "asc" },
   });
   const requiredHosts = getRequiredVerifyHosts(repositoryFullName);
-  const capable = hosts.filter(
+  const capable = sortDispatchHosts(hosts).filter(
     (host) =>
       (requiredHosts === null || requiredHosts.includes(host.name)) &&
       isDispatchHostOnline(host.lastSeenAt, now) &&

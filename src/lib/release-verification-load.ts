@@ -1,4 +1,5 @@
 import { loadReleaseReviewNotes } from "@/lib/release-review-note-store";
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { db } from "@/lib/db";
 import {
@@ -138,7 +139,7 @@ export async function loadReleaseOpsContext(
   }
 
   const hosts: ReleaseOpsHostFact[] = [];
-  for (const row of declared) {
+  for (const row of sortDispatchHosts(declared)) {
     const online = isDispatchHostOnline(row.lastSeenAt, now);
     let includesCandidate: boolean | null = null;
     // 起動時コミット（いま走っているコード）が候補headを含むか。headから見て進んでいるか同じなら含む

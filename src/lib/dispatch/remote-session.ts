@@ -1,5 +1,6 @@
 import type { DispatchHost, DispatchJob, RemoteSession } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { db } from "@/lib/db";
 import {
   isDispatchHostOnline,
@@ -79,7 +80,7 @@ function toHostInfo(host: DispatchHost, activeCount: number, now: Date): RemoteS
 
 async function loadHostInfos(now: Date): Promise<RemoteSessionHostInfo[]> {
   const [hosts, counts] = await Promise.all([
-    db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
+    db.dispatchHost.findMany({ orderBy: { name: "asc" } }).then(sortDispatchHosts),
     db.remoteSession.groupBy({
       by: ["host"],
       where: { status: { in: ACTIVE_STATUSES } },

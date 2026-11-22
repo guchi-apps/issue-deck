@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { formatDispatchHostName, sortDispatchHosts } from "@/lib/dispatch/host-label";
 
 describe("formatDispatchHostName", () => {
   it("`subpc`は「サブPC」として出す（#1416）", () => {
@@ -19,5 +19,18 @@ describe("formatDispatchHostName", () => {
   it("対応表に無いホストはそのまま返す", () => {
     expect(formatDispatchHostName("otherpc")).toBe("otherpc");
     expect(formatDispatchHostName("")).toBe("");
+  });
+});
+
+describe("sortDispatchHosts（#5569）", () => {
+  it("サブPCを先頭にし、残りは名前順に並べる", () => {
+    const names = sortDispatchHosts([{ name: "macmini" }, { name: "subpc" }, { name: "alpha" }]).map((h) => h.name);
+    expect(names).toEqual(["subpc", "alpha", "macmini"]);
+  });
+
+  it("元の配列を変更しない", () => {
+    const hosts = [{ name: "macmini" }, { name: "subpc" }];
+    sortDispatchHosts(hosts);
+    expect(hosts.map((h) => h.name)).toEqual(["macmini", "subpc"]);
   });
 });
