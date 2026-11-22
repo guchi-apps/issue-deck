@@ -52,6 +52,45 @@ describe("PlanReviewFindings の操作帯", () => {
   });
 });
 
+describe("指摘カードの要約と詳細（#5579）", () => {
+  const LONG = "長い指摘の文章。".repeat(20);
+  const DETAIL_BODY = [
+    "## 計画レビュー",
+    "",
+    "**1. 指摘の題**",
+    `- **指摘**: ${LONG}`,
+    "- **提案**: こう直す",
+    "- **根拠**: 実物のファイルを確認した",
+    "",
+    "推奨: 修正のうえ承認",
+  ].join("\n");
+
+  it("閉じている間は要約だけを出し、開くと指摘・提案・根拠を出す", () => {
+    render(
+      <PlanReviewFindings
+        review={parsePlanReview(DETAIL_BODY)}
+        submitLabel="選んだ指摘で計画を出し直す"
+        fallbackSubmitLabel="一括"
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("finding-summary-1").textContent).toContain("こう直す");
+    expect(screen.queryByText("実物のファイルを確認した")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /詳細を開く/ }));
+    expect(screen.queryByTestId("finding-summary-1")).toBeNull();
+    expect(screen.getByText("実物のファイルを確認した")).toBeTruthy();
+    expect(screen.getByText("指摘")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /詳細を閉じる/ }));
+    expect(screen.getByTestId("finding-summary-1")).toBeTruthy();
+  });
+
+  it("短く根拠も無い指摘には詳細ボタンを出さない", () => {
+    renderCard();
+    expect(screen.getByTestId("finding-summary-1").textContent).toBe("直す点");
+    expect(screen.queryByRole("button", { name: /詳細を開く/ })).toBeNull();
+  });
+});
+
 describe("buildNextSteps", () => {
   const base = {
     hasFindings: true,

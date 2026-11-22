@@ -3759,6 +3759,8 @@ export function POST(request: NextRequest) {
   （`decidePlan`の`revise`）、無人実行の計画は対応PRより上に単独で出して承認欄の「修正」と同じ
   `handleReject`（`@claude`コメント）で送る。**無人実行向けのカードは`expectsActionsRun`の
   ときだけ出す**（ローカルでも出すと、パネル内のカードと送信ボタンが2つ並ぶ）。
+  **各指摘は、閉じている間は指摘＋提案をつないだ要約（`buildFindingSummary`・最大3行）だけを出し、
+  「詳細を開く」で指摘・提案・根拠の全文を出す**（#5579。根拠が無く短い指摘には詳細ボタンを出さない）。
   **送る文は番号・見出し・判断・見送る理由だけ**（`buildPlanReviewDecisionRequestText`）。
   本文はレビューコメントを読ませる——引用すると修正の上限（`SESSION_PLAN_REVISION_MAX_LENGTH`）に
   3件ほどで届く。**分けられないレビューは本文を1枚で出し、従来の一括の依頼文
