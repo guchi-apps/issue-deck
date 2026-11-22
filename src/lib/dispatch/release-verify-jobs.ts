@@ -13,6 +13,7 @@ import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
 import {
   describeIntegrationNotApplicable,
   describeIntegrationSetupGap,
+  getRequiredVerifyHosts,
 } from "@/lib/release-verification-config";
 import {
   recordReleaseVerificationResult,
@@ -44,8 +45,10 @@ async function pickReleaseVerifyHost(repositoryFullName: string, now: Date): Pro
     where: { lastSeenAt: { gte: new Date(now.getTime() - DISPATCH_HOST_ONLINE_WINDOW_MS) } },
     orderBy: { name: "asc" },
   });
+  const requiredHosts = getRequiredVerifyHosts(repositoryFullName);
   const capable = hosts.filter(
     (host) =>
+      (requiredHosts === null || requiredHosts.includes(host.name)) &&
       isDispatchHostOnline(host.lastSeenAt, now) &&
       host.releaseVerifyCapable === true &&
       parseDispatchHostRepositories(host.repositories).includes(repositoryFullName),
@@ -86,7 +89,10 @@ export async function requestReleaseVerifyJob(
 
   const hostName = await pickReleaseVerifyHost(target.repoFullName, now);
   if (hostName === null) {
-    const message = `${target.repoFullName}の統合検証を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`;
+    const required = getRequiredVerifyHosts(target.repoFullName);
+    const message = required
+      ? `${target.repoFullName}の統合検証は${required.join("・")}でしか実行できません（MySQLなどの前提が要るため）が、そのホストがオフライン・pollerが未対応・リポジトリ未登録のいずれかです。`
+      : `${target.repoFullName}の統合検証を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`;
     await recordReleaseVerificationResult(target, { kind: "integration", state: "failed", message });
     return { ok: false, rejection: "no_host", message };
   }

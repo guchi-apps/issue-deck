@@ -82,6 +82,14 @@ describe("requestReleaseVerifyJob", () => {
     expect(jobCreate).toHaveBeenCalled();
   });
 
+  it("MySQLを要る検証は、macminiにも積める（#5564。requiredHostsで固定しない）", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "macmini", repositories: JSON.stringify(["guchi-apps/asset-manager"]) })]);
+    jobCreate.mockResolvedValue({ id: "job2" });
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/asset-manager" }, NOW);
+    expect(result).toMatchObject({ ok: true, outcome: "queued" });
+    expect(jobCreate).toHaveBeenCalled();
+  });
+
   it("根拠付きの対象外（アーカイブ等）だけがnot_applicableになる", async () => {
     const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/trainroute" }, NOW);
     expect(result).toMatchObject({ ok: true, outcome: "not_applicable" });

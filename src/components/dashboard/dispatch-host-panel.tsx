@@ -291,6 +291,8 @@ function HostCard({
     onRequestSelfUpdate !== undefined &&
     host.selfUpdateCapable === true &&
     shouldShowDispatchHostSelfUpdateButton(host.checkout, selfUpdate !== null);
+  const canRestartPoller =
+    onRequestSelfUpdate !== undefined && host.selfUpdateCapable === true && host.online;
   // ホストごと再起動できるか（#2496）。**「更新して再起動」とは別物**で、こちらはOSごと落ちる
   const reboot = describeDispatchHostReboot(host);
   const rebootResult = describeDispatchHostRebootJob(rebootJob);
@@ -340,6 +342,19 @@ function HostCard({
           hostName={host.name}
           selfUpdate={selfUpdate}
           onRequestSelfUpdate={onRequestSelfUpdate}
+        />
+      )}
+      {/* **更新が要らないときも、pollerだけは再起動できる**（#5557）。plist・`dispatch.env`を
+          変えた後の反映や挙動の切り分けで、ターミナルから`launchctl kickstart`を打たずに済む。
+          中身は同じ`SELF_UPDATE`（最新なら「既に最新でした。再起動します。」で`exec`入れ替え）。
+          確認を1枚挟み、人が押した1回だけ積む（`send-keys`は使わない） */}
+      {!canSelfUpdate && canRestartPoller && onRequestSelfUpdate && (
+        <SelfUpdateRow
+          hostName={host.name}
+          selfUpdate={selfUpdate}
+          onRequestSelfUpdate={onRequestSelfUpdate}
+          restartOnly
+          liveSessions={host.liveSessions}
         />
       )}
 
@@ -424,9 +439,14 @@ function SelfUpdateRow({
   hostName,
   selfUpdate,
   onRequestSelfUpdate,
+  restartOnly = false,
+  liveSessions = null,
 }: {
   hostName: string;
   selfUpdate: DispatchHostSelfUpdateRow | null;
+  /** 更新が要らないホストの「poller を再起動」（#5557）。押す前に確認を挟む */
+  restartOnly?: boolean;
+  liveSessions?: number | null;
   onRequestSelfUpdate: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -434,12 +454,14 @@ function SelfUpdateRow({
   const [sending, setSending] = useState(false);
   // 積めなかった理由（#1927）。**次に押すまで残す**（消えると押した結果が無かったことになる）
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const pending = sending || (selfUpdate?.pending ?? false);
   const notice = error
     ? { label: error, tone: "critical" as DispatchHostCheckoutTone }
     : selfUpdate;
 
   async function request() {
+    setConfirming(false);
     setSending(true);
     setError(null);
     try {
@@ -452,20 +474,43 @@ function SelfUpdateRow({
 
   return (
     <div className="mt-1.5 flex flex-col items-end gap-1">
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-[11px]"
-        disabled={pending}
-        onClick={() => void request()}
-      >
-        {pending ? (
-          <Loader2 className="size-3 animate-spin" />
-        ) : (
-          <RefreshCw className="size-3" />
-        )}
-        更新して再起動
-      </Button>
+      {restartOnly && confirming ? (
+        <div className="flex w-full flex-col items-end gap-1 rounded-md border p-2">
+          <span className="w-full text-left text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">{hostName}</span> のpollerを再起動します。
+            {liveSessions !== null ? `走っているセッション（${liveSessions}本）` : "走っているセッション"}
+            は止まりません（同じプロセスのまま入れ替わります）。
+          </span>
+          <span className="flex gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => setConfirming(false)}
+            >
+              やめる
+            </Button>
+            <Button size="sm" className="h-7 text-[11px]" onClick={() => void request()}>
+              再起動する
+            </Button>
+          </span>
+        </div>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px]"
+          disabled={pending}
+          onClick={() => (restartOnly ? setConfirming(true) : void request())}
+        >
+          {pending ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <RefreshCw className="size-3" />
+          )}
+          {restartOnly ? "poller を再起動" : "更新して再起動"}
+        </Button>
+      )}
       {notice && (
         <span className={cn("text-right text-[11px]", CHECKOUT_TONE_CLASS[notice.tone])}>
           {notice.label}

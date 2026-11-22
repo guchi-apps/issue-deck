@@ -19,6 +19,7 @@ import {
 import { RELEASE_REVIEW_DECISION_LABEL, type ReleaseReviewDecisionKind } from "@/lib/release-review-decision";
 import type { CrossRepoIssueDraft } from "@/lib/release-review-cross-repo";
 import { describeUnresolvableCause } from "@/lib/release-review-guidance";
+import { isIntegrationEnvironmentFailure } from "@/lib/release-integration-environment";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { cn } from "@/lib/utils";
 
@@ -47,16 +48,21 @@ const SEVERITY_TONE = {
  * - `unresolvable`: 指摘0件で、再評価を終えても全体レビューの要確認だけが残った。直すコードが無く、系列を
  *   始めても同じ理由で止まるため、ボタンを出さずに再実行・判断の欄へ案内する。文言は原因別に出し分け、
  *   他リポジトリが原因なら利用側への確認Issueの下書きを出す（#5378。`describeUnresolvableCause`）
+ * - `environment`: 統合検証の失敗が環境の不足（DB未起動・ツール無し。`P1001`など）。直すコードが無く、
+ *   自動修正を始めても空振りするので、ボタンを出さずに再実行・実行ホストの変更へ案内する（#5561）
  * - `null`: 出さない（系列が動いている・直すものが無い・全体レビューの実行中や再評価中）
  */
-export type AutoProceedMode = "table" | "start" | "unresolvable";
+export type AutoProceedMode = "table" | "start" | "unresolvable" | "environment";
 
 export function decideAutoProceedMode(verification: ReleaseVerificationSummary | null, runActive: boolean): AutoProceedMode | null {
   if (!verification || runActive) return null;
   const review = verification.aiReview;
   const counts = review.decisions?.counts;
   if (review.state === "needs_check" && (counts?.undecidedBlocking ?? 0) > 0) return "table";
-  if (verification.integration.state === "failed") return "start";
+  if (verification.integration.state === "failed") {
+    const { summary, reason } = verification.integration;
+    return isIntegrationEnvironmentFailure(`${summary ?? ""}\n${reason ?? ""}`) ? "environment" : "start";
+  }
   if (review.state === "needs_check" && (counts?.fixNow ?? 0) > 0) return "start";
   if (review.state === "needs_check" && review.findings.length === 0 && review.stage?.kind === "needs_check") return "unresolvable";
   return null;
@@ -270,6 +276,29 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
   }
 
   const mode = decideAutoProceedMode(verification, false);
+  if (mode === "environment") {
+    return (
+      <section
+        aria-label="次の操作"
+        className={cn("flex flex-col gap-1.5 rounded-[10px] border-[1.5px] border-amber-600/70 bg-amber-500/5 p-3.5 text-sm", className)}
+        data-testid="release-auto-proceed-environment"
+      >
+        <span className="text-xs text-muted-foreground">次の操作</span>
+        <h3 className="text-[15px] font-semibold text-balance">統合検証は環境の不足で失敗しました</h3>
+        <p className="break-words text-xs text-muted-foreground">
+          DBに接続できない・必要なコマンドが無いなど、実行ホスト側の問題です。コードに直すものが無いため、自動修正は勧めません。
+          実行ホストの前提（MySQLなど）を整えるか、前提のあるホストで統合検証を再実行してください。
+        </p>
+        {manualHref && (
+          <Button asChild className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold sm:w-fit">
+            <a href={manualHref} data-testid="release-auto-proceed-environment-link">
+              下の「現在候補の検証」で再実行する ↓
+            </a>
+          </Button>
+        )}
+      </section>
+    );
+  }
   if (mode === "unresolvable") {
     // 原因別に出し分ける（#5378）。他リポジトリが原因なら、利用側への確認Issueの下書きを出す
     const cause = describeUnresolvableCause(verification, { repositoryFullName, pullRequestNumber });

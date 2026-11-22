@@ -34,6 +34,16 @@ export type ReleaseVerificationRepoConfig = {
    * **1件でもあれば設定不足**として扱い、統合検証は`failed`（理由付き）で記録して成功にしない
    */
   setupGaps?: readonly string[];
+  /**
+   * 統合検証を**実行してよいホスト名**（`DISPATCH_HOST_NAME`。#5561）。MySQLのように特定のホストにしか無い
+   * 前提を要るコマンドを、無いホストへ振らないために使う。未指定なら申告のある全ホストが対象
+   */
+  requiredHosts?: readonly string[];
+  /**
+   * 統合検証の実行ホストに**無ければ環境不足として止める**コマンド名（`command -v`で確かめる。#5561）。
+   * コマンドを流してから`P1001`などで気付くのでなく、最初の工程で`setup_missing`にする
+   */
+  requiredTools?: readonly string[];
 };
 
 /** 本番リリースが無い・アーカイブ済みなどで、検証の対象にしないリポジトリと根拠 */
@@ -116,6 +126,8 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm）＋Prisma",
     integrationCommands: [NPM_CI, "npm run lint", "npm test", "npm run verify:build"],
+    // `verify:build`は使い捨てのMySQLを自分で起動する。`mysqld`のあるホストならsubpc・macminiのどちらでも通る（#5564）
+    requiredTools: ["mysqld"],
   },
   "guchi-apps/yoteiflow": {
     enforced: false,
@@ -183,6 +195,8 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm）＋Prisma",
     integrationCommands: [NPM_CI, "npm run lint", "npx tsc --noEmit", "npm test", "bash scripts/verify-build.sh"],
+    // `verify-build.sh`は使い捨てのMySQL（`mysqld`）を起動して実行する。subpc・macminiのどちらでも通る（#5564）
+    requiredTools: ["mysqld"],
   },
   "guchi-apps/stockly": {
     enforced: false,
@@ -254,4 +268,23 @@ export function describeIntegrationSetupGap(repoFullName: string): string | null
     return `検証の前提が未整備です: ${config.setupGaps.join("／")}`;
   }
   return null;
+}
+
+/** 統合検証の実行ホストを絞る台帳の指定。無ければ`null`（どのホストでもよい） */
+export function getRequiredVerifyHosts(repoFullName: string): readonly string[] | null {
+  const hosts = getReleaseVerificationConfig(repoFullName).requiredHosts;
+  return hosts && hosts.length > 0 ? hosts : null;
+}
+
+/**
+ * pollerへ渡す統合検証のコマンド列。`requiredTools`があれば、先頭に前提の確認工程を足す（#5561）。
+ * 無いツールは終了コード127で落とすので、`evidence_classify_step`が`setup_missing`へ分類する
+ */
+export function buildIntegrationCommands(repoFullName: string): string[] {
+  const config = getReleaseVerificationConfig(repoFullName);
+  const commands = [...(config.integrationCommands ?? [])];
+  const tools = (config.requiredTools ?? []).filter((tool) => /^[A-Za-z0-9._+-]+$/.test(tool));
+  if (commands.length === 0 || tools.length === 0) return commands;
+  const check = `for t in ${tools.join(" ")}; do command -v "$t" >/dev/null 2>&1 || { echo "環境の不足: このホストに $t がありません（command not found）" >&2; exit 127; }; done`;
+  return [check, ...commands];
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildIntegrationCommands,
+  getRequiredVerifyHosts,
   describeIntegrationNotApplicable,
   describeIntegrationSetupGap,
   describeMacSetupGap,
@@ -86,5 +88,25 @@ describe("公開停止の台帳（#5353）", () => {
       expect(RELEASE_VERIFICATION_EXCLUSIONS[repo], repo).toBeUndefined();
       expect(RELEASE_PRODUCTION_SUSPENSIONS[repo].trim().length, repo).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("実行ホストの前提（#5561）", () => {
+  it("MySQLを要る検証はホストを固定せず（#5564）、前提ツールの確認工程を先頭に足す", () => {
+    for (const repo of ["guchi-apps/asset-manager", "guchi-apps/db-console"]) {
+      expect(getRequiredVerifyHosts(repo)).toBeNull();
+      const commands = buildIntegrationCommands(repo);
+      expect(commands[0]).toContain("command -v");
+      expect(commands[0]).toContain("mysqld");
+      expect(commands[0]).toContain("exit 127");
+      expect(commands.slice(1)).toEqual([...(RELEASE_VERIFICATION_REPOS[repo].integrationCommands ?? [])]);
+    }
+  });
+
+  it("前提の指定が無いリポジトリのコマンドは変えない", () => {
+    expect(getRequiredVerifyHosts("guchi-apps/clip-hive")).toBeNull();
+    expect(buildIntegrationCommands("guchi-apps/clip-hive")).toEqual([
+      ...(RELEASE_VERIFICATION_REPOS["guchi-apps/clip-hive"].integrationCommands ?? []),
+    ]);
   });
 });

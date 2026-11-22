@@ -154,7 +154,7 @@ function runState(extra = {}) {
 }
 
 const SET_VERSION =
-  'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));p.version=process.env.NEW_VERSION;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\' && sed -i "1i # v$NEW_VERSION" CHANGELOG.md';
+  'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));p.version=process.env.NEW_VERSION;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\' && { printf "# v%s\\n" "$NEW_VERSION"; cat CHANGELOG.md; } > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md';
 
 function runBump(extra) {
   writeFileSync(path.join(workDir, "release-pr-lines.txt"), "");

@@ -4224,7 +4224,7 @@ run_release_verify_job() {
   fi
   ensure_tmux_server_scope
   if ! tmux new-session -d -s "$session" -c "$HOME" \
-    "TMUX_SESSION_NAME=$(printf '%q' "$session") bash $(printf '%q' "$RELEASE_VERIFY_RUNNER") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha") $(printf '%q' "$job_id") $(printf '%q' "$commands") $(printf '%q' "$mac_check")"; then
+    "TMUX_SESSION_NAME=$(printf '%q' "$session") POLLER_STARTED_COMMIT=$(printf '%q' "${POLLER_STARTED_COMMIT:-}") bash $(printf '%q' "$RELEASE_VERIFY_RUNNER") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha") $(printf '%q' "$job_id") $(printf '%q' "$commands") $(printf '%q' "$mac_check")"; then
     report_job "$job_id" failed "統合検証のtmuxセッションを起動できませんでした: $session"
     return 0
   fi

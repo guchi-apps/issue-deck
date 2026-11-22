@@ -236,6 +236,9 @@ main() {
     return 0
   fi
   summary="統合対象: main ${base_sha:0:7} + release head ${head_sha:0:7}"$'\n'
+  # 実行ホストと実行中pollerの起動コミット。Darwin（Mac自身）ではSSH事前確認を省くため、
+  # 全体レビューのhost_compatが「pollerのコミット不明」で要確認に残らないよう報告に含める（#5561）
+  summary+="実行ホスト: $(hostname -s 2>/dev/null || printf 'unknown')（$(uname -s)）／poller起動コミット: ${POLLER_STARTED_COMMIT:-不明}"$'\n'
 
   # 検証対象のCIと同じNodeのメジャー版で実行する（macOSのHomebrewは最新版を入れるため。#5549）
   if ci_node_major="$(os_compat_ci_node_major "$WORKTREE")"; then
@@ -274,7 +277,7 @@ main() {
       evidence_add_step "$EVIDENCE_FILE" "$step" passed 0 "" ""
     else
       # 取得失敗・設定不足・時間切れ・不合格を区別する（未実施をコード不具合に置き換えない）
-      step_kind="$(evidence_classify_step "$step" "$step_code")"
+      step_kind="$(evidence_classify_step "$step" "$step_code" "$output_file")"
       summary+="実施・失敗（${step_kind}・終了コード ${step_code}）: ${step}"$'\n'"$(tail -n 20 "$output_file" | tr -d '\000' | evidence_redact)"$'\n'
       evidence_add_step "$EVIDENCE_FILE" "$step" failed "$step_code" "$step_kind" "$output_file"
       evidence_finish "$EVIDENCE_FILE" failed "$step_kind" "失敗したコマンド: ${step}"

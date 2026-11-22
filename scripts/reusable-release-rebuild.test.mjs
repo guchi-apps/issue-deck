@@ -181,7 +181,7 @@ function runBump({ bumpKind, rebuildFrom, devVersion, bumpCommand }) {
       // npm version の代わりに版だけを書き換える（lifecycleの代わりに更新履歴へ1行足す）
       BUMP_COMMAND:
         bumpCommand ??
-        'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));p.version=process.env.NEW_VERSION;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\' && sed -i "1i # v$NEW_VERSION" CHANGELOG.md',
+        'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));p.version=process.env.NEW_VERSION;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\' && { printf "# v%s\\n" "$NEW_VERSION"; cat CHANGELOG.md; } > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md',
     },
   });
   return readFileSync(path.join(workDir, "release-pr-body.md"), "utf8");
