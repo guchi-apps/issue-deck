@@ -545,7 +545,7 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 
 ### macminiで統合検証がどこまで通るか（#5561）
 
-macmini（`DISPATCH_HOST_NAME=macmini`）にはnode・pnpm・jq・gh・GNU `timeout`（coreutils）がある。MySQL 8.0（brew）が入っている。asset-manager・db-consoleの検証スクリプトは常駐DBへ繋がず、使い捨ての`mysqld`を空きポートで起動するため、常駐の3306・既存ユーザー・DBは要らない（#5564で実機の2件とも合格を確認。RC-77の`P1001`は`mysqld`が無い／PATHに無い状態で、実機の現状とは異なる）。`mysqld`は`/opt/homebrew/bin`にあり、`command -v mysqld`が通る。
+macmini（`DISPATCH_HOST_NAME=macmini`）にはnode・pnpm・jq・gh・GNU `timeout`（coreutils）がある。MySQL 8.0（brew）が入っている。asset-manager・db-consoleの検証スクリプトは常駐DBへ繋がず、使い捨ての`mysqld`を空きポートで起動するため、常駐の3306・既存ユーザー・DBは要らない（#5564で実機の2件とも合格を確認。RC-77の`P1001`は`mysqld`が無い／PATHに無い状態で、実機の現状とは異なる）。`mysql@8.0`はkeg-onlyで`mysqld`は`/opt/homebrew/bin`ではなく`/opt/homebrew/opt/mysql@8.0/bin`にあるため、`scripts/lib/os-compat.sh`の`os_compat_setup_path`がこのディレクトリをPATHへ足す。pollerと`run-release-verify.sh`はこれをsourceするので、launchdから起動しても`requiredTools`の`command -v mysqld`が通る（足さないと必ず`setup_missing`で止まる）。
 
 | リポジトリ | コマンド | macmini | 扱い |
 |---|---|---|---|

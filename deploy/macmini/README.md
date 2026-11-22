@@ -67,13 +67,17 @@ LaunchAgent はユーザーのログインセッションで動く。再起動�
 asset-manager・db-consoleのリリース統合検証は、Mac miniでも実行できる。検証スクリプトが使い捨ての`mysqld`を空きポートで起動するので、常駐MySQLの3306・ユーザー・DBは**要らない**（足りない前提は`mysqld`が`PATH`にあることだけ）。
 
 ```bash
-brew install mysql@8.0          # 未導入の場合。mysqld・mysqlが/opt/homebrew/binに入る
-command -v mysqld && command -v mysql
+brew install mysql@8.0          # 未導入の場合
+# mysql@8.0はkeg-onlyで/opt/homebrew/binへリンクされず、実体は/opt/homebrew/opt/mysql@8.0/binにある。
+# pollerと統合検証はscripts/lib/os-compat.shがこのディレクトリをPATHへ足すので、brew linkは要らない
+PATH="/opt/homebrew/opt/mysql@8.0/bin:$PATH" bash -c 'command -v mysqld && command -v mysql'
 ```
+
+手元の対話シェルで`mysql`を使うときだけ、`~/.zshrc`へ`export PATH="/opt/homebrew/opt/mysql@8.0/bin:$PATH"`を足す。
 
 開発用に常駐MySQLが要るとき（`scripts/ensure-mysql.sh`は`brew services`で起動する）は、DB・ユーザーを手元で作る。パスワードは1Passwordで管理し、ここへは書かない。
 
 ```bash
 brew services start mysql@8.0
-mysql -uroot -e "CREATE DATABASE IF NOT EXISTS <DB名>; CREATE USER IF NOT EXISTS '<ユーザー>'@'localhost' IDENTIFIED BY '<パスワード>'; GRANT ALL ON <DB名>.* TO '<ユーザー>'@'localhost';"
+/opt/homebrew/opt/mysql@8.0/bin/mysql -uroot -e "CREATE DATABASE IF NOT EXISTS <DB名>; CREATE USER IF NOT EXISTS '<ユーザー>'@'localhost' IDENTIFIED BY '<パスワード>'; GRANT ALL ON <DB名>.* TO '<ユーザー>'@'localhost';"
 ```

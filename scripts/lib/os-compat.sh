@@ -13,7 +13,7 @@
 # このファイル自体は実行せず、source して使う。source した時点で次の2つを行う。
 #   1. bash 4以降でなければ理由を出して終了する（`mapfile`・`declare -A`を使うスクリプトが多く、
 #      macOS標準のbash 3.2では途中で構文エラーになり、どこで落ちたか分かりにくいため）
-#   2. macOSでは、HomebrewのGNU coreutils（gnubin）・util-linux・Homebrew本体のbinをPATHの先頭へ置く
+#   2. macOSでは、HomebrewのGNU coreutils（gnubin）・util-linux・Homebrew本体のbin・keg-onlyの`mysql@8.0`をPATHの先頭へ置く
 #      （`date -d`・`stat -c`・`timeout`・`setsid`・`flock`を、個々のスクリプトを直さずに通すため。
 #      子プロセス〈tmuxサーバー・ランチャー・Claude Codeのセッション〉にもそのまま引き継がれる）
 
@@ -56,6 +56,9 @@ os_compat_setup_path() {
       "$prefix/opt/util-linux/bin"
       "$prefix/opt/gettext/bin"
       "$prefix/bin"
+      # `mysql@8.0`はkeg-onlyで`$prefix/bin`へリンクされない。統合検証の`requiredTools: ["mysqld"]`
+      # （asset-manager・db-console）が`command -v mysqld`で通るよう、ここで足す（#5564）
+      "$prefix/opt/mysql@8.0/bin"
     )
     break
   done
