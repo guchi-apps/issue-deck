@@ -463,7 +463,6 @@ export function WorkflowStepBadge({
           queued: "計画レビュー起動待ち",
           queued_overdue: "計画レビュー起動待ち",
           creating: "計画レビュー中",
-          presented: "計画レビュー済み・計画承認待ち",
         } satisfies Record<PlanReviewListState, string>)[planReviewState]
       : null;
   const stepText = planReviewLabel
