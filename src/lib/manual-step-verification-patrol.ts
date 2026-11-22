@@ -5,6 +5,7 @@ import {
   buildDispatchActiveKey,
   isActiveDispatchJobStatus,
   isDispatchHostOnline,
+  sortDispatchHostsByPriority,
 } from "@/lib/dispatch/dispatch-job";
 import { enqueueManualStepJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
@@ -441,7 +442,10 @@ async function pickPatrolHost(
   now: Date,
 ): Promise<{ name: string; manualStepVpsCapable: boolean | null } | null> {
   const hosts = await db.dispatchHost.findMany({ where: { manualStepCapable: true } });
-  const online = hosts.find((host) => isDispatchHostOnline(host.lastSeenAt, now));
+  // 優先順→名前順で決定的に選ぶ（#5568）。順序の無い`findMany`のままだと巡回のたびにホストが変わる
+  const online = sortDispatchHostsByPriority(hosts).find((host) =>
+    isDispatchHostOnline(host.lastSeenAt, now),
+  );
   return online ? { name: online.name, manualStepVpsCapable: online.manualStepVpsCapable } : null;
 }
 

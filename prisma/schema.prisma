@@ -1282,6 +1282,9 @@ model DispatchHost {
   // リリース全体のAIレビュー（`RELEASE_REVIEW`・#4238）を実行できるか。`null`（未申告）は「できない」
   releaseReviewCapable      Boolean?
   manualStepSessionCapable  Boolean?
+  // 手作業の代行・巡回で、同じ条件のホストが複数オンラインのときの優先順（#5568）。小さい方が先。
+  // pollerが`DISPATCH_HOST_PRIORITY`から申告する。`null`（未申告）は最後尾（同順位は名前順）
+  priority                  Int?
   // チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。ランチャーと
   // Codex CLIが揃っているpollerだけが申告する。`null`（未申告）は「できない」
   chatCodexCapable          Boolean?

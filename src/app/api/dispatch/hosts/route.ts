@@ -139,6 +139,8 @@ export async function POST(request: NextRequest) {
     // （`instruction`と同じ向き。配ると未知の種別として`failed`になり、押した起動が失われる）
     manualStepSessionCapable:
       typeof payload?.manualStepSession === "boolean" ? payload.manualStepSession : null,
+    // 手作業の担当ホストの優先順（#5568。`DISPATCH_HOST_PRIORITY`）。**未申告はnull＝最後尾**
+    priority: parseNonNegativeInt(payload?.priority),
     // develop向けPRのAIレビュー（#3990）を実行できるpollerだけが送ってくる。**未申告はnull＝
     // 非対応扱い**（配ると未知の種別として`failed`になり、PRのレビューが必ず失敗として残る）
     reviewFixCapable: typeof payload?.reviewFix === "boolean" ? payload.reviewFix : null,

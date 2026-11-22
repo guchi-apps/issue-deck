@@ -282,6 +282,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
     manualStepSessionCapable: host.manualStepSessionCapable,
+    priority: host.priority,
     reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
     releaseVerifyCapable: host.releaseVerifyCapable,
@@ -2577,6 +2578,8 @@ export async function announceDispatchHost(params: {
   codexRemoteControlCapable: boolean | null;
   /** 手作業セッション（#2771）を起こせるか。申告していないpollerでは`null`＝非対応 */
   manualStepSessionCapable: boolean | null;
+  /** 手作業の担当ホストの優先順（#5568）。未申告は`null`／未定義 */
+  priority?: number | null;
   /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
@@ -2655,6 +2658,7 @@ export async function announceDispatchHost(params: {
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,
     manualStepSessionCapable: params.manualStepSessionCapable,
+    priority: params.priority ?? null,
     reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
     releaseVerifyCapable: params.releaseVerifyCapable ?? null,
