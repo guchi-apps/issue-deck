@@ -55,11 +55,11 @@ const MANUAL_STEP_SESSION_AGENT_ENTRIES = [
 ] as const;
 
 /**
- * 手作業Issueを、サブPCのAIエージェントセッションと対話しながら進める入口（#2771）。
+ * 手作業Issueを、ローカル（サブPC・Mac mini）のAIエージェントセッションと対話しながら進める入口（#2771）。
  *
  * 手作業アシスタントの代行実行（「承認してN件を自動実行」）は本文のコマンドをpollerが1件ずつ
  * 実行し、失敗したら出力を貼って診断する往復になる。こちらは**このIssue専用のセッションを
- * サブPCに1本立て**、止まるところまで手順を流す。答える先は
+ * ローカルのホストに1本立て**、止まるところまで手順を流す。答える先は
  * Issue詳細の質問パネルか、選択したエージェントのセッションから進める。
  *
  * セッションは本文の手順を出発点に、**本文に書かれていない調査・修正・確認も含めて**目的の達成まで
@@ -269,7 +269,8 @@ export function useManualStepSessionLauncher(
   // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
   const host =
     resolveDefaultManualStepSessionHost(dispatch.hosts) ?? resolveManualStepHost(dispatch.hosts);
-  const hostName = host?.name ?? "サブPC";
+  // ホストの申告が1件も無いときの表示。特定の機体名は出さない（ローカルはサブPC・Mac miniのどちらでもよい。#5568）
+  const hostName = host?.name ?? "ローカル";
   const job = findManualStepSessionJobForIssue(
     dispatch.jobs,
     issue.repositoryFullName,

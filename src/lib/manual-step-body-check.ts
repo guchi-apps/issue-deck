@@ -247,7 +247,7 @@ function checkDevice(guide: ReturnType<typeof parseManualStepGuide>): ManualStep
     {
       rule: "multiple-devices",
       severity: "error",
-      message: `「実行するデバイス」に端末が複数書かれている（${found.join("・")}）のに、どこで実行するか書かれていない手順が${missing.length}件あります。どの端末で実行するかが決まらないため、その手順は代行実行の対象から外れます。\`- [ ] （サブPC）…\`のように各手順の文頭へ端末を書いてください。`,
+      message: `「実行するデバイス」に端末が複数書かれている（${found.join("・")}）のに、どこで実行するか書かれていない手順が${missing.length}件あります。どの端末で実行するかが決まらないため、その手順は代行実行の対象から外れます。\`- [ ] （ローカル）…\`のように各手順の文頭へ端末を書いてください。`,
     },
   ];
 }
