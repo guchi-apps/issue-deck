@@ -252,7 +252,7 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - 失敗種別`failureKind`（統合検証の結果JSONに追加。旧サーバーは無視する）: `merge_conflict`（競合ファイルを併記・統合状態の検証は未実施）／`dependency_install_failed`（`pnpm install`・`npm ci`・`pip install`等の失敗）／`setup_missing`（終了コード126/127）／`timeout`（124/137）／`test_failed`（テスト・型検査・ビルドの不合格）／`duplicate_run`。**取得失敗・設定不足・時間切れを`test_failed`（コード不具合）に置き換えない**
 - 二重実行: 同じ候補（base/head）の証跡に隣接するロック（PID）で、進行中の統合検証がある間は2本目を開始せず`needs_check`（`duplicate_run`）で返す。PIDが生きていなければロックを引き継ぐ
 - **環境の不足は`test_failed`にしない（#5561）**: 失敗した工程の出力に接続不達（`P1001`・`Can't reach database server`・`ECONNREFUSED`）・`command not found`があれば、終了コードに関わらず`setup_missing`へ分類する（`evidence_classify_step`の第3引数）。サーバーは`failureKind`を受け取らないため、`release-integration-environment.ts`が同じ文言を結果の文面から拾い、`classifyIntegrationFailure`が`execution`を返して完了系列は`execution_failure`で止まる。画面は「おまかせで公開承認まで進める」を出さず、「環境の不足」として再実行・実行ホストの変更を案内する（`release-auto-proceed-panel.tsx`の`environment`モード）
-- **実行ホストの前提（#5561）**: 台帳の`requiredHosts`（実行してよいホスト名。`pickReleaseVerifyHost`が絞り、該当が無ければ`no_host`）と`requiredTools`（`command -v`で確かめるコマンド名。ジョブのコマンド列の先頭へ確認工程を足し、無ければ終了コード127＝`setup_missing`で、本体のコマンドを流す前に止める。`buildIntegrationCommands`）。MySQLを要るasset-manager・db-consoleは`subpc`・`mysqld`を指定している
+- **実行ホストの前提（#5561）**: 台帳の`requiredHosts`（実行してよいホスト名。`pickReleaseVerifyHost`が絞り、該当が無ければ`no_host`）と`requiredTools`（`command -v`で確かめるコマンド名。ジョブのコマンド列の先頭へ確認工程を足し、無ければ終了コード127＝`setup_missing`で、本体のコマンドを流す前に止める。`buildIntegrationCommands`）。MySQLを要るasset-manager・db-consoleは`requiredTools: ["mysqld"]`だけを指定し、`requiredHosts`は外してある（#5564。`mysqld`のあるsubpc・macminiのどちらでも動く）
 - **実行ホストとpollerの起動コミットを報告に含める（#5561）**: 統合検証の要約に「実行ホスト: <名前>（<OS>）／poller起動コミット: <SHA>」を載せる。Darwin（Mac自身）ではMac検証のSSH事前確認を省くため、全体レビューが「実行中pollerのコミットが不明」を未確認範囲として残さないための記録。固定参照（`workflows/vN`）のタグ更新は画面の配布（別経路）で行う
 - **未対応（別Issueで扱う）**: サーバー側が`failureKind`を画面・復旧系列（#4451/#4480）へ接続すること。全体レビューを統合検証の完了まで待たせる順序制御は#4763で実装した（上の「統合検証の完了後に全体レビューを開始する」）。証跡が無い場合（統合検証を引き継いだ・積めなかった）は従来どおり「未実施」としてレビューへ渡す
 
@@ -545,12 +545,12 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 
 ### macminiで統合検証がどこまで通るか（#5561）
 
-macmini（`DISPATCH_HOST_NAME=macmini`）にはnode・pnpm・jq・gh・GNU `timeout`（coreutils）がある。MySQLへ接続できない（RC-77は`127.0.0.1:3306`へ到達できず`P1001`。`mysqld`の実体の有無は`requiredTools`で実行前に確かめる）。
+macmini（`DISPATCH_HOST_NAME=macmini`）にはnode・pnpm・jq・gh・GNU `timeout`（coreutils）がある。MySQL 8.0（brew）が入っている。asset-manager・db-consoleの検証スクリプトは常駐DBへ繋がず、使い捨ての`mysqld`を空きポートで起動するため、常駐の3306・既存ユーザー・DBは要らない（#5564で実機の2件とも合格を確認。RC-77の`P1001`は`mysqld`が無い／PATHに無い状態で、実機の現状とは異なる）。`mysqld`は`/opt/homebrew/bin`にあり、`command -v mysqld`が通る。
 
 | リポジトリ | コマンド | macmini | 扱い |
 |---|---|---|---|
-| asset-manager | `npm run verify:build` | 失敗（MySQL無し・`P1001`） | `requiredHosts: ["subpc"]`・`requiredTools: ["mysqld"]`でsubpcへ振る |
-| db-console | `bash scripts/verify-build.sh` | 失敗見込み（`mysqld`無し） | 同上 |
+| asset-manager | `npm run verify:build` | 合格（#5564で実測） | `requiredTools: ["mysqld"]`のみ。ホストは固定しない |
+| db-console | `bash scripts/verify-build.sh` | 合格（#5564で実測） | 同上 |
 | kurashio・pi0w・signaly | `python3 -m venv`＋pip/pytest | **未確認**（macminiのPythonと依存の可否） | 未確認のまま。実走して分かったら本表を更新する |
 | 上記以外のpnpm・npm系 | `build:ci`など | DB不要のため通る見込み（実走で確認） | 指定なし |
 

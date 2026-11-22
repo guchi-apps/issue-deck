@@ -126,8 +126,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm）＋Prisma",
     integrationCommands: [NPM_CI, "npm run lint", "npm test", "npm run verify:build"],
-    // `verify:build`はMySQLへ接続する。macminiにはMySQLが無く`P1001`で失敗する（RC-77。#5561）
-    requiredHosts: ["subpc"],
+    // `verify:build`は使い捨てのMySQLを自分で起動する。`mysqld`のあるホストならsubpc・macminiのどちらでも通る（#5564）
     requiredTools: ["mysqld"],
   },
   "guchi-apps/yoteiflow": {
@@ -196,8 +195,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm）＋Prisma",
     integrationCommands: [NPM_CI, "npm run lint", "npx tsc --noEmit", "npm test", "bash scripts/verify-build.sh"],
-    // `verify-build.sh`はMySQL（`mysqld`）を起動して実行する（#5561）
-    requiredHosts: ["subpc"],
+    // `verify-build.sh`は使い捨てのMySQL（`mysqld`）を起動して実行する。subpc・macminiのどちらでも通る（#5564）
     requiredTools: ["mysqld"],
   },
   "guchi-apps/stockly": {

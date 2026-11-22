@@ -92,9 +92,9 @@ describe("公開停止の台帳（#5353）", () => {
 });
 
 describe("実行ホストの前提（#5561）", () => {
-  it("MySQLを要る検証はsubpcに絞り、前提ツールの確認工程を先頭に足す", () => {
+  it("MySQLを要る検証はホストを固定せず（#5564）、前提ツールの確認工程を先頭に足す", () => {
     for (const repo of ["guchi-apps/asset-manager", "guchi-apps/db-console"]) {
-      expect(getRequiredVerifyHosts(repo)).toEqual(["subpc"]);
+      expect(getRequiredVerifyHosts(repo)).toBeNull();
       const commands = buildIntegrationCommands(repo);
       expect(commands[0]).toContain("command -v");
       expect(commands[0]).toContain("mysqld");
