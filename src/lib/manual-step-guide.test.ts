@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildManualStepQueue,
+  hasAllHostsMarker,
+  isManualStepLocalDeviceLabel,
   matchManualStepDeviceNames,
   parseManualStepGuide,
   resolveManualStepDevice,
@@ -169,6 +171,7 @@ describe("parseManualStepGuide", () => {
     expect(guide.outcome).toContain("猶予待ちのセッションに理由を残す");
     expect(guide.where).toEqual({
       connect: "ssh subpc",
+      allHosts: false,
       device: "サブPC",
       defaultDevice: "サブPC",
       directory: "~/apps/issue-deck",
@@ -299,6 +302,7 @@ describe("parseManualStepGuide", () => {
       directory: null,
       branch: null,
       connect: null,
+      allHosts: false,
     });
   });
 
@@ -318,6 +322,7 @@ describe("parseManualStepGuide", () => {
       directory: null,
       branch: null,
       connect: null,
+      allHosts: false,
     });
   });
 
@@ -495,5 +500,29 @@ describe("stripCodeBlocks（#2403）", () => {
 
   it("コードブロックが無ければそのまま", () => {
     expect(stripCodeBlocks("pollerを再起動する")).toBe("pollerを再起動する");
+  });
+});
+
+describe("ローカル・全ホストの端末表記（#5568）", () => {
+  it("（ローカル）と（サブPC）と（Mac mini）はローカルとして読み、全ホストの印を拾う", () => {
+    expect(matchManualStepDeviceNames("ローカル（全ホスト）")).toEqual(["ローカル"]);
+    expect(matchManualStepDeviceNames("**Mac mini**")).toEqual(["Mac mini"]);
+    expect(isManualStepLocalDeviceLabel("サブPC")).toBe(true);
+    expect(isManualStepLocalDeviceLabel("ローカル")).toBe(true);
+    expect(isManualStepLocalDeviceLabel("VPS")).toBe(false);
+    expect(hasAllHostsMarker("ローカル・全ホスト")).toBe(true);
+    expect(hasAllHostsMarker("ローカル")).toBe(false);
+  });
+
+  it("手順の文頭の（ローカル・全ホスト）から端末と全ホストの印を読む", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] （ローカル・全ホスト）`.env`へ値を足す\n- [ ] （ローカル）GitHubを設定する\n- [ ] （VPS）再起動する\n",
+    );
+    expect(guide.steps.map((step) => [step.device, step.allHosts])).toEqual([
+      ["ローカル", true],
+      ["ローカル", false],
+      ["VPS", false],
+    ]);
+    expect(guide.steps[0].text).toBe(".envへ値を足す");
   });
 });

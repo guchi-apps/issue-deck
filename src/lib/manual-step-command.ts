@@ -1,5 +1,6 @@
 import { FENCE_PATTERN, TASK_LINE_PATTERN } from "@/lib/markdown-task-list";
 import {
+  isManualStepLocalDeviceLabel,
   matchManualStepDeviceNames,
   parseManualStepGuide,
   type ManualStepGuide,
@@ -444,14 +445,18 @@ export function resolveManualStepRunTarget(
 ): ManualStepRunTarget | null {
   const names = matchManualStepDeviceNames(device);
   if (names.length !== 1) return null;
-  if (names[0] === "サブPC") return "subpc";
+  // サブPC・Mac mini・ローカルはどれも「ローカルのどれか1台」（#5568）。通信値は互換のため`subpc`のまま
+  if (isManualStepLocalDeviceLabel(names[0])) return "subpc";
   if (names[0] === "VPS") return "vps";
   return null;
 }
 
-/** 実行先を画面・ログに出すときの表記 */
+/**
+ * 実行先を画面・ログに出すときの表記。`subpc`の実体は「ジョブを取ったローカルのホスト」で、
+ * サブPCとは限らない（#5568）
+ */
 export function describeManualStepRunTarget(target: ManualStepRunTarget): string {
-  return target === "vps" ? "VPS" : "サブPC";
+  return target === "vps" ? "VPS" : "ローカル（サブPC・Mac mini）";
 }
 
 /**
