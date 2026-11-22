@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, Loader2, SendHorizonal, Square, X } from "lucide-react";
+import { Copy, ExternalLink, Loader2, SendHorizonal, Square, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { InputStashList, StashConfirmDialog } from "@/components/dashboard/input-stash";
@@ -29,6 +29,7 @@ import {
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
 import { buildSessionOpenTarget } from "@/lib/dispatch/session-open-target";
+import { buildSessionTerminalCommands } from "@/lib/dispatch/session-terminal-command";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { SessionTimelineEventView } from "@/lib/dispatch/session-timeline";
 import { formatDateTime, formatDateTimeFull, formatTimeOfDay } from "@/lib/format-date-time";
@@ -134,6 +135,75 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * 「ターミナルで開く」（#5574）。tmuxへ入るコマンドを表示してコピーさせる。既定は
+ * ホスト上のターミナルで直接実行する形で、別の端末からはSSH経由のタブに切り替える。
+ */
+function TerminalAccess({ session }: { session: DispatchSessionView }) {
+  const [tab, setTab] = useState<"host" | "ssh">("host");
+  const [note, setNote] = useState<string | null>(null);
+  const commands = buildSessionTerminalCommands({
+    hostName: session.host,
+    tmuxSessionName: session.tmuxSessionName,
+  });
+  if (!commands) return null;
+  const command = tab === "host" ? commands.onHost : commands.viaSsh;
+  const hostLabel = formatDispatchHostName(session.host);
+  const select = (next: "host" | "ssh") => {
+    setTab(next);
+    setNote(null);
+  };
+  return (
+    <div className="rounded-md border p-3">
+      <h3 className="mb-2 text-sm font-semibold">ターミナルで開く</h3>
+      <div className="mb-2 flex flex-wrap gap-1.5" role="group" aria-label="接続方法">
+        {(
+          [
+            ["host", "そのホスト上で"],
+            ["ssh", "別の端末から（SSH）"],
+          ] as const
+        ).map(([key, label]) => (
+          <Button
+            key={key}
+            type="button"
+            size="sm"
+            variant={tab === key ? "default" : "outline"}
+            className="h-auto rounded-full px-3 py-0.5 text-xs"
+            aria-pressed={tab === key}
+            onClick={() => select(key)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      <code className="block break-all rounded bg-muted px-2.5 py-2 font-mono text-xs" data-testid="terminal-command">
+        {command}
+      </code>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-2 max-sm:h-11 max-sm:w-full"
+        onClick={() => {
+          void navigator.clipboard
+            ?.writeText(command)
+            .then(() => setNote("コピーしました。"))
+            .catch(() => setNote("コピーできませんでした。コマンドを選択してコピーしてください。"));
+        }}
+      >
+        <Copy />
+        コピー
+      </Button>
+      <p className="mt-2 text-xs text-muted-foreground" role="status">
+        {note ??
+          (tab === "host"
+            ? `${hostLabel}のターミナルで実行します。抜けるときは Ctrl+b → d。`
+            : "Tailscale接続済みの端末から実行します。抜けるときは Ctrl+b → d。")}
+      </p>
+    </div>
   );
 }
 
@@ -290,6 +360,7 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
                   </InfoRow>
                 </dl>
               </div>
+              {session.state !== "GONE" && <TerminalAccess key={session.id} session={session} />}
               {(openTarget || summary.previewUrl) && (
                 <div className="flex flex-wrap gap-2">
                   {openTarget && (
