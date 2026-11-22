@@ -251,7 +251,7 @@ export function DispatchQueueContent({
       */}
       <ModelDotLegend className="mt-3 border-t pt-2" />
       <p className="mt-2 text-[11px] text-muted-foreground">
-        このキューはサブPCのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
+        このキューはDeskMiniのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
       </p>
 
       {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}

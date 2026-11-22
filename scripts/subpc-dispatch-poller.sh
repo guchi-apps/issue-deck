@@ -3384,7 +3384,7 @@ check_login_expiry() {
     return 0
   fi
 
-  LOGIN_EXPIRY_MESSAGE="サブPCのClaude Codeのログインが切れているため、起動ジョブは取りに行きません（止まっているセッション ${count} 本。サブPCで /login してください）。"
+  LOGIN_EXPIRY_MESSAGE="DeskMiniのClaude Codeのログインが切れているため、起動ジョブは取りに行きません（止まっているセッション ${count} 本。DeskMiniで /login してください）。"
   login_expiry_notified && return 0
   [[ "$DRY_RUN" -eq 0 ]] || return 0
 
@@ -3393,7 +3393,7 @@ check_login_expiry() {
   repo_name="${BASH_REMATCH[1]}"
   issue_number="${BASH_REMATCH[2]}"
   full_name="$(resolve_session_repository "$first" "$repo_name" || true)"
-  detail="サブPCで\`/login\`してください。ログインが切れている間は新しいセッションの起動を見送ります。止まっているセッション（${count}本）: $(printf '%s, ' "${LOGIN_EXPIRED_SESSIONS[@]:0:10}" | sed 's/, $//')"
+  detail="DeskMiniで\`/login\`してください。ログインが切れている間は新しいセッションの起動を見送ります。止まっているセッション（${count}本）: $(printf '%s, ' "${LOGIN_EXPIRED_SESSIONS[@]:0:10}" | sed 's/, $//')"
   echo "$LOGIN_EXPIRY_MESSAGE"
   notify_session_interrupted "$first" "$repo_name" "$issue_number" "${full_name:-}" "$detail" login_expired
   login_expiry_record_notified
@@ -4030,9 +4030,9 @@ run_manual_step_job() {
 
   # 実行を始めたことを先に伝える（届くまで最大1巡ぶん遅れるので、画面が黙る時間を短くする）
   if [[ "$run_target" == "vps" ]]; then
-    where="サブPCからVPSへ接続して"
+    where="DeskMiniからVPSへ接続して"
   else
-    where="サブPCで"
+    where="DeskMiniで"
   fi
   report_job "$job_id" running "${where}実行しています"
 
@@ -4831,7 +4831,7 @@ run_remote_session_job() {
       [[ -n "$url" ]] && break
       # 起動直後にClaude Codeが落ちた（未ログイン・設定の誤りなど）。最後の出力を理由として返す
       if ! tmux has-session -t "=$session" 2>/dev/null; then
-        report_job "$job_id" failed "Claude Codeが起動直後に終了しました。サブPCで claude を一度起動して状態を確認してください。"
+        report_job "$job_id" failed "Claude Codeが起動直後に終了しました。DeskMiniで claude を一度起動して状態を確認してください。"
         return 0
       fi
       sleep 3

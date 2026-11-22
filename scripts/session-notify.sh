@@ -1063,7 +1063,7 @@ notification_type = hook.get("notification_type", "")
 issue_number = os.environ.get("NOTIFY_ISSUE_NUMBER", "")
 repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 # **APIへ送る`hostName`は識別子のまま**にする（照合キーであり、`ssh`・`tmux`の相手でもある）。
-# 画面に出す表記（`subpc` → サブPC）への変換はissue-deck側（`src/lib/dispatch/host-label.ts`）が持つ。
+# 画面に出す表記（`subpc` → DeskMini）への変換はissue-deck側（`src/lib/dispatch/host-label.ts`）が持つ。
 host_name = os.environ.get("NOTIFY_HOST_NAME", "")
 # 引き上げ（`SessionInterrupted`）の宛先。`tmux attach -t <名前>`としてIssueコメントに出る
 tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")

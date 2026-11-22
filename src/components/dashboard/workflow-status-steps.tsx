@@ -564,7 +564,7 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
       // 待たされている理由が分かるならそれを、分からなければ「そのうち始まる」ことを言う
       // （「順番待ち」だけだと、正常に待っているのかpollerが落ちているのかを区別できない。#1394）
       title={`${label}${
-        waitReason ? `。${waitReason}` : isStarting ? "" : "。サブPCが順に起動します"
+        waitReason ? `。${waitReason}` : isStarting ? "" : "。DeskMiniが順に起動します"
       }`}
       // `WorkflowStepBadge`と同じく、溢れるより先に添える字が切り詰められるようにする（#2516）
       className="flex min-w-0 items-center gap-1.5"

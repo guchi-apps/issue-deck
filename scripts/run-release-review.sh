@@ -42,7 +42,7 @@ KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
 EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足|資料にありません|固定SHA|適用手順|デプロイ設定'
 # 実行ホスト（サブPCのpoller）の稼働状態を指す文言（#4799）。`src/lib/release-review-reevaluation.ts`の`HOST_TEXT`と揃える
-HOST_TEXT_PATTERN='poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
+HOST_TEXT_PATTERN='poller|ポーラー|DeskMini|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
 # 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
 PARALLEL="${ISSUE_DECK_RELEASE_REVIEW_PARALLEL:-3}"
 # AI 1回の呼び出しのターン数の上限（claudeの`--max-turns`。#4769）。0で上限なし。上限に達すると診断は`turn_limit`になる。
@@ -619,11 +619,11 @@ runner_host_prompt_text() {
   started="${POLLER_STARTED_COMMIT:-}"
   current="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
   includes="$(runner_host_includes "$full_name" "$head")"
-  printf '\n## 実行ホストの稼働情報（このレビューを起動したサブPCのpoller）\n\n'
+  printf '\n## 実行ホストの稼働情報（このレビューを起動したDeskMiniのpoller）\n\n'
   printf -- '- いま走っているpollerの版（起動時のコミット）: %s\n' "${started:-確認できない（申告の無い旧poller）}"
   printf -- '- チェックアウトの現在のHEAD: %s\n' "${current:-確認できない}"
   printf -- '- 起動時のコミットが候補headを含むか: %s\n\n' "$includes"
-  printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（サブPCのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にサブPCへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
+  printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（DeskMiniのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にDeskMiniへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
 }
 
 # result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632・#4767）

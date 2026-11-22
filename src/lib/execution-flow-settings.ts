@@ -95,11 +95,11 @@ function appAiAgent(model: AppAiModel) {
 }
 
 function appAiLocation(model: AppAiModel) {
-  return appAiProvider(model) === "openai" ? "サブPC" : "IssueDeckサーバー";
+  return appAiProvider(model) === "openai" ? "DeskMini" : "IssueDeckサーバー";
 }
 
 const CODEX_APP_AI_NOTE =
-  "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。Codexが使えないときはエラーを表示し、Claudeへは切り替えません。";
+  "GPT系はOpenAI APIを使わず、DeskMiniのCodex CLI（ChatGPTサブスク枠）で実行します。Codexが使えないときはエラーを表示し、Claudeへは切り替えません。";
 /**
  * 画面専用の文言を各フォームへ散らさず、保存前の値から現在の実効設定を組み立てる。
  * Actions の修復系はモデル入力を受け取らないため、CLI の既定と明示して推測表示を避ける。
@@ -127,17 +127,17 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
   return [
     actionFlow("計画作成（無人実行）"),
     {
-      group: "計画", name: "計画作成（サブPC）", location: "サブPC", agent: "Claude Code",
-      model: localModel(settings.claudeLocalModel, "claude"), source: "サブPC Claude 設定", sourceId: "subpc-model-settings", note: localClaudeNote,
+      group: "計画", name: "計画作成（DeskMini）", location: "DeskMini", agent: "Claude Code",
+      model: localModel(settings.claudeLocalModel, "claude"), source: "DeskMini Claude 設定", sourceId: "subpc-model-settings", note: localClaudeNote,
     },
     {
-      group: "計画", name: "計画作成（サブPC）", location: "サブPC", agent: "Codex CLI",
-      model: localModel(settings.codexModel, "codex"), source: "サブPC Codex 設定", sourceId: "subpc-model-settings", note: localCodexNote,
+      group: "計画", name: "計画作成（DeskMini）", location: "DeskMini", agent: "Codex CLI",
+      model: localModel(settings.codexModel, "codex"), source: "DeskMini Codex 設定", sourceId: "subpc-model-settings", note: localCodexNote,
     },
     ...(["Claude Codeで開始後", "Codex CLIで開始後"] as const).map((name, index) => {
       const agent = index === 0 ? settings.planReviewAgentForClaude : settings.planReviewAgentForCodex;
       return {
-        group: "計画" as const, name: `自動計画レビュー（${name}）`, location: "サブPC",
+        group: "計画" as const, name: `自動計画レビュー（${name}）`, location: "DeskMini",
         agent: agent === "claude" ? "Claude Code" : "Codex CLI", model: planReviewModel(settings, agent),
         source: "計画レビュー設定", sourceId: "plan-review-settings",
       };
@@ -147,12 +147,12 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       agent: actionsAgent(settings), model: actionsModel(settings), source: "GitHub Actions 共通設定", sourceId: "github-actions-settings",
     },
     {
-      group: "実装", name: "通常実装・セッション継続（Claude）", location: "サブPC", agent: "Claude Code",
-      model: localModel(settings.claudeLocalModel, "claude"), source: "サブPC Claude 設定", sourceId: "subpc-model-settings", note: localClaudeNote,
+      group: "実装", name: "通常実装・セッション継続（Claude）", location: "DeskMini", agent: "Claude Code",
+      model: localModel(settings.claudeLocalModel, "claude"), source: "DeskMini Claude 設定", sourceId: "subpc-model-settings", note: localClaudeNote,
     },
     {
-      group: "実装", name: "通常実装・セッション継続（Codex）", location: "サブPC", agent: "Codex CLI",
-      model: localModel(settings.codexModel, "codex"), source: "サブPC Codex 設定", sourceId: "subpc-model-settings", note: localCodexNote,
+      group: "実装", name: "通常実装・セッション継続（Codex）", location: "DeskMini", agent: "Codex CLI",
+      model: localModel(settings.codexModel, "codex"), source: "DeskMini Codex 設定", sourceId: "subpc-model-settings", note: localCodexNote,
     },
     {
       group: "実装", name: "質問回答・Issue分割", location: "GitHub Actions", agent: actionsAgent(settings),
@@ -164,7 +164,7 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings",
     },
     {
-      group: "レビュー", name: "PRコードレビュー（Codex）", location: "サブPC", agent: "Codex CLI",
+      group: "レビュー", name: "PRコードレビュー（Codex）", location: "DeskMini", agent: "Codex CLI",
       model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings",
     },
     {
@@ -172,20 +172,20 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings", note: "Claude実装のレビュー指摘修正と、CI自動修正・コンフリクト解消・PR repairで共有します。",
     },
     {
-      group: "修復", name: "レビュー指摘修正（Codex）", location: "サブPC", agent: "Codex CLI",
-      model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings", note: "Codexで実装したIssueのレビュー指摘を、サブPCのChatGPT購読認証で修正します。APIキーは不要です。",
+      group: "修復", name: "レビュー指摘修正（Codex）", location: "DeskMini", agent: "Codex CLI",
+      model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings", note: "Codexで実装したIssueのレビュー指摘を、DeskMiniのChatGPT購読認証で修正します。APIキーは不要です。",
     },
     {
       group: "アプリ内AI", name: "要約・検索・文章整理・Issue作成補助・手作業アシスタント", location: appAiLocation(settings.appAiModel),
       agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
       note: appAiProvider(settings.appAiModel) === "openai"
-        ? `${CODEX_APP_AI_NOTE}画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。`
+        ? `${CODEX_APP_AI_NOTE}画像からの変更内容の抽出も、画像をDeskMiniへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。`
         : undefined,
     },
     {
       group: "アプリ内AI", name: "原因診断（チャット調査）", location: appAiLocation(settings.appAiModelReasoning),
       agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
-      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、DeskMiniのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
     },
     {
       group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨", location: appAiLocation(settings.appAiModelReasoning),
@@ -365,7 +365,7 @@ export function resolveProviderFlowRows(
     {
       step: "計画",
       entries: [
-        entry(find("計画作成（サブPC）", agentLabel(subAgent)), subBinding),
+        entry(find("計画作成（DeskMini）", agentLabel(subAgent)), subBinding),
         entry(find("計画作成（無人実行）"), actionsBinding),
       ],
       sourceId: "subpc-model-settings",

@@ -237,7 +237,7 @@ describe("isCheckUserWaitingForAgent", () => {
     ).toBe(false);
   });
 
-  it("対応PRが無くても、サブPCのセッションが作業中なら実行中とみなす", () => {
+  it("対応PRが無くても、DeskMiniのセッションが作業中なら実行中とみなす", () => {
     expect(
       isCheckUserWaitingForAgent(
         makeIssue({ labels: [label("00.check-user"), label("01.check-plan")] }),

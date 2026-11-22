@@ -3,7 +3,7 @@
  *
  * ホスト名（`DispatchHost.name`）は`hostname`そのままの識別子で、poller・tmux・
  * `local-repos.conf`・DBの照合キーを兼ねている。**識別子は変えられないが、人が読む場所に
- * `subpc`という綴りが出るのは表記として揃っていない**（ドキュメントも地の文では「サブPC」と
+ * `subpc`という綴りが出るのは表記として揃っていない**（ドキュメントも地の文では「DeskMini」と
  * 書いている）ため、表示するときだけここで日本語表記へ置き換える。
  *
  * 対応表に無いホストはそのまま返す。**未知のホストを勝手に加工しない**のは、表示から
@@ -14,9 +14,9 @@
  * そのまま使う値なので識別子のまま残す。
  */
 const HOST_DISPLAY_NAMES: Record<string, string> = {
-  subpc: "サブPC",
-  // サブPCと並ぶ2台目の常時起動ホスト（#5528）。識別子はstatus-hubのホスト統計と同じ`macmini`
-  macmini: "MacMini",
+  subpc: "DeskMini",
+  // DeskMiniと並ぶ2台目の常時起動ホスト（#5528）。識別子はstatus-hubのホスト統計と同じ`macmini`
+  macmini: "Mac mini",
 };
 
 /** ホスト名を画面に出す表記へ直す。対応表に無ければそのまま返す */

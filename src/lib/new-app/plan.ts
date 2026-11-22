@@ -244,7 +244,7 @@ export function buildNewAppPlan(
     {
       kind: "manual-subpc",
       automation: "proxy",
-      title: `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`,
+      title: `[手作業] DeskMini: ${spec.repositoryName}のシークレットを投入する`,
       target: "guchi-apps/issue-deck",
       description: "1Passwordへの値の投入とGitHub secretへの同期。cloneはローカルセッションを使うとき用。手作業アシスタントの代行実行で流せる",
     },
@@ -390,11 +390,11 @@ export function buildParentIssueBody(
     ...(options.githubAppNeedsRepositoryAdd
       ? [`ブラウザでissue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する`]
       : []),
-    "サブPCでclone・対応表への登録・1Passwordへの値投入を済ませる（初期化Issueの前提）",
+    "DeskMiniでclone・対応表への登録・1Passwordへの値投入を済ませる（初期化Issueの前提）",
     `\`${repo}\` の初期化と、developへのマージ（ホストの準備後にIssueDeckから開始します）`,
     `\`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映`,
     vpsProvisionable(spec)
-      ? `サブPCから \`${NEW_APP_VPS_REPOSITORY}\` のプロビジョニングを流し（置き場・DB・vhostの有効化・PM2・TLS）、初回デプロイ`
+      ? `DeskMiniから \`${NEW_APP_VPS_REPOSITORY}\` のプロビジョニングを流し（置き場・DB・vhostの有効化・PM2・TLS）、初回デプロイ`
       : "VPSで置き場とTLSを用意して初回デプロイ",
     `初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）`,
   ];
@@ -434,7 +434,7 @@ ${steps.map((line, index) => `${index + 1}. ${line}`).join("\n")}
 ワークフローが行います（\`guchi-apps/vps#132\`）。
 
 **ポート帯のPull Requestは、developへマージしただけでは効きません。**
-\`${LOCAL_PORT_BAND_CONF_PATH}\` はサブPCの本体チェックアウトから読まれるため、
+\`${LOCAL_PORT_BAND_CONF_PATH}\` はDeskMiniの本体チェックアウトから読まれるため、
 issue-deckの画面のホスト一覧で「更新して再起動」を押すまで反映されません
 （[docs/multi-agent/generic-launcher.md](https://github.com/${NEW_APP_PARENT_REPOSITORY}/blob/develop/docs/multi-agent/generic-launcher.md)）。
 
@@ -549,7 +549,7 @@ export function buildInitIssueBody(
   const isNext = spec.kind === "next" || spec.kind === "next-db";
   const scaffolded = scaffold !== null && scaffold.paths.length > 0;
   const has = (path: string) => scaffolded && scaffold.paths.includes(path);
-  const prerequisites = `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
+  const prerequisites = `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（DeskMiniの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
 
 **このIssueはサブPC・Macのローカルセッションで実装します。**
 GitHub Actions経由の計画・実装は廃止しました。ホストへリポジトリを登録してから
@@ -784,9 +784,9 @@ ${specTable(spec, { appearance: false })}
 
 ## 前提条件
 
-- 実行するデバイス: サブPC（ローカルセッション）
+- 実行するデバイス: DeskMini（ローカルセッション）
 - 先に完了している必要があるIssue・PR: ${[initRef, vpsRef, vpsManualRef].join("・")}
-- その他の前提: \`op\`・\`gh\` がサブPCでログイン済みで、VPSへSSHできること
+- その他の前提: \`op\`・\`gh\` がDeskMiniでログイン済みで、VPSへSSHできること
 
 **このIssueはサブPCのローカルセッションで実装します。** 実地確認の手順は個人スキル
 \`initial-deploy-check\` にあり、GitHub Actions上の無人実行からは読めません。1Password・VPSへの
@@ -1056,11 +1056,11 @@ function wildcardDnsCheck(spec: NewAppSpec): string {
 
 function portBandPrerequisite(refs: NewAppIssueRefs): string {
   const pr = refs.portBandPullRequest ?? `\`${LOCAL_PORT_BAND_CONF_PATH}\` へポート帯を足すPull Request`;
-  return `${pr} がdevelopへマージされ、issue-deckの画面のホスト一覧で「更新して再起動」を押してサブPCのチェックアウトを更新済みであること`;
+  return `${pr} がdevelopへマージされ、issue-deckの画面のホスト一覧で「更新して再起動」を押してDeskMiniのチェックアウトを更新済みであること`;
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}のローカル準備とシークレット投入を行う`;
+  return `[手作業] DeskMini: ${spec.repositoryName}のローカル準備とシークレット投入を行う`;
 }
 
 /**
@@ -1077,35 +1077,35 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCでフォルダ信頼確認に止まらず、\`${spec.repositoryName}\` のローカルセッションを起こせるようになる`,
+    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてDeskMiniでフォルダ信頼確認に止まらず、\`${spec.repositoryName}\` のローカルセッションを起こせるようになる`,
     blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（初期化Issueもホスト準備の完了を待ちます）`,
     urgency: "初期化Issueを開始する前",
-    device: "**サブPC**（メインPCからなら `ssh subpc`）",
+    device: "**DeskMini**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",
     prerequisiteIssues: refs.githubAppNeedsRepositoryAdd
       ? `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`
       : refs.parent,
-    otherPrerequisites: `\`gh\` がサブPCでログイン済みで、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること。${portBandPrerequisite(refs)}`,
-    steps: `- [ ] （サブPC）リポジトリをcloneする
+    otherPrerequisites: `\`gh\` がDeskMiniでログイン済みで、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること。${portBandPrerequisite(refs)}`,
+    steps: `- [ ] （DeskMini）リポジトリをcloneする
 
   \`\`\`bash
   gh repo clone ${repo} ${path}
   \`\`\`
 
-- [ ] （サブPC）ローカルセッションの対応表へ追記する
+- [ ] （DeskMini）ローカルセッションの対応表へ追記する
 
   \`\`\`bash
   printf '%s\\n' '${repo} ${path}' >> "$HOME/.config/issue-deck/local-repos.conf"
   \`\`\`
 
-- [ ] （サブPC）Claude Codeを一度開き、「Yes, I trust this folder」を選んでから \`/exit\` で抜ける
+- [ ] （DeskMini）Claude Codeを一度開き、「Yes, I trust this folder」を選んでから \`/exit\` で抜ける
 
   \`\`\`bash
   cd ${path} && claude
   \`\`\`
 
-- [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
+- [ ] （DeskMini）1Passwordのアイテムを作り、機械的に定まる値を投入する
 
   \`\`\`bash
   ${provisionCommand(spec)}
@@ -1146,7 +1146,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 ${sharedSecretCheck(spec)}${wildcardDnsCheck(spec)}
 **GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
 リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。フォルダ信頼は対象を人が確認して答える必要があるため自動化せず、その手順だけサブPCの端末で実行します。ほかの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
+    why: "DeskMiniのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。フォルダ信頼は対象を人が確認して答える必要があるため自動化せず、その手順だけDeskMiniの端末で実行します。ほかの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
@@ -1155,7 +1155,7 @@ export function buildVpsManualIssueTitle(spec: NewAppSpec): string {
   // 実行する場所が変わるとタイトルの先頭も変わる（CLAUDE.md「[手作業] <実行する場所>: <やること>」）。
   // ワークフローへ流せるならサブPCの1コマンドで済む（#2246）
   return vpsProvisionable(spec)
-    ? `[手作業] サブPC: ${spec.displayName}をVPSへ受け入れる（置き場・DB・証明書）`
+    ? `[手作業] DeskMini: ${spec.displayName}をVPSへ受け入れる（置き場・DB・証明書）`
     : `[手作業] VPS: ${spec.displayName}の置き場と証明書を用意する`;
 }
 
@@ -1187,7 +1187,7 @@ function buildVpsProvisionIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): st
     benefit: `${spec.displayName}が ${publicUrlFor(spec)} で開けるようになる`,
     blocked: `デプロイの配布先が無く、${spec.databaseName ? "DBにも接続できず、" : ""}HTTPSでも開けない`,
     urgency: "初回デプロイの前（1回目）と、初回デプロイの後（2回目）",
-    device: "**サブPC**",
+    device: "**DeskMini**",
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: `${vpsRef}（VirtualHostが \`main\` まで進んで実機へ反映済み）`,
@@ -1196,19 +1196,19 @@ function buildVpsProvisionIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): st
 \`(変更なし)\` と出るだけです。1回目で置き場・DB・vhostの有効化・証明書まで進み、
 2回目で\`deploy/ecosystem.config.js\`ができたPM2への登録が進みます。
 
-- [ ] （サブPC）初回デプロイの前に、VPSの受け入れを流す
+- [ ] （DeskMini）初回デプロイの前に、VPSの受け入れを流す
 
   \`\`\`bash
   ${command}
   \`\`\`
 
-- [ ] （サブPC）初回デプロイの後に、もう一度流してPM2へ登録する
+- [ ] （DeskMini）初回デプロイの後に、もう一度流してPM2へ登録する
 
   \`\`\`bash
   ${command}
   \`\`\`
 
-- [ ] （サブPC）実行ログの末尾「リポジトリへ取り込む差分」に出た内容を ${vpsRef} へ控える
+- [ ] （DeskMini）実行ログの末尾「リポジトリへ取り込む差分」に出た内容を ${vpsRef} へ控える
 
   \`\`\`bash
   ${runList} --limit 1 --json databaseId --jq '.[0].databaseId' \\
@@ -1217,7 +1217,7 @@ function buildVpsProvisionIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): st
 
   certbotは実機の設定ファイルだけを書き換えます。控えて取り込むまで、毎日のドリフト検知に
   「[新規（未取り込み）]」として出続けます。`,
-    verification: `**手順ごとに1つずつ確かめます**（#2256）。サブPCで上から順に流し、すべてが成功すれば完了です。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。DeskMiniで上から順に流し、すべてが成功すれば完了です。
 
 - 直近のプロビジョニングが成功している
 
@@ -1340,7 +1340,7 @@ ${dbCheck}
 控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むまでは、毎日のドリフト検知に
 「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。ここだけは
 コマンドで確かめられないので、${vpsRef} にコメントが付いていることを目で確かめてください。`,
-    why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はサブPCだけです）。",
+    why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はDeskMiniだけです）。",
     related: `- 起点Issue: ${refs.parent}
 - VirtualHost: ${vpsRef}`,
   });
@@ -1455,13 +1455,13 @@ Issueを別リポジトリで同時に起こすと開発サーバーのポート
 grep -F '${repo}' scripts/local-repo-ports.conf
 \`\`\`
 
-サブPCでは、developへマージしたうえで**issue-deckの画面のホスト一覧で「更新して再起動」**を
+DeskMiniでは、developへマージしたうえで**issue-deckの画面のホスト一覧で「更新して再起動」**を
 押すと反映されます（このファイルは本体チェックアウトから読まれるため、マージだけでは効きません）。
 
 ## 注意点
 
 - 帯は「現状の最大 + 1000」で決めています。空きを詰め直してはいません（古いチェックアウトが
-  残っているサブPCで前の持ち主と衝突しうるため）。
+  残っているDeskMiniで前の持ち主と衝突しうるため）。
 `;
 }
 

@@ -835,7 +835,7 @@ async function investigate(user: ChatUser, conversationId: string, context: Chat
   }
   const userMessage = await db.chatMessage.create({ data: { conversationId, role: "user", text: text.slice(0, 2000) } });
   const run = await db.chatRun.create({
-    data: { conversationId, userMessageId: userMessage.id, status: "running", phase: "サブPCへ送信しています", provider: CODEX_CLI_PROVIDER, model: execution.model },
+    data: { conversationId, userMessageId: userMessage.id, status: "running", phase: "DeskMiniへ送信しています", provider: CODEX_CLI_PROVIDER, model: execution.model },
   });
   let lastFailure: string | null = null;
   const codexSession = createCodexSession({ runId: run.id, model: execution.model, requestedByUserId: user.id });

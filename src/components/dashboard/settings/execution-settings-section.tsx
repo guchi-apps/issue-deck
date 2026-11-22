@@ -520,7 +520,7 @@ export function ExecutionSettingsSection({
         )}
       </div>}
 
-      {(mode === "execution" || mode === "all") && <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPCとエラー処理</h3>}
+      {(mode === "execution" || mode === "all") && <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">DeskMiniとエラー処理</h3>}
 
       {(mode === "execution" || mode === "all") && <div id="execution-controls" className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5">
@@ -548,8 +548,8 @@ export function ExecutionSettingsSection({
 
       {(mode === "execution" || mode === "all") && <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <div className="flex items-center gap-1.5">
-          <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
-          <InfoHint label="サブPC：既定のエージェント">
+          <Label htmlFor="default-dispatch-agent">DeskMini：既定のエージェント</Label>
+          <InfoHint label="DeskMini：既定のエージェント">
             「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
           </InfoHint>
         </div>
@@ -613,9 +613,9 @@ export function ExecutionSettingsSection({
 
       {(mode === "execution" || mode === "all") && <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <div className="flex items-center gap-1.5">
-          <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
-          <InfoHint label="サブPCの同時実行数">
-            サブPCへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
+          <Label htmlFor="dispatch-concurrency">DeskMiniの同時実行数</Label>
+          <InfoHint label="DeskMiniの同時実行数">
+            DeskMiniへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
             合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
             4本にするとメモリが足りずビルドが2倍以上遅くなります）。
           </InfoHint>
@@ -637,7 +637,7 @@ export function ExecutionSettingsSection({
         <div className="flex items-center gap-1.5">
           <Label htmlFor="github-actions-agent">エージェント</Label>
           <InfoHint label="エージェント">
-            GitHub Actionsの計画・実装・レビューに使うCLIです。サブPCとは別に保存されます。
+            GitHub Actionsの計画・実装・レビューに使うCLIです。DeskMiniとは別に保存されます。
           </InfoHint>
         </div>
         <Select value={githubActionsAgent} onValueChange={(value) => setGithubActionsAgent(value as GithubActionsAgent)}>
@@ -702,12 +702,12 @@ export function ExecutionSettingsSection({
         </Select>
       </div>
 
-      <h3 id="subpc-model-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPC 共通設定</h3>
+      <h3 id="subpc-model-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">DeskMini 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5">
-          <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
-          <InfoHint label="サブPC（Claude）：計画・実装">
+          <Label htmlFor="claude-local-model">DeskMini（Claude）：計画・実装</Label>
+          <InfoHint label="DeskMini（Claude）：計画・実装">
             「実装を開始」で最初から選ばれるモデルです。「おまかせ」を選ぶと、開くたびにIssueの内容から
             モデルを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、
             「ローカルで開始」・PR修正依頼の呼び戻し・一括停止からの再開など、モデルを選ばずに
@@ -744,8 +744,8 @@ export function ExecutionSettingsSection({
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5">
-          <Label htmlFor="codex-model">Codex：サブPCでの計画・実装</Label>
-          <InfoHint label="Codex：サブPCでの計画・実装">
+          <Label htmlFor="codex-model">Codex：DeskMiniでの計画・実装</Label>
+          <InfoHint label="Codex：DeskMiniでの計画・実装">
             「実装を開始」でCodex CLIを選んだとき、最初から選ばれるモデルです。通常はTerra、難しい
             IssueはSol、単純な修正を優先する場合はLunaが適しています。「おまかせ」を選ぶと、開くたびに
             Issueの内容からSol・Terra・Lunaを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、
@@ -770,7 +770,7 @@ export function ExecutionSettingsSection({
 
       {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
           「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く。
-          サブPCのモデル設定（すぐ上）の直後に置く */}
+          DeskMiniのモデル設定（すぐ上）の直後に置く */}
       <div id="model-pick-settings" className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5">
           <Label htmlFor="model-pick-engine">判定に使うAI（おまかせ・ラベル付与）</Label>
@@ -813,9 +813,9 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
           <InfoHint label="アプリ内AI：要約・検索・文章整理">
             Issueとコメントの要約、類似Issue検索、本文整理、Issue作成補助、デプロイ失敗の原因分析に使います。
-            定型処理が中心のため、通常はHaikuが適しています。GPT系を選ぶとサブPCのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、
+            定型処理が中心のため、通常はHaikuが適しています。GPT系を選ぶとDeskMiniのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、
             Claudeが使えないときの代わりになります。OpenAI API（従量課金）は使わず、Codexが使えないときはエラーを表示してClaudeへは切り替えません。
-            画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。モデルの自動選択はルールで判定します。
+            画像からの変更内容の抽出も、画像をDeskMiniへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。モデルの自動選択はルールで判定します。
           </InfoHint>
         </div>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
@@ -839,7 +839,7 @@ export function ExecutionSettingsSection({
           <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
             手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
             通常はSonnetが適しています。GPT系を選ぶと、原因診断（チャット調査）・新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨を
-            サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。OpenAI API（従量課金）は使わず、Codexが使えないときはClaudeへ切り替えません。
+            DeskMiniのCodex CLI（ChatGPTサブスク枠）で実行します。OpenAI API（従量課金）は使わず、Codexが使えないときはClaudeへ切り替えません。
           </InfoHint>
         </div>
         <Select
@@ -898,7 +898,7 @@ function AppAiRuntimeNote({ model }: { model: AppAiModel }) {
     <p className="text-xs text-muted-foreground" data-testid="app-ai-runtime">
       実行先:{" "}
       {codex
-        ? "サブPCのCodex CLI（ChatGPTサブスク枠）。Claudeが止まっていても動きます。サブPCがオフライン・未ログイン・枠超過のときはエラーになります"
+        ? "DeskMiniのCodex CLI（ChatGPTサブスク枠）。Claudeが止まっていても動きます。DeskMiniがオフライン・未ログイン・枠超過のときはエラーになります"
         : "IssueDeckサーバーからAnthropic API（Claudeのサブスク枠）"}
     </p>
   );

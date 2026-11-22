@@ -117,7 +117,7 @@ describe("summarizeIssueSession", () => {
   it("ALIVEで様子の報告が無ければ実行中", () => {
     const s = summarizeIssueSession(session());
     expect(s.tone).toBe("running");
-    expect(s.label).toContain("サブPCで実行中");
+    expect(s.label).toContain("DeskMiniで実行中");
   });
 
   it("入力待ちはRemote Controlの案内を添える", () => {
@@ -286,14 +286,14 @@ describe("summarizeIssueSession", () => {
  */
 describe("compactIssueSessionLabel", () => {
   it("ホスト名と短い言い方をつなぐ", () => {
-    expect(compactIssueSessionLabel(session())).toBe("サブPC・実行中");
+    expect(compactIssueSessionLabel(session())).toBe("DeskMini・実行中");
     expect(compactIssueSessionLabel(session({ activity: "NOT_STARTED" }))).toBe(
-      "サブPC・まだ開始していません",
+      "DeskMini・まだ開始していません",
     );
     expect(compactIssueSessionLabel(session({ activity: "WAITING_INPUT" }))).toBe(
-      "サブPC・入力を待っています",
+      "DeskMini・入力を待っています",
     );
-    expect(compactIssueSessionLabel(session({ state: "FAILED" }))).toBe("サブPC・異常終了");
+    expect(compactIssueSessionLabel(session({ state: "FAILED" }))).toBe("DeskMini・異常終了");
   });
 });
 
@@ -636,7 +636,7 @@ describe("describeSessionPermission", () => {
     });
     const s = summarizeIssueSession(waiting);
     expect(s.tone).toBe("waiting");
-    expect(s.label).toBe("サブPCのセッションがアクセスの許可を待っています");
+    expect(s.label).toBe("DeskMiniのセッションがアクセスの許可を待っています");
     expect(s.shortLabel).toBe("許可を待っています");
     expect(describeSessionPermission(waiting)).toEqual({
       toolLabel: "Read（ファイルの読み取り）",

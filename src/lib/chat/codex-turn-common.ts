@@ -58,11 +58,11 @@ export async function pickChatCodexHost(now: Date = new Date()): Promise<HostChe
   const hosts = await db.dispatchHost.findMany({ orderBy: { lastSeenAt: "desc" } });
   const online = hosts.filter((host) => isDispatchHostOnline(host.lastSeenAt, now));
   if (online.length === 0) {
-    return { ok: false, reason: "Codex(offline) サブPCがオフラインです" };
+    return { ok: false, reason: "Codex(offline) DeskMiniがオフラインです" };
   }
   const capable = online.find((host) => host.chatCodexCapable === true);
   if (!capable) {
-    return { ok: false, reason: "Codex(unsupported) サブPCのpollerがチャットのCodex実行に未対応です" };
+    return { ok: false, reason: "Codex(unsupported) DeskMiniのpollerがチャットのCodex実行に未対応です" };
   }
   return { ok: true, hostName: capable.name };
 }

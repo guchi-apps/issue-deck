@@ -406,7 +406,7 @@ function describePhase({
       }
       return [
         hasInvestigation ? "AIが作業しています" : "AIが調査しています",
-        "ローカル（サブPC・Mac mini）のセッションが進めています。あなたの操作が必要になると、質問としてこの下に出ます。",
+        "ローカル（DeskMini・Mac mini）のセッションが進めています。あなたの操作が必要になると、質問としてこの下に出ます。",
       ];
     case "user_action":
       if (sessionWaitingInput && !questionPending) {

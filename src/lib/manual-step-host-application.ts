@@ -70,7 +70,7 @@ export function isManualStepAppliedOnAllHosts(
   return applications.length > 0 && applications.every((entry) => entry.applied);
 }
 
-/** 画面に出す1行（例: `MacMini 済／サブPC 未適用`） */
+/** 画面に出す1行（例: `Mac mini 済／サブPC 未適用`） */
 export function describeManualStepHostApplications(
   applications: readonly ManualStepHostApplication[],
 ): string {

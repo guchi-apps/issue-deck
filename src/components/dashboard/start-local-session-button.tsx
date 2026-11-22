@@ -185,11 +185,11 @@ export function StartLocalSessionButton({
               disabled={isBusy}
             >
               {isBusy ? <Loader2 className="animate-spin" /> : <Server />}
-              サブPCで開始
+              DeskMiniで開始
               <ChevronDown />
             </Button>
           </DropdownMenuTrigger>
-          {/* スマホの画面幅（サブPC起動の主な用途）でも収まるよう、幅は画面からはみ出さない */}
+          {/* スマホの画面幅（DeskMini起動の主な用途）でも収まるよう、幅は画面からはみ出さない */}
           <DropdownMenuContent align="end" className="w-72 max-w-[calc(100vw-2rem)]">
             <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
               起動先を選ぶ

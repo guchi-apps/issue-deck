@@ -123,7 +123,7 @@ export function evaluateRollout(input: RolloutInput): RolloutRow {
       reasons: [
         declared.length > 0
           ? "リポジトリを申告しているホストが、統合検証・全体レビューに未対応です（pollerの更新が必要）"
-          : "このリポジトリで統合検証・全体レビューを実行できるサブPCが申告していません（チェックアウトとホスト登録が必要）",
+          : "このリポジトリで統合検証・全体レビューを実行できるローカルのホストが申告していません（チェックアウトとホスト登録が必要）",
       ],
       hosts: [],
     };

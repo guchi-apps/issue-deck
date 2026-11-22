@@ -33,7 +33,7 @@ export const RELEASE_REVIEW_CHECK_ITEMS: readonly ReleaseReviewCheckItem[] = [
   },
   {
     id: "host_compat",
-    label: "実行ホスト（アプリ・サブPC poller・Mac）と共有ワークフローの新旧互換性・配布条件",
+    label: "実行ホスト（アプリ・DeskMini poller・Mac）と共有ワークフローの新旧互換性・配布条件",
     guide:
       "今回の差分で、サーバーだけ先に出た／pollerだけ古いときに失敗する呼び出し、共有ワークフローのタグ参照・配布条件の食い違い、実行ホストへ届かないスクリプトの変更のいずれかをコードで確認できたら指摘する。",
   },

@@ -73,7 +73,7 @@ describe("parseDispatchTarget", () => {
     });
   });
 
-  it("パス参照・空白・スラッシュ過多を弾く（サブPC側でパスの一部になるため）", () => {
+  it("パス参照・空白・スラッシュ過多を弾く（DeskMini側でパスの一部になるため）", () => {
     expect(parseDispatchTarget("../etc", 1)).toBeNull();
     expect(parseDispatchTarget("guchi-apps/../issue-deck", 1)).toBeNull();
     expect(parseDispatchTarget("guchi apps/issue-deck", 1)).toBeNull();
@@ -207,7 +207,7 @@ describe("parseDispatchReportStatus", () => {
 describe("describeDispatchEnqueueRejection", () => {
   it("理由ごとに、次に何を見ればよいかが分かる日本語を返す", () => {
     expect(describeDispatchEnqueueRejection("host_offline", { hostName: "subpc" })).toContain(
-      "サブPC",
+      "DeskMini",
     );
     expect(
       describeDispatchEnqueueRejection("repository_not_runnable", {
@@ -1075,7 +1075,7 @@ describe("セッションの操作（#1332）", () => {
         hostName: "subpc",
         kind: "KILL",
       });
-      expect(message).toContain("サブPC");
+      expect(message).toContain("DeskMini");
       expect(message).toContain("poller");
     });
   });
@@ -1806,7 +1806,7 @@ describe("resolveManualStepExecutionRejection", () => {
   });
 
   // サブPCの手順は、VPSの申告が無くても従来どおり押せる
-  it("VPSの申告が無くてもサブPCの手順は押せる", () => {
+  it("VPSの申告が無くてもDeskMiniの手順は押せる", () => {
     expect(
       resolveManualStepExecutionRejection(
         params({

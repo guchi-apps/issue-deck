@@ -75,7 +75,7 @@ report_start_progress() {
   progress_resolve_endpoint "$root"
   if [[ -z "$PROGRESS_BASE_URL" || -z "$PROGRESS_SECRET" ]]; then
     echo "#$number: 進捗（Project Status）は報告しませんでした（APP_BASE_URL / PROGRESS_REPORT_SECRET が見つかりません）。"
-    echo "     サブPCでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。"
+    echo "     DeskMiniでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。"
     echo "     issue-deckの画面の「実装を開始」ボタン、またはカンバンでカードを動かしても進められます。"
     return 0
   fi

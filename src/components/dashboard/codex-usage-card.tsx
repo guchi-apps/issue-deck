@@ -76,7 +76,7 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
               転記へ戻ったまま、実際と違う値が出続けていた） */}
           {data.source === "transcript" && (
             <li className="text-xs text-muted-foreground">
-              ops-dashboardから取得できないため、サブPCの転記（最終観測 {formatObservedAt(data.fetchedAt)}）を表示しています
+              ops-dashboardから取得できないため、DeskMiniの転記（最終観測 {formatObservedAt(data.fetchedAt)}）を表示しています
             </li>
           )}
         </ul>

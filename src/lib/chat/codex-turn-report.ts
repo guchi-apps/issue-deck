@@ -96,7 +96,7 @@ export async function fetchChatTurnRequest(params: { jobId: string; host: string
         jobId: params.jobId,
         hostName: params.host,
         status: "failed",
-        message: "サブPCのチェックアウトが画像の受け渡しに未対応です（image_host_outdated）",
+        message: "DeskMiniのチェックアウトが画像の受け渡しに未対応です（image_host_outdated）",
       });
       return { ok: false as const, status: 409, error: "images_unsupported" };
     }

@@ -39,7 +39,7 @@ describe("isWorkflowBadgeSpinning", () => {
     ).toBe(false);
   });
 
-  it("サブPCのセッションが生きていれば回す（#1439）", () => {
+  it("DeskMiniのセッションが生きていれば回す（#1439）", () => {
     expect(
       isWorkflowBadgeSpinning({ session: session(), approvalPending: false, now: NOW }),
     ).toBe(true);

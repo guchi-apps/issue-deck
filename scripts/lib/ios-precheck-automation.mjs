@@ -79,7 +79,7 @@ export async function processPullRequest(io, repository, number, state, maxFixes
   const repaired = await io.repair(current, result);
   if (!repaired) {
     await io.save({ ...next, blockedSha: sha, reason: 'repair_failed' });
-    await io.report(repository, sha, 'failure', 'iOS検証失敗: 自動修正を停止しました。サブPCのログを確認してください');
+    await io.report(repository, sha, 'failure', 'iOS検証失敗: 自動修正を停止しました。DeskMiniのログを確認してください');
     return 'blocked';
   }
   // 次巡で新しいHEADを取り直してMacで検証する。古い成功を転記しない。

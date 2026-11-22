@@ -171,9 +171,9 @@ export async function requestReleaseReviewJob(
   );
   if (hostName === null) {
     if (options.recordNoHost === false) {
-      return { ok: false, rejection: "no_host", message: "全体レビューを積めるサブPCがないため見送りました" };
+      return { ok: false, rejection: "no_host", message: "全体レビューを積めるDeskMiniがないため見送りました" };
     }
-    const message = `${target.repoFullName}の全体レビュー（${describeReleaseReviewAssignee(assignee)}）を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録・Codex未対応のいずれか）。`;
+    const message = `${target.repoFullName}の全体レビュー（${describeReleaseReviewAssignee(assignee)}）を実行できるDeskMiniがありません（オフライン・pollerが未対応・リポジトリ未登録・Codex未対応のいずれか）。`;
     await recordReleaseVerificationResult(target, {
       kind: "ai_review",
       state: "failed",

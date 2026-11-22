@@ -120,6 +120,6 @@ describe("describeClaudeWindowKeepAlive", () => {
   });
 
   it("枠が止まっていれば次の巡回で開けると出す", () => {
-    expect(describeClaudeWindowKeepAlive(view())).toMatch(/サブPCの次の巡回で開けます。$/);
+    expect(describeClaudeWindowKeepAlive(view())).toMatch(/DeskMiniの次の巡回で開けます。$/);
   });
 });

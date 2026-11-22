@@ -382,7 +382,7 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}" || echo "::warning::確認待ちのラベルを外せませんでした"
           fi
 
-      - name: Codexのレビュー修正をサブPCへ依頼する
+      - name: Codexのレビュー修正をDeskMiniへ依頼する
         id: codex_fix
         if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'codex'
         env:
@@ -399,16 +399,16 @@ jobs:
           body="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" --argjson pullRequest "$PR_NUMBER" --arg headSha "$HEAD_SHA" --argjson manual "$MANUAL" --arg runId "$RUN_ID" '{runId:$runId,action:"request",repository:$repository,issueNumber:$issueNumber,pullRequest:$pullRequest,headSha:$headSha,manual:$manual}')"
           result="$(curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data-binary "$body" "${APP_BASE_URL%/}/api/dispatch/review-fix")"
           jq -e '.status == "QUEUED" or .status == "CLAIMED" or .status == "RUNNING" or .status == "SUCCEEDED"' <<<"$result" >/dev/null
-          echo 'サブPCへ依頼しました。完了はDispatchJobの状態で確認できます。'
+          echo 'DeskMiniへ依頼しました。完了はDispatchJobの状態で確認できます。'
 
-      - name: 修正担当の解決またはサブPCへの依頼失敗を通知する
+      - name: 修正担当の解決またはDeskMiniへの依頼失敗を通知する
         if: failure() && steps.state.outputs.should_fix == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --body 'レビュー修正の担当解決またはサブPCへの依頼に失敗しました。実装担当の記録、サブPCの更新・オンライン状態、同じIssueの実装セッションを確認してください。Claudeへは切り替えていません。<!-- issue-deck-source:claude-review-fix -->'
+          gh issue comment "$ISSUE_NUMBER" --body 'レビュー修正の担当解決またはDeskMiniへの依頼に失敗しました。実装担当の記録、DeskMiniの更新・オンライン状態、同じIssueの実装セッションを確認してください。Claudeへは切り替えていません。<!-- issue-deck-source:claude-review-fix -->'
           gh issue edit "$ISSUE_NUMBER" --add-label 00.check-user --add-label 01.check-blocked
 
       - name: 作業ブランチをcheckoutする

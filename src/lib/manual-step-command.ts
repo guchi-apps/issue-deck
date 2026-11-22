@@ -456,7 +456,7 @@ export function resolveManualStepRunTarget(
  * サブPCとは限らない（#5568）
  */
 export function describeManualStepRunTarget(target: ManualStepRunTarget): string {
-  return target === "vps" ? "VPS" : "ローカル（サブPC・Mac mini）";
+  return target === "vps" ? "VPS" : "ローカル（DeskMini・Mac mini）";
 }
 
 /**

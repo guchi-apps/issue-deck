@@ -75,7 +75,7 @@ export type ManualStepGuideStep = {
  * 別々に持つと、検査を通った書き方を画面が読めない（その逆も）が必ず出る。
  */
 export const MANUAL_STEP_DEVICE_NAMES = [
-  { label: "サブPC", needles: ["サブpc", "subpc"] },
+  { label: "DeskMini", needles: ["deskmini", "サブpc", "subpc"] },
   { label: "メインPC", needles: ["メインpc", "mainpc"] },
   { label: "VPS", needles: ["vps"] },
   { label: "ブラウザ", needles: ["ブラウザ"] },
@@ -84,7 +84,7 @@ export const MANUAL_STEP_DEVICE_NAMES = [
 ] as const;
 
 /** ローカルのホスト（サブPC・Mac mini）を指す端末名。実行先`local`（通信値`subpc`）へ読む */
-const LOCAL_DEVICE_LABELS: readonly string[] = ["サブPC", "ローカル", "Mac mini"];
+const LOCAL_DEVICE_LABELS: readonly string[] = ["DeskMini", "ローカル", "Mac mini"];
 
 /** `matchManualStepDeviceNames`の結果が、ローカルのホストを指す1つの端末名か */
 export function isManualStepLocalDeviceLabel(label: string | null | undefined): boolean {

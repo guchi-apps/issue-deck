@@ -368,7 +368,7 @@ describe("QuestionAnswerPanel（手作業の手順）", () => {
   const MANUAL_STEP_BODY = [
     "## 前提条件",
     "",
-    "- 実行するデバイス: サブPC（`ssh subpc`）",
+    "- 実行するデバイス: DeskMini（`ssh subpc`）",
     "- カレントディレクトリ: `~/apps/issue-deck`",
     "",
     "## やること",

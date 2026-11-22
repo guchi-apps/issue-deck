@@ -22,7 +22,7 @@ finish() {
   [[ -z "$promptdir" ]] || rm -rf "$promptdir"
   pr_review_heartbeat_stop
   if [[ "$finished" != 1 ]]; then
-    pr_review_report "$JOB_ID" failed "Codexのレビュー修正が停止しました（終了コード $code）。サブPCのログを確認してください。"
+    pr_review_report "$JOB_ID" failed "Codexのレビュー修正が停止しました（終了コード $code）。DeskMiniのログを確認してください。"
   fi
   [[ -z "$workdir" || -z "$local_path" ]] || git -C "$local_path" worktree remove --force "$workdir" >/dev/null 2>&1 || true
 }

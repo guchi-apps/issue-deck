@@ -18,7 +18,7 @@ function prerequisite(overrides: Partial<ManualStepPrerequisite> = {}): ManualSt
     origin: false,
     explicit: true,
     kind: "issue",
-    title: "[手作業] サブPC: 停止しているセルフホストランナーを起こす",
+    title: "[手作業] DeskMini: 停止しているセルフホストランナーを起こす",
     htmlUrl: `https://github.com/${REPO}/issues/39`,
     stage: "manual-pending",
     label: "手作業・未実施",

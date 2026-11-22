@@ -1257,7 +1257,7 @@ export function describeManualStepExecutionRejection(
       // ではない）。**サブPCとVPSだけが代行できる**（VPSは#2901でサブPCからのSSH越しに加わった）
       return context.device
         ? `この手作業は${context.device}で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。`
-        : "この手作業はサブPC・VPS以外で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。";
+        : "この手作業はDeskMini・VPS以外で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。";
     case "no_command":
       // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
       // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
@@ -1273,7 +1273,7 @@ export function describeManualStepExecutionRejection(
       // サービスアカウントがあり、1Passwordの読み書きは非対話で通る（#1874）。ここへ出すのは、
       // 人が「自分で実行するしかない」と受け取って毎回手で実行してしまうため
       return context.interactiveCommand === OP_SIGNIN_COMMAND
-        ? `${head}なお、1Passwordの読み書きは\`scripts/provision-secret.sh\`（サブPCの書き込み用トークンを使う）へ書き換えると代行できます。`
+        ? `${head}なお、1Passwordの読み書きは\`scripts/provision-secret.sh\`（DeskMiniの書き込み用トークンを使う）へ書き換えると代行できます。`
         : head;
     }
     case "placeholder_command":
@@ -1871,7 +1871,7 @@ export function isActionsRunInProgress(
  * 積む導線が複数ある（「実装を開始」・「セッションを復旧」など）ので、文言だけはここで揃える。
  */
 export const ACTIONS_RUNNING_ENQUEUE_REASON =
-  "GitHub Actionsの実行が進行中です。同じブランチを2つの経路が進めることになるため、実行が終わるまでサブPCへは積めません。";
+  "GitHub Actionsの実行が進行中です。同じブランチを2つの経路が進めることになるため、実行が終わるまでDeskMiniへは積めません。";
 
 /**
  * そのIssueの実行が**もう始まっているか**（#1667）。開始の導線を出すかどうかの判定に使う。
@@ -2070,7 +2070,7 @@ function describePrReviewJobStatus(status: DispatchJobStatus): {
     case "QUEUED":
       return { label: "キュー待ち", tone: "pending" };
     case "CLAIMED":
-      return { label: "サブPC受付済み", tone: "pending" };
+      return { label: "DeskMini受付済み", tone: "pending" };
     case "RUNNING":
       return { label: "レビュー実行中", tone: "running" };
     case "SUCCEEDED":
@@ -2103,9 +2103,9 @@ function describeManualStepJobStatus(status: DispatchJobStatus): {
 } {
   switch (status) {
     case "QUEUED":
-      return { label: "サブPCへ送信しました", tone: "pending" };
+      return { label: "DeskMiniへ送信しました", tone: "pending" };
     case "CLAIMED":
-      return { label: "サブPCが受け取りました", tone: "pending" };
+      return { label: "DeskMiniが受け取りました", tone: "pending" };
     case "RUNNING":
       return { label: "実行中", tone: "running" };
     case "SUCCEEDED":
@@ -2117,7 +2117,7 @@ function describeManualStepJobStatus(status: DispatchJobStatus): {
     case "SKIPPED":
       return { label: "実行を見送りました", tone: "muted" };
     case "TIMEOUT":
-      return { label: "サブPCへ届きませんでした", tone: "error" };
+      return { label: "DeskMiniへ届きませんでした", tone: "error" };
     case "CANCELED":
       return { label: "取り消し済み", tone: "muted" };
   }

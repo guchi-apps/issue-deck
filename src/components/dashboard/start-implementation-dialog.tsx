@@ -132,7 +132,7 @@ function describeNextWindowTarget(
 ): string {
   const nextWindow = settings?.nextWindow ?? null;
   const lead = nextWindow ? `${nextWindow.leadMinutes}分` : "設定した時間";
-  const where = hostName ? formatDispatchHostName(hostName) : "サブPC";
+  const where = hostName ? formatDispatchHostName(hostName) : "DeskMini";
   const tail =
     nextWindow && !nextWindow.enabled
       ? "次枠実行はOFFなので、「予約実行」画面でONにするまで起動しません"
@@ -542,7 +542,7 @@ export function StartImplementationDialog({
   const nightlyProjectedLabelNames = new Set(startImplementationLabelsToRemove(options));
   const nightlyRejection =
     nightlyHost === null
-      ? "このリポジトリを実行できるサブPCが登録されていません"
+      ? "このリポジトリを実行できるDeskMiniが登録されていません"
       : resolveNightlyRunLabelRejection(
           issue.labels.filter((label) => !nightlyProjectedLabelNames.has(label.name)),
           scheduledKind,
@@ -1072,7 +1072,7 @@ export function StartImplementationDialog({
             </div>
           )}
           {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
-              実行先（サブPC）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
+              実行先（DeskMini）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
               対応を申告していないホストでは欄ごと出さない */}
           {!isTargetPending && showAgents && (
             <div className="flex flex-col gap-2">

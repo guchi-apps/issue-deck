@@ -89,7 +89,7 @@ const REPOSITORY = "guchi-apps/issue-deck";
 const BODY = [
   "## 前提条件", // 1
   "", // 2
-  "- 実行するデバイス: **サブPC**（`ssh subpc`）", // 3
+  "- 実行するデバイス: **DeskMini**（`ssh subpc`）", // 3
   "", // 4
   "## やること", // 5
   "", // 6

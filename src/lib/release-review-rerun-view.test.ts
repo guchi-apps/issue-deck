@@ -85,7 +85,7 @@ describe("describeReviewRerun", () => {
         state: "needs_check",
         review: {
           checks: [
-            { id: "host_compat", status: "unconfirmed", evidence: "サブPCのpoller更新が未確認", source: "current", carriedFromHeadSha: null },
+            { id: "host_compat", status: "unconfirmed", evidence: "DeskMiniのpoller更新が未確認", source: "current", carriedFromHeadSha: null },
             { id: "tests", status: "unconfirmed", evidence: "テスト結果待ち", source: "current", carriedFromHeadSha: null },
           ],
         } as never,

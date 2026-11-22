@@ -78,9 +78,9 @@ export function buildCodexPrompt(request: Pick<ChatTurnRequest, "system" | "mess
 export function describeChatTurnError(kind: ChatTurnErrorKind | null): string {
   switch (kind) {
     case "not_logged_in":
-      return "Codex(not_logged_in) サブPCのCodex CLIがログインしていません";
+      return "Codex(not_logged_in) DeskMiniのCodex CLIがログインしていません";
     case "api_key_auth":
-      return "Codex(api_key_auth) サブPCのCodex CLIがAPIキーでログインしています（従量課金になるため使いません）";
+      return "Codex(api_key_auth) DeskMiniのCodex CLIがAPIキーでログインしています（従量課金になるため使いません）";
     case "usage_limit":
       return "Codex(usage_limit) Codexの利用枠の上限に達しています";
     case "timeout":
@@ -191,7 +191,7 @@ export function createCodexSession(params: {
           stepRequest: JSON.parse(JSON.stringify(request)) as Prisma.InputJsonValue,
           stepResult: null,
           stepError: null,
-          phase: "サブPCの受け取り待ち",
+          phase: "DeskMiniの受け取り待ち",
         },
       });
       notifyDispatchHostWake(job.targetHost);
@@ -260,14 +260,14 @@ async function waitForSession(params: {
         ok: false,
         reason:
           current.status === "TIMEOUT" && run.stepError === null
-            ? "Codex(not_claimed) サブPCが応答しませんでした"
+            ? "Codex(not_claimed) DeskMiniが応答しませんでした"
             : describeChatTurnError(parseChatTurnErrorKind(run.stepError)),
       };
     }
     const elapsed = params.clock() - startedAt;
     if (current.status === "QUEUED" && elapsed >= CHAT_TURN_CLAIM_WAIT_MS) {
-      await abandonChatTurnJob(params.jobId, "サブPCに受け取られませんでした");
-      return { ok: false, reason: "Codex(not_claimed) サブPCがジョブを受け取りませんでした" };
+      await abandonChatTurnJob(params.jobId, "DeskMiniに受け取られませんでした");
+      return { ok: false, reason: "Codex(not_claimed) DeskMiniがジョブを受け取りませんでした" };
     }
     if (elapsed >= params.timeoutMs) {
       await abandonChatTurnJob(params.jobId, "チャットの回答待ちが時間切れになりました");

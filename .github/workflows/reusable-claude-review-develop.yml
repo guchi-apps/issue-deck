@@ -170,7 +170,7 @@ on:
           claude-code-actionには「ワークフローファイルの内容がデフォルトブランチと完全一致して
           いなければClaudeの実行だけをスキップする」検証機構があり、そのPRでは意味的レビューが
           無いまま`success`で終わる。confirm(既定) / allow(従来どおりレビュー無しで通す)。
-          confirmでは代わりにサブPCのCodexレビューを依頼し(#4149)、その判定で自動マージを決める
+          confirmでは代わりにDeskMiniのCodexレビューを依頼し(#4149)、その判定で自動マージを決める
           (判定が出るまでは保留)。依頼できない・判定が得られないときは自動マージせず
           00.check-user＋01.check-mergeで人へ回す(#4144)。merge-policyとは独立で、relaxedでも効く。
           Codexが担当のPR(claude-reviewを使わない)には適用しない。
@@ -981,7 +981,7 @@ jobs:
     permissions:
       pull-requests: read
     steps:
-      - name: CodexレビューをサブPCへ依頼する（結果は待たない）
+      - name: CodexレビューをDeskMiniへ依頼する（結果は待たない）
         id: request
         env:
           MODE: ${{ needs.review-provider.outputs.provider == 'codex' && 'primary' || 'workflow-change' }}
@@ -1115,7 +1115,7 @@ jobs:
           CODEX_FAILURE_REASON: ${{ needs.codex-review.outputs.reason }}
         run: |
           set -euo pipefail
-          gh pr comment "$PR_NUMBER" --body "⚠️ Codexによる自動レビューを依頼できませんでした${CODEX_FAILURE_REASON:+（${CODEX_FAILURE_REASON}）}。サブPCの状態とActionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          gh pr comment "$PR_NUMBER" --body "⚠️ Codexによる自動レビューを依頼できませんでした${CODEX_FAILURE_REASON:+（${CODEX_FAILURE_REASON}）}。DeskMiniの状態とActionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
           [ -n "$ISSUE_NUMBER" ] || exit 0
           DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
           LABEL_ARGS=()
@@ -1747,7 +1747,7 @@ jobs:
             needs-check) CODEX_REVIEW_TEXT="⚠️ 要確認" ;;
             changes-requested) CODEX_REVIEW_TEXT="❌ 要修正" ;;
             skipped) CODEX_REVIEW_TEXT="— 実施なし（${CODEX_SKIP_REASON}）" ;;
-            pending) CODEX_REVIEW_TEXT="⏳ サブPCで実行待ち・実行中（完了後に自動で更新されます）" ;;
+            pending) CODEX_REVIEW_TEXT="⏳ DeskMiniで実行待ち・実行中（完了後に自動で更新されます）" ;;
             *) CODEX_REVIEW="unavailable"; CODEX_REVIEW_TEXT="? 判定を取得できませんでした" ;;
           esac
 

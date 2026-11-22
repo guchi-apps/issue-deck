@@ -135,11 +135,11 @@ const VPS_REPO: InfraConfigRepo = {
  */
 const SUBPC_REPO: InfraConfigRepo = {
   device: "subpc",
-  deviceLabel: "サブPC",
+  deviceLabel: "DeskMini",
   repositoryFullName: "guchi-apps/subpc",
   baseBranch: "develop",
   applyNote:
-    "`develop`へマージしたうえで、`develop`→`main`のリリースPR（`release-develop-to-main.yml`）をマージすると、`.github/workflows/deploy.yml`がサブPC上のself-hostedランナーで`scripts/setup-apply.sh`を実行し実機へ反映する",
+    "`develop`へマージしたうえで、`develop`→`main`のリリースPR（`release-develop-to-main.yml`）をマージすると、`.github/workflows/deploy.yml`がDeskMini上のself-hostedランナーで`scripts/setup-apply.sh`を実行し実機へ反映する",
   entries: [
     {
       livePath: "/etc/default/grub",
@@ -258,7 +258,7 @@ const WRITE_MARKERS = [
 export function resolveInfraConfigDevice(device: string | null): InfraConfigDevice | null {
   const names = matchManualStepDeviceNames(device);
   if (names.length !== 1) return null;
-  if (names[0] === "サブPC") return "subpc";
+  if (names[0] === "DeskMini") return "subpc";
   if (names[0] === "VPS") return "vps";
   return null;
 }

@@ -86,7 +86,7 @@ SECRET="${ISSUE_DECK_IMAGE_SECRET:-}"
 [[ -n "$SECRET" ]] || SECRET="$(dispatch_env_value DISPATCH_SECRET)"
 if [[ -z "$BASE_URL" || -z "$SECRET" ]]; then
   echo "Error: 画像の取得先（APP_BASE_URL）か鍵（DISPATCH_SECRET）が見つかりません（$CONFIG_FILE）" >&2
-  echo "       サブPCでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。" >&2
+  echo "       DeskMiniでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。" >&2
   exit 1
 fi
 BASE_URL="${BASE_URL%/}"

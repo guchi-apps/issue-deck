@@ -92,7 +92,7 @@ const input = {
 describe("createCodexSession（1発言1ジョブ・1回の起動で調査する。#4109・#4199）", () => {
   beforeEach(() => setup({ chatCodexCapable: true }));
 
-  it("サブPCが返した最終メッセージをそのまま返す（OpenAI APIは呼ばない）", async () => {
+  it("DeskMiniが返した最終メッセージをそのまま返す（OpenAI APIは呼ばない）", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     state.onPoll = (jobId) => {
       const job = state.jobs.get(jobId)!;
@@ -140,7 +140,7 @@ describe("createCodexSession（1発言1ジョブ・1回の起動で調査する�
     expect(findChatCodexSession([...state.jobs.keys()][0])).toBeNull();
   });
 
-  it("サブPCがオフラインならジョブを積まずに offline で断る", async () => {
+  it("DeskMiniがオフラインならジョブを積まずに offline で断る", async () => {
     setup({ chatCodexCapable: true, online: false });
     const result = await model()(input);
     expect(result.ok).toBe(false);
@@ -166,7 +166,7 @@ describe("createCodexSession（1発言1ジョブ・1回の起動で調査する�
     expect([...state.jobs.values()][0].status).toBe("CANCELED");
   });
 
-  it("サブPCが返した失敗の種別（利用枠超過）を区別して返す", async () => {
+  it("DeskMiniが返した失敗の種別（利用枠超過）を区別して返す", async () => {
     state.onPoll = (jobId) => {
       state.jobs.get(jobId)!.status = "FAILED";
       state.runs.get("run1")!.stepError = "usage_limit";

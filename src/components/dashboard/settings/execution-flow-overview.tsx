@@ -242,7 +242,7 @@ export function ExecutionFlowOverview({
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-semibold">PRレビュー・修復のモデル</span>
                   <InfoHint label="PRレビュー・修復のモデル">
-                    PRレビューとレビュー指摘修正のworkflow専用の設定です。Claudeの設定はClaude実装のレビュー指摘修正・CI自動修正・コンフリクト解消・PR repairで共有します。Codexの設定は、Codexで実装したIssueのレビュー指摘をサブPCのChatGPT購読認証で修正するときに使います（APIキーは不要）。デフォルトを選ぶと個別指定を解除します。
+                    PRレビューとレビュー指摘修正のworkflow専用の設定です。Claudeの設定はClaude実装のレビュー指摘修正・CI自動修正・コンフリクト解消・PR repairで共有します。Codexの設定は、Codexで実装したIssueのレビュー指摘をDeskMiniのChatGPT購読認証で修正するときに使います（APIキーは不要）。デフォルトを選ぶと個別指定を解除します。
                   </InfoHint>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

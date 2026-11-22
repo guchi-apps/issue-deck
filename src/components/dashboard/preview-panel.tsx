@@ -83,7 +83,7 @@ export function PreviewPanel({
   if (hosts.length === 0) {
     return (
       <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        サブPCの申告が届いていません。pollerが動いているか確認してください。
+        DeskMiniの申告が届いていません。pollerが動いているか確認してください。
       </p>
     );
   }
@@ -155,7 +155,7 @@ function HostPreview({
 
       {!compact && (
         <p className="text-xs text-muted-foreground">
-          developの最新をサブPCで動かし、mainへ出す前の状態を実物の画面で確かめます。
+          developの最新をDeskMiniで動かし、mainへ出す前の状態を実物の画面で確かめます。
           tailnetのURLはスマホからそのまま開けます。
         </p>
       )}
@@ -289,7 +289,7 @@ function RunningPreview({
       <div className="flex flex-col divide-y">
         {/*
           **tailnetのURLを先に出す**（#2444）。この画面を見るのはスマホであることも多く、
-          `localhost`はサブPCの中でしか開けない
+          `localhost`はDeskMiniの中でしか開けない
         */}
         <UrlRow
           label="スマホ・別端末"
@@ -297,7 +297,7 @@ function RunningPreview({
           emptyNote="tailscale serve が使えないため、このホストからは公開できていません。"
           openable
         />
-        <UrlRow label="このPC" url={`http://localhost:${preview.port}`} note="サブPCの中だけ" />
+        <UrlRow label="このPC" url={`http://localhost:${preview.port}`} note="DeskMiniの中だけ" />
       </div>
 
       {/*
@@ -452,7 +452,7 @@ function RepositoryRow({
         /*
           開発サーバーを持たないリポジトリ（vps・subpc・docs・claude-config・ideas）。
           **一覧から消さずに理由を添える**——消すと「vpsはなぜ無いのか」が分からず、
-          確認環境で見られないことと、サブPCにチェックアウトが無いことの区別も付かない
+          確認環境で見られないことと、DeskMiniにチェックアウトが無いことの区別も付かない
         */
         <span className="shrink-0 text-[11px] text-muted-foreground">開発サーバーがありません</span>
       ) : (

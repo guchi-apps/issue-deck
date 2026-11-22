@@ -146,7 +146,7 @@ export async function requestPrReviewJob(params: {
     return {
       ok: false,
       rejection: "no_host",
-      message: `${target.repositoryFullName}のPRレビュー（${target.agent}）を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`,
+      message: `${target.repositoryFullName}のPRレビュー（${target.agent}）を実行できるDeskMiniがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`,
     };
   }
 
@@ -228,7 +228,7 @@ async function notifyResumeGaveUp(job: DispatchJob): Promise<void> {
     if (!repository || !owner || !repo) return;
     const token = await getInstallationToken(repository.installation.installationId);
     const body =
-      `⚠️ サブPCのAIレビューが終わりましたが、最終マージ判定を自動で再開できませんでした（${describePrReviewGateState(resolvePrReviewGateState(job))}）。` +
+      `⚠️ DeskMiniのAIレビューが終わりましたが、最終マージ判定を自動で再開できませんでした（${describePrReviewGateState(resolvePrReviewGateState(job))}）。` +
       "このPRのActionsで `auto-merge` ジョブを再実行するか、内容を確認してマージしてください。自動マージは有効化していません。" +
       "\n\n<!-- issue-deck-source:codex-review-develop -->";
     await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/issues/${job.prNumber}/comments`, token, {

@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
 
   if (result.job.kind === "REVIEW_FIX" && status !== "running" && status !== "succeeded") {
     const { notifyReviewFixFailure } = await import("@/lib/dispatch/review-fix-notify");
-    await notifyReviewFixFailure(result.job.repositoryFullName, result.job.issueNumber, message ?? "サブPCのレビュー修正が停止しました。");
+    await notifyReviewFixFailure(result.job.repositoryFullName, result.job.issueNumber, message ?? "DeskMiniのレビュー修正が停止しました。");
   }
 
   // PRレビューが確定したら、そのPRの最終マージ判定（`auto-merge`ジョブ）をイベント駆動で

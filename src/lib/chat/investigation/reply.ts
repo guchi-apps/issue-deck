@@ -73,7 +73,7 @@ export function describeUnavailable(stopReason: string): { kind: string; label: 
     return {
       kind: "api_credit_exhausted",
       label: "AI APIの残高（従量課金のクレジット）が尽きています",
-      next: "待っても回復しません。API残高を補充するか、設定のAI実行プロバイダーをCodex（サブPCのサブスク枠）またはClaudeへ切り替えてから再試行してください。",
+      next: "待っても回復しません。API残高を補充するか、設定のAI実行プロバイダーをCodex（DeskMiniのサブスク枠）またはClaudeへ切り替えてから再試行してください。",
     };
   }
   if (/HTTP 429/.test(stopReason)) {
@@ -98,13 +98,13 @@ function describeCodexUnavailable(code: string): { kind: string; label: string; 
   switch (code) {
     case "offline":
     case "not_claimed":
-      return { kind, label: "サブPCに接続できません（Codexの実行先が応答しません）", next: "サブPCとpollerが動いているかを実行状況パネルで確認してから、再試行してください。" };
+      return { kind, label: "DeskMiniに接続できません（Codexの実行先が応答しません）", next: "DeskMiniとpollerが動いているかを実行状況パネルで確認してから、再試行してください。" };
     case "unsupported":
-      return { kind, label: "サブPCのpollerがチャットのCodex実行に未対応です", next: "設定のフリート運用から「更新して再起動」でサブPCのpollerを更新してから、再試行してください。" };
+      return { kind, label: "DeskMiniのpollerがチャットのCodex実行に未対応です", next: "設定のフリート運用から「更新して再起動」でDeskMiniのpollerを更新してから、再試行してください。" };
     case "not_logged_in":
-      return { kind, label: "サブPCのCodex CLIが未ログインです", next: "サブPCで `codex login`（ChatGPTアカウント）を済ませてから、再試行してください。" };
+      return { kind, label: "DeskMiniのCodex CLIが未ログインです", next: "DeskMiniで `codex login`（ChatGPTアカウント）を済ませてから、再試行してください。" };
     case "api_key_auth":
-      return { kind, label: "サブPCのCodex CLIがAPIキーでログインしています", next: "従量課金を避けるため使いません。サブPCで `codex logout` → `codex login`（ChatGPTアカウント）を行ってから、再試行してください。" };
+      return { kind, label: "DeskMiniのCodex CLIがAPIキーでログインしています", next: "従量課金を避けるため使いません。DeskMiniで `codex logout` → `codex login`（ChatGPTアカウント）を行ってから、再試行してください。" };
     case "usage_limit":
       return { kind, label: "Codex（ChatGPTサブスク）の利用枠の上限に達しています", next: "枠がリセットされてから再試行するか、設定のAI実行プロバイダーをClaudeへ切り替えてください。" };
     case "timeout":
@@ -116,7 +116,7 @@ function describeCodexUnavailable(code: string): { kind: string; label: string; 
     case "provider_changed":
       return { kind, label: "AI実行プロバイダーが切り替わりました", next: "同じ内容をもう一度送ってください。" };
     default:
-      return { kind: "codex_error", label: "サブPCでのCodex実行に失敗しました", next: "再試行してください。続く場合はサブPCの実行ログを確認してください。" };
+      return { kind: "codex_error", label: "DeskMiniでのCodex実行に失敗しました", next: "再試行してください。続く場合はDeskMiniの実行ログを確認してください。" };
   }
 }
 

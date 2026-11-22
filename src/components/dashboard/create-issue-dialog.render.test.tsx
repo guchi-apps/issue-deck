@@ -283,7 +283,7 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     expect(screen.queryByText("デザインを提示")).not.toBeNull();
   });
 
-  it("サブPCで開始した後、11.localの付与が返ってきても実行先の選択を開き直さない（#1434）", async () => {
+  it("DeskMiniで開始した後、11.localの付与が返ってきても実行先の選択を開き直さない（#1434）", async () => {
     // `11.local`の付与（GitHubへの往復）は、ダイアログが閉じた後に返る
     let resolveUpdate: ((issue: Issue) => void) | undefined;
     updateIssue.mockReturnValue(
@@ -299,7 +299,7 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
 
     // 作成できた時点で実行先の選択が開く（既定はサブPC）
     await screen.findByText("実装を開始");
-    expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /^DeskMini/ }).getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "開始する" }));
 

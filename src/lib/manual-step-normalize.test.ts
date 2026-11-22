@@ -23,7 +23,7 @@ function templateBody(): string {
 const fence = "```";
 const messy = `手順
 
-- サブPCで実行
+- DeskMiniで実行
   ${fence}bash
   echo hello
   ${fence}
@@ -43,7 +43,7 @@ describe("hasBlockingFindings", () => {
 });
 
 describe("isSafeNormalization", () => {
-  const before = (command: string, device = "サブPC") => `## やること
+  const before = (command: string, device = "DeskMini") => `## やること
 
 - [ ] （${device}）手順
   ${fence}bash
@@ -66,7 +66,7 @@ describe("isSafeNormalization", () => {
   });
 
   it("読めていた手順の端末が付け替わったら拒否する", () => {
-    expect(isSafeNormalization(before("echo a", "VPS"), before("echo a", "サブPC"))).toBe(false);
+    expect(isSafeNormalization(before("echo a", "VPS"), before("echo a", "DeskMini"))).toBe(false);
   });
 
   it("端末が読めなかった手順に端末が付くのは許す", () => {

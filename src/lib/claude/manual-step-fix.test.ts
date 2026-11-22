@@ -22,9 +22,9 @@ import {
  */
 
 const INPUT: ManualStepFixInput = {
-  issueTitle: "[手作業] サブPC: pollerを更新して再起動する",
+  issueTitle: "[手作業] DeskMini: pollerを更新して再起動する",
   kind: "step",
-  where: { device: "サブPC", directory: "~/apps/issue-deck", branch: "develop" },
+  where: { device: "DeskMini", directory: "~/apps/issue-deck", branch: "develop" },
   markdown: "pollerを再起動する\n\n```bash\nsystemctl --user restart issue-deck-poller.service\n```",
   command: "systemctl --user restart issue-deck-poller.service",
   exitCode: 5,
@@ -66,7 +66,7 @@ describe("buildManualStepFixPrompt", () => {
     expect(prompt).toContain("systemctl --user restart issue-deck-poller.service");
     expect(prompt).toContain("終了コード: 5");
     expect(prompt).toContain("Unit issue-deck-poller.service not found.");
-    expect(prompt).toContain("実行するデバイス: サブPC");
+    expect(prompt).toContain("実行するデバイス: DeskMini");
     expect(prompt).toContain("カレントディレクトリ: ~/apps/issue-deck");
   });
 
@@ -253,7 +253,7 @@ describe("pickManualStepFix", () => {
         kind: "manual",
         cause: "DBのマイグレーションが当たっていません。",
         steps: [
-          { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
+          { text: "（DeskMini）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
           { text: "（ブラウザ）画面を開き直してテーブルが出ることを見る", command: null },
         ],
       }),
@@ -262,7 +262,7 @@ describe("pickManualStepFix", () => {
 
     expect(result.kind).toBe("manual");
     expect(result.steps).toEqual([
-      { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
+      { text: "（DeskMini）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
       { text: "（ブラウザ）画面を開き直してテーブルが出ることを見る", command: null },
     ]);
   });
@@ -277,13 +277,13 @@ describe("pickManualStepFix", () => {
           { text: "", command: "ls" },
           { text: "1行目\n2行目", command: null },
           { text: "あ".repeat(MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH + 1), command: null },
-          { text: "（サブPC）ログを見る", command: "```bash\njournalctl\n```" },
+          { text: "（DeskMini）ログを見る", command: "```bash\njournalctl\n```" },
         ],
       }),
       CURRENT,
     );
 
-    expect(result.steps).toEqual([{ text: "（サブPC）ログを見る", command: null }]);
+    expect(result.steps).toEqual([{ text: "（DeskMini）ログを見る", command: null }]);
   });
 
   it("手順が多すぎる応答は上限で打ち切る", () => {
@@ -303,7 +303,7 @@ describe("pickManualStepFix", () => {
         kind: "command",
         cause: "原因",
         command: INPUT.command,
-        steps: [{ text: "（サブPC）ユニット名を調べる", command: "systemctl --user list-units" }],
+        steps: [{ text: "（DeskMini）ユニット名を調べる", command: "systemctl --user list-units" }],
       }),
       CURRENT,
     );

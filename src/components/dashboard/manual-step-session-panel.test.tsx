@@ -19,7 +19,7 @@ vi.mock("@/lib/copy-text", () => ({ copyText: (text: string) => copyText(text) }
 /** テンプレートどおりの本文（サブPCの手順1件・ブラウザの手順1件・完了の確認1件） */
 const BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること

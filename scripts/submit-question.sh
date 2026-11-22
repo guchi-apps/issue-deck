@@ -43,7 +43,7 @@ APP_BASE_URL="$(dispatch_env_value APP_BASE_URL)"
 DISPATCH_SECRET="$(dispatch_env_value DISPATCH_SECRET)"
 [[ -n "$APP_BASE_URL" && -n "$DISPATCH_SECRET" ]] || {
   echo "Error: APP_BASE_URL / DISPATCH_SECRET が見つかりません（$CONFIG_FILE）" >&2
-  echo "       サブPCでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。" >&2
+  echo "       DeskMiniでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。" >&2
   exit 1
 }
 

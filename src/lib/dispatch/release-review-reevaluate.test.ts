@@ -168,7 +168,7 @@ describe("pollerの更新を契機にした自動再評価（#5111）", () => {
     state: "needs_check",
     unverifiedScope: null,
     findings: {
-      review: { checks: [{ status: "unconfirmed", evidence: "サブPCのpollerの再起動が未確認" }] },
+      review: { checks: [{ status: "unconfirmed", evidence: "DeskMiniのpollerの再起動が未確認" }] },
       hostFacts: { host: "subpc", startedCommit: C1 },
       ...extra,
     },

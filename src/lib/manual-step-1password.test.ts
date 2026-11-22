@@ -21,7 +21,7 @@ const ISSUE_2572 = `## この作業でできるようになること
 
 - [ ] （ブラウザ）OpenAI Platformでissue-deck用のAPIキーを作成し、1Passwordの\`apps\`ボールトにある\`issue-deck\`アイテムの\`openai-api-key\`フィールドへ登録する
 
-- [ ] （サブPC）1Passwordの値をGitHub Actionsの\`OPENAI_API_KEY\` secretへ同期する
+- [ ] （DeskMini）1Passwordの値をGitHub Actionsの\`OPENAI_API_KEY\` secretへ同期する
 
   \`\`\`bash
   cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/issue-deck --key OPENAI_API_KEY --sync-only

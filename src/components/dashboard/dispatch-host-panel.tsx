@@ -788,7 +788,7 @@ function CompactHostCard({
       )}
 
       {/* **縮めた版でも落とさない**（#2095）。ホームで「実行中」が増えないことに気付くのが
-          いちばん早く、そこに理由が無いと結局サブPCを見に行くことになる */}
+          いちばん早く、そこに理由が無いと結局DeskMiniを見に行くことになる */}
       {launchHold && <LaunchHoldRow message={launchHold} />}
     </>
   );
@@ -854,13 +854,13 @@ export function CompactHostCardSkeleton() {
     <div className="rounded-md border p-2" data-testid="dispatch-host-skeleton">
       {/* 中身のない飾りなので読み上げからは外し、代わりに状況を1行だけ渡す */}
       <span className="sr-only" role="status">
-        サブPCの状態を読み込み中
+        DeskMiniの状態を読み込み中
       </span>
       <div aria-hidden>
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex items-center gap-1.5 text-xs font-medium">
             <Skeleton className="size-1.5 shrink-0 rounded-full" />
-            <Skeleton className="rounded-sm text-transparent">サブPC</Skeleton>
+            <Skeleton className="rounded-sm text-transparent">DeskMini</Skeleton>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             <Skeleton className="rounded-sm text-[11px] text-transparent">セッション 0/0</Skeleton>

@@ -119,5 +119,5 @@ export function describeClaudeWindowKeepAlive(view: ClaudeWindowKeepAliveView): 
   if (view.runningUntil) {
     return `${head}いまの枠は${formatTimeOfDay(view.runningUntil)}にリセットし、その後の巡回で次の枠を開けます。`;
   }
-  return `${head}サブPCの次の巡回で開けます。`;
+  return `${head}DeskMiniの次の巡回で開けます。`;
 }

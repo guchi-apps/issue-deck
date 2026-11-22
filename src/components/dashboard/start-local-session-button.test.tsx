@@ -186,7 +186,7 @@ function renderButton(
 /** 押せない理由は、PCではボタンを包むspanのtitleに入る（#1468）。 */
 function startButtonTitle(): string {
   return (
-    screen.getByRole("button", { name: /サブPCで開始/ }).parentElement?.getAttribute("title") ?? ""
+    screen.getByRole("button", { name: /DeskMiniで開始/ }).parentElement?.getAttribute("title") ?? ""
   );
 }
 
@@ -207,7 +207,7 @@ describe("StartLocalSessionButton", () => {
   });
 
   describe("導線を出す条件", () => {
-    it("申告しているサブPCが無ければ導線ごと出さない", () => {
+    it("申告しているDeskMiniが無ければ導線ごと出さない", () => {
       const { container } = renderButton();
       expect(container.firstChild).toBeNull();
     });
@@ -215,7 +215,7 @@ describe("StartLocalSessionButton", () => {
     it("申告があれば出す（マーカー行の有無は問わない・#1224）", () => {
       dispatchState.hosts = [makeHost()];
       renderButton();
-      expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /DeskMiniで開始/ })).not.toBeNull();
     });
 
     it("closeされたIssueでは出さない（起動しても実装対象が無いため）", () => {
@@ -233,28 +233,28 @@ describe("StartLocalSessionButton", () => {
 
   describe("起動先の選択", () => {
     // 選択肢が1つしか無いメニューを開かせない
-    it("サブPCが1台ならメニューではなく単独のボタンにする", async () => {
+    it("DeskMiniが1台ならメニューではなく単独のボタンにする", async () => {
       dispatchState.hosts = [makeHost()];
       enqueue.mockResolvedValue(true);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /DeskMiniで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
     });
 
-    it("サブPCが2台以上ならメニューにする", () => {
+    it("DeskMiniが2台以上ならメニューにする", () => {
       dispatchState.hosts = [makeHost(), makeHost({ name: "subpc2" })];
       renderButton();
 
-      expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /DeskMiniで開始/ })).not.toBeNull();
     });
 
     // #1468。PCのツールバーでは本文がボタン列を縦に膨らませるためtitleへ寄せた
-    it("応答していないサブPCではボタンを押せず、理由をtitleで出す（PC）", () => {
+    it("応答していないDeskMiniではボタンを押せず、理由をtitleで出す（PC）", () => {
       dispatchState.hosts = [makeHost({ online: false })];
       renderButton();
 
-      expect(screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled")).toBe(
+      expect(screen.getByRole("button", { name: /DeskMiniで開始/ }).hasAttribute("disabled")).toBe(
         true,
       );
       expect(screen.queryByText(/応答していません/)).toBeNull();
@@ -269,11 +269,11 @@ describe("StartLocalSessionButton", () => {
       expect(screen.getByText(/応答していません/)).not.toBeNull();
     });
 
-    it("そのリポジトリを実行できないサブPCは選べない", () => {
+    it("そのリポジトリを実行できないDeskMiniは選べない", () => {
       dispatchState.hosts = [makeHost({ repositories: ["guchi-apps/other"] })];
       renderButton();
 
-      expect(screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled")).toBe(
+      expect(screen.getByRole("button", { name: /DeskMiniで開始/ }).hasAttribute("disabled")).toBe(
         true,
       );
     });
@@ -285,7 +285,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(true);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /DeskMiniで開始/ }));
       await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
       expect(updateIssue.mock.calls[0][0].labels).toContain("11.local");
     });
@@ -295,7 +295,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(false);
       renderButton();
 
-      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /DeskMiniで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
       expect(updateIssue).not.toHaveBeenCalled();
     });
@@ -305,7 +305,7 @@ describe("StartLocalSessionButton", () => {
       enqueue.mockResolvedValue(true);
       renderButton(makeIssue({ labels: [label("11.local")] }));
 
-      fireEvent.click(screen.getByRole("button", { name: /サブPCで開始/ }));
+      fireEvent.click(screen.getByRole("button", { name: /DeskMiniで開始/ }));
       await waitFor(() => expect(enqueue).toHaveBeenCalled());
       expect(updateIssue).not.toHaveBeenCalled();
     });
@@ -318,7 +318,7 @@ describe("StartLocalSessionButton", () => {
       dispatchState.sessions = [makeSession()];
       renderButton();
 
-      const button = screen.getByRole("button", { name: /サブPCで開始/ });
+      const button = screen.getByRole("button", { name: /DeskMiniで開始/ });
       expect(button.hasAttribute("disabled")).toBe(true);
       expect(startButtonTitle()).toMatch(/issue-deck-issue-1049/);
       expect(startButtonTitle()).toMatch(/kill-session/);
@@ -331,7 +331,7 @@ describe("StartLocalSessionButton", () => {
       renderButton();
 
       expect(
-        screen.getByRole("button", { name: /サブPCで開始/ }).hasAttribute("disabled"),
+        screen.getByRole("button", { name: /DeskMiniで開始/ }).hasAttribute("disabled"),
       ).toBe(false);
     });
 
@@ -367,7 +367,7 @@ describe("StartLocalSessionButton", () => {
       ];
       renderButton();
 
-      expect(screen.getByText(/サブPCで失敗/)).not.toBeNull();
+      expect(screen.getByText(/DeskMiniで失敗/)).not.toBeNull();
       expect(screen.getByText("start-issue.sh が見つかりません")).not.toBeNull();
     });
 
@@ -378,7 +378,7 @@ describe("StartLocalSessionButton", () => {
       renderButton(makeIssue(), { showJobStatus: false });
 
       expect(screen.queryByText(/順番待ち/)).toBeNull();
-      expect(screen.getByRole("button", { name: /サブPCで開始/ })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /DeskMiniで開始/ })).not.toBeNull();
     });
   });
 
@@ -389,14 +389,14 @@ describe("StartLocalSessionButton", () => {
       dispatchState.hosts = [makeHost()];
       renderButton(makeIssue(), { showStartButton: false });
 
-      expect(screen.queryByRole("button", { name: /サブPCで開始/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /DeskMiniで開始/ })).toBeNull();
     });
 
-    it("サブPCが2台以上でも起動先のメニューを出さない", () => {
+    it("DeskMiniが2台以上でも起動先のメニューを出さない", () => {
       dispatchState.hosts = [makeHost(), makeHost({ name: "subpc2" })];
       renderButton(makeIssue(), { showStartButton: false });
 
-      expect(screen.queryByRole("button", { name: /サブPCで開始/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /DeskMiniで開始/ })).toBeNull();
     });
 
     // このコンポーネントが残っている理由（#1248）。ダイアログは積んだ時点で閉じる

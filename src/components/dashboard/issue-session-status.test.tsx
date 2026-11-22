@@ -138,7 +138,7 @@ describe("IssueSessionStatus", () => {
     );
 
     expect(screen.getByText("3時間前")).toBeTruthy();
-    expect(screen.getByText(/サブPC・入力を待っています/)).toBeTruthy();
+    expect(screen.getByText(/DeskMini・入力を待っています/)).toBeTruthy();
   });
 
   it("様子の報告が無ければpollerが最後に見た時刻を添える", () => {
@@ -148,7 +148,7 @@ describe("IssueSessionStatus", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
 
     expect(screen.getByText("たった今")).toBeTruthy();
-    expect(screen.getByText(/サブPC・実行中/)).toBeTruthy();
+    expect(screen.getByText(/DeskMini・実行中/)).toBeTruthy();
   });
 
   /**
@@ -213,7 +213,7 @@ describe("IssueSessionStatus", () => {
     expect(screen.getByText("Lintチェック中")).toBeTruthy();
     expect(screen.getByText("2分")).toBeTruthy();
     // 最後の`Stop`のあとにツールが走っているので「応答を終えています」にはしない（#2705）
-    expect(screen.getByText(/サブPC・作業中/)).toBeTruthy();
+    expect(screen.getByText(/DeskMini・作業中/)).toBeTruthy();
   });
 
   /**
@@ -302,7 +302,7 @@ describe("IssueSessionStatus", () => {
     expect(screen.getByRole("link", { name: /セッションを開く/ }).getAttribute("href")).toBe(
       "codex://threads/a0b1c2d3-1234-4abc-9def-0123456789ab",
     );
-    expect(screen.getByText(/サブPC上のCodexセッション/)).toBeTruthy();
+    expect(screen.getByText(/DeskMini上のCodexセッション/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /再開コマンドをコピー/ })).toBeTruthy();
   });
 });
@@ -466,12 +466,12 @@ describe("IssueSessionStatus のセッション操作", () => {
   });
 
   it("失敗の理由はその場に出す", async () => {
-    sendSessionControl.mockResolvedValue({ ok: false, message: "サブPC が応答していません。" });
+    sendSessionControl.mockResolvedValue({ ok: false, message: "DeskMini が応答していません。" });
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     openControls();
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
 
-    expect(await screen.findByText("サブPC が応答していません。")).not.toBeNull();
+    expect(await screen.findByText("DeskMini が応答していません。")).not.toBeNull();
   });
 
   /**

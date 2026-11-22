@@ -661,7 +661,7 @@ batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
     it("証跡を指さない未確認（運用作業など）は、証跡が更新されても再利用する", () => {
       const { calls, env } = setup();
       writeEvidence("running");
-      runReview({ ...env, UNCONF_FILE: "file5.txt", UNCONF_TEXT: "サブPCのpollerを更新・再起動する必要があります" });
+      runReview({ ...env, UNCONF_FILE: "file5.txt", UNCONF_TEXT: "DeskMiniのpollerを更新・再起動する必要があります" });
       const batches = lines(calls);
       writeEvidence("passed", "2026-10-18T10:00:00Z");
       const rerun = runReview(env);

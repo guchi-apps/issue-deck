@@ -78,7 +78,7 @@ export async function requestReviewFixJob(target: ReviewFixTarget) {
   if (prior && (!target.manual || ["QUEUED", "CLAIMED", "RUNNING", "SUCCEEDED"].includes(prior.status) || prior.workflowRunId === target.runId)) return prior;
   const hosts = await db.dispatchHost.findMany({ where: { reviewFixCapable: true, codexCapable: true, lastSeenAt: { gte: new Date(Date.now() - DISPATCH_HOST_ONLINE_WINDOW_MS) } }, orderBy: { name: "asc" } });
   const host = hosts.find((h) => parseDispatchHostRepositories(h.repositories).includes(target.repository));
-  if (!host) throw new Error("レビュー修正に対応するサブPCがありません。pollerを更新し、オンライン状態を確認してください");
+  if (!host) throw new Error("レビュー修正に対応するDeskMiniがありません。pollerを更新し、オンライン状態を確認してください");
   try {
     const created = await db.dispatchJob.create({ data: { ...where, targetHost: host.name, agent: "codex", status: "QUEUED", prNumber: target.pullRequest, instruction: target.manual ? "manual" : "automatic", workflowRunId: target.runId ?? null, activeKey: buildDispatchActiveKey(target.repository, target.issueNumber), } });
     notifyDispatchHostWake(created.targetHost);

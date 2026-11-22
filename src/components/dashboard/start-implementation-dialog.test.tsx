@@ -282,11 +282,11 @@ describe("StartImplementationDialog", () => {
     expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ })).not.toBeNull();
   });
 
-  it("申告があれば実行先を選べ、既定はサブPC（#1262）", () => {
+  it("申告があれば実行先を選べ、既定はDeskMini（#1262）", () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
-    expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /^DeskMini/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
       "false",
     );
@@ -301,7 +301,7 @@ describe("StartImplementationDialog", () => {
     );
   });
 
-  it("Actionsが使えないリポジトリでも、トリガーは押せてサブPCで開始できる（#1262）", async () => {
+  it("Actionsが使えないリポジトリでも、トリガーは押せてDeskMiniで開始できる（#1262）", async () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({
       includeDispatchTargets: true,
@@ -375,11 +375,11 @@ describe("StartImplementationDialog", () => {
     });
   });
 
-  it("サブPCを選ぶとジョブを積み、11.localを付け、@claudeコメントは投稿しない", async () => {
+  it("DeskMiniを選ぶとジョブを積み、11.localを付け、@claudeコメントは投稿しない", async () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
-    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
     clickStart();
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
@@ -407,7 +407,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost({ codexCapable: null })];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       expect(screen.queryByRole("radiogroup", { name: "エージェント" })).toBeNull();
     });
 
@@ -415,7 +415,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost({ codexCapable: true })];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       expect(screen.getByRole("radiogroup", { name: "エージェント" })).toBeTruthy();
       expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe(
         "true",
@@ -543,7 +543,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost({ codexCapable: true })];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
 
       expect(screen.getByText(/画面からの連携が一部効きません/)).toBeTruthy();
@@ -554,7 +554,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost({ codexCapable: true })];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
       clickStart();
 
@@ -566,7 +566,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost({ codexCapable: true })];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
       fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
 
@@ -583,11 +583,11 @@ describe("StartImplementationDialog", () => {
    * GitHub Actionsは設定を全体で読む別経路で、ジョブに積んだ値は届かない。
    */
   describe("モデルの選択（#2717・#3106）", () => {
-    it("サブPCを選ぶと、おまかせ・Fable・Opus・Sonnetの4つを出し、設定の値が選ばれている", () => {
+    it("DeskMiniを選ぶと、おまかせ・Fable・Opus・Sonnetの4つを出し、設定の値が選ばれている", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       const group = screen.getByRole("radiogroup", { name: "モデル" });
       expect(within(group).getAllByRole("radio")).toHaveLength(4);
       expect(screen.queryByRole("radio", { name: /設定に従う/ })).toBeNull();
@@ -603,7 +603,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       expect(screen.queryByRole("radio", { name: /CLIの既定/ })).toBeNull();
     });
 
@@ -612,7 +612,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       expect(screen.getByRole("radio", { name: /^Opus/ }).getAttribute("aria-checked")).toBe("true");
       expect(screen.queryByText(/設定（設定 ＞ 実行）で選んだ/)).toBeNull();
     });
@@ -622,11 +622,11 @@ describe("StartImplementationDialog", () => {
      * 押したときだけ呼ぶ従来の経路（下）とは別に、初期値が「おまかせ」のときだけ走る。
      */
     describe("初期値がおまかせ", () => {
-      it("サブPCを選んでモデル欄が出たら、押さなくても判定し、そのモデルで積む", async () => {
+      it("DeskMiniを選んでモデル欄が出たら、押さなくても判定し、そのモデルで積む", async () => {
         dispatchState.hosts = [makeHost()];
         renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
 
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         expect(screen.getByRole("radio", { name: /^おまかせ/ }).getAttribute("aria-checked")).toBe(
           "true",
         );
@@ -649,7 +649,7 @@ describe("StartImplementationDialog", () => {
         dispatchState.hosts = [makeHost()];
         renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
 
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
         fireEvent.click(screen.getByRole("radio", { name: /^Sonnet/ }));
 
@@ -666,7 +666,7 @@ describe("StartImplementationDialog", () => {
         modelPickFetch.mockReturnValue(new Promise(() => {}));
         renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
 
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         await waitFor(() =>
           expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
             true,
@@ -687,11 +687,11 @@ describe("StartImplementationDialog", () => {
 
         dispatchState.hosts = [makeHost()];
         rerenderSame();
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         await waitFor(() => expect(modelPickFetch).toHaveBeenCalledTimes(1));
 
         fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
         expect(modelPickFetch).toHaveBeenCalledTimes(1);
       });
@@ -702,7 +702,7 @@ describe("StartImplementationDialog", () => {
         modelPickFetch.mockResolvedValue({ ok: false, status: 500 });
         renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
 
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         await waitFor(() => expect(screen.getByText(/モデルを選べませんでした/)).toBeTruthy());
         expect(modelPickFetch).toHaveBeenCalledTimes(1);
       });
@@ -712,7 +712,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, claudeLocalModel: "sonnet" });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       expect(modelPickFetch).not.toHaveBeenCalled();
     });
 
@@ -733,7 +733,7 @@ describe("StartImplementationDialog", () => {
       const openCodex = (props: Parameters<typeof renderDialog>[0] = {}) => {
         dispatchState.hosts = [makeHost({ codexCapable: true })];
         renderDialog({ includeDispatchTargets: true, ...props });
-        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
         fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
       };
       const checked = (name: RegExp) =>
@@ -827,7 +827,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
       expect(screen.getByRole("radio", { name: /^Fable/ }).textContent).toContain("難しい調査・設計から");
       // 選んだあとの説明文は出さない（#3119）
@@ -847,7 +847,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       // 開いただけでは呼ばない（枠を消費しないため）
       expect(modelPickFetch).not.toHaveBeenCalled();
 
@@ -878,7 +878,7 @@ describe("StartImplementationDialog", () => {
       });
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
 
       // #3231。確率は下部の一覧ではなく、対応する各モデルのカード内に置く。
@@ -898,7 +898,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
 
       await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
@@ -920,7 +920,7 @@ describe("StartImplementationDialog", () => {
       );
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
 
       // 判定中はどれにも付かない
@@ -956,7 +956,7 @@ describe("StartImplementationDialog", () => {
       );
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
       await waitFor(() =>
         expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
@@ -985,7 +985,7 @@ describe("StartImplementationDialog", () => {
       });
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
       await waitFor(() => expect(screen.getByText(/ラベルと分量から選びました/)).toBeTruthy());
     });
@@ -994,7 +994,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
       fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
       clickStart();
@@ -1009,7 +1009,7 @@ describe("StartImplementationDialog", () => {
     enqueue.mockResolvedValue(false);
     renderDialog({ includeDispatchTargets: true });
 
-    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
     clickStart();
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
@@ -1029,13 +1029,13 @@ describe("StartImplementationDialog", () => {
     expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("オプションのラベルはサブPC経路でも起動前に付ける", async () => {
+  it("オプションのラベルはDeskMini経路でも起動前に付ける", async () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
     // チェックボックスの並びはSTART_IMPLEMENTATION_OPTIONSの表示順（先頭が「計画を立案」）
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
-    fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
     clickStart();
 
     await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -1052,7 +1052,7 @@ describe("StartImplementationDialog", () => {
       // オプションは作成フォームでは選ばせず、この画面だけで選ぶ（#1580）
       expect(screen.queryByText("計画を立案")).not.toBeNull();
       // 既定はサブPC。作成直後にGitHub Actionsへ固定されないこと自体が#1323の目的
-      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("radio", { name: /^DeskMini/ }).getAttribute("aria-checked")).toBe("true");
     });
 
     it("既に付いているラベルは選択状態として引き継ぎ、付け直しのPATCHは投げない", async () => {
@@ -1072,7 +1072,7 @@ describe("StartImplementationDialog", () => {
 
   describe("オプションの出し分け（#1317）", () => {
     // サブPC・ローカル実行はtailscale serveで実物の画面を見られるため、撮影は無人実行専用にする
-    it("サブPCが既定のときはスクリーンショットのオプションを出さない", () => {
+    it("DeskMiniが既定のときはスクリーンショットのオプションを出さない", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
@@ -1091,7 +1091,7 @@ describe("StartImplementationDialog", () => {
       expect(
         screen.getByRole("checkbox", { name: /計画を立案/ }).getAttribute("aria-checked"),
       ).toBe("true");
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -1123,7 +1123,7 @@ describe("StartImplementationDialog", () => {
           .getByRole("checkbox", { name: /デザインを提示/ })
           .getAttribute("aria-checked"),
       ).toBe("true");
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -1265,11 +1265,11 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      expect(screen.getByText(/サブPCが取りに来た時点で起動します/)).not.toBeNull();
+      expect(screen.getByText(/DeskMiniが取りに来た時点で起動します/)).not.toBeNull();
 
       fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
 
-      expect(screen.queryByText(/サブPCが取りに来た時点で起動します/)).toBeNull();
+      expect(screen.queryByText(/DeskMiniが取りに来た時点で起動します/)).toBeNull();
       expect(screen.getByText(/プロンプト/)).not.toBeNull();
     });
 
@@ -1349,7 +1349,7 @@ describe("StartImplementationDialog", () => {
       expect(enqueue).toHaveBeenCalledTimes(1);
       // 閉じ切るまでの間（閉じるアニメーション中）も中身は描画され続ける
       rerenderSame();
-      const subpc = screen.getByRole("radio", { name: /^サブPC/ });
+      const subpc = screen.getByRole("radio", { name: /^DeskMini/ });
       expect(subpc.getAttribute("aria-checked")).toBe("true");
       expect(subpc.hasAttribute("disabled")).toBe(false);
       expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
@@ -1363,7 +1363,7 @@ describe("StartImplementationDialog", () => {
       updateIssue.mockReturnValue(new Promise(() => {}));
       renderDialog({ includeDispatchTargets: true, onOpenChange });
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^DeskMini/ }));
       clickStart();
 
       await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
@@ -1379,7 +1379,7 @@ describe("StartImplementationDialog", () => {
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(onOpenChange).not.toHaveBeenCalled();
-      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("radio", { name: /^DeskMini/ }).getAttribute("aria-checked")).toBe("true");
     });
   });
 
@@ -1398,7 +1398,7 @@ describe("StartImplementationDialog", () => {
       );
     });
 
-    it("確定した時点でサブPCを含む選択肢を出す", () => {
+    it("確定した時点でDeskMiniを含む選択肢を出す", () => {
       dispatchState.isLoaded = false;
       const { rerenderSame } = renderDialog({ includeDispatchTargets: true });
 
@@ -1406,7 +1406,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       rerenderSame();
 
-      expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("radio", { name: /^DeskMini/ }).getAttribute("aria-checked")).toBe("true");
       expect((screen.getByRole("button", { name: /^(開始する|コピーする)$/ }) as HTMLButtonElement).disabled).toBe(
         false,
       );
@@ -1440,10 +1440,10 @@ describe("StartImplementationDialog", () => {
     dispatchState.hosts = [makeHost({ repositories: ["guchi-apps/dayspan"] })];
     renderDialog({ includeDispatchTargets: true });
 
-    const option = screen.getByRole("radio", { name: /^サブPC/ });
+    const option = screen.getByRole("radio", { name: /^DeskMini/ });
     expect(option.hasAttribute("disabled")).toBe(true);
     expect(
-      screen.getByText(/guchi-apps\/issue-deck は サブPC で実行できません/),
+      screen.getByText(/guchi-apps\/issue-deck は DeskMini で実行できません/),
     ).not.toBeNull();
   });
 

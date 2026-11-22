@@ -122,7 +122,7 @@ afterEach(async () => {
 });
 
 describe("GPT系選択時の画像からの変更内容の抽出（#5068）", () => {
-  it("サブPCのCodex CLIへ画像を渡して読み取り結果を返し、Claude API・OpenAI APIへは送らない", async () => {
+  it("DeskMiniのCodex CLIへ画像を渡して読み取り結果を返し、Claude API・OpenAI APIへは送らない", async () => {
     const token = await getAppAiToken("issue_image_extract");
     const result = await generateImageExtract(token!, [`https://example.test/api/issues/images/${NAME}`]);
 
@@ -138,11 +138,11 @@ describe("GPT系選択時の画像からの変更内容の抽出（#5068）", ()
     expect(state.runs.size).toBe(0);
   });
 
-  it("画像を受け取れない古いサブPCのスクリプトには渡さず、更新を促すエラーで止まる", async () => {
+  it("画像を受け取れない古いDeskMiniのスクリプトには渡さず、更新を促すエラーで止まる", async () => {
     state.acceptsImages = false;
     const token = await getAppAiToken("issue_image_extract");
     await expect(generateImageExtract(token!, [`https://example.test/api/issues/images/${NAME}`])).rejects.toThrow(
-      /サブPCのチェックアウトを更新してください/,
+      /DeskMiniのチェックアウトを更新してください/,
     );
     expect(state.fetched).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled();

@@ -81,7 +81,7 @@ const EVIDENCE_TEXT = /統合検証|検証結果|検証証跡|証跡|実行結�
  * 実行ホスト（サブPCのpoller）の更新・再起動を指す未確認の文言（#4799）。
  * **ランナー（`scripts/run-release-review.sh`の`HOST_TEXT_PATTERN`）と同じ語を持つ**（変えるときは両方を揃える）
  */
-const HOST_TEXT = /poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat/i;
+const HOST_TEXT = /poller|ポーラー|DeskMini|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat/i;
 
 /**
  * レビュー結果が実行ホストの運用状態に左右されているか（#4799）。ランナーの`result_depends_on_host`と同じ規則。
@@ -236,12 +236,12 @@ export const OPS_REEVALUATION_SKIP_TEXT: Record<OpsReevaluationSkipReason, strin
   not_waiting_ops: "",
   execution_failed: "全体レビューを最後まで実行できていないため、自動では再評価しません。",
   review_active: "全体レビューを実行中です。終わるまで自動の再評価は積みません。",
-  ops_not_needed: "この候補はサブPCの更新が不要なため、pollerの更新を契機には再評価しません。",
-  ops_needed: "サブPCのpollerが候補を含む版で動き出すのを待っています。更新・再起動を確認すると自動で再評価します。",
-  ops_unknown: "サブPCの稼働状態（オンラインか・起動時のコミット）を確認できないため、自動では開始しません。",
+  ops_not_needed: "この候補はDeskMiniの更新が不要なため、pollerの更新を契機には再評価しません。",
+  ops_needed: "DeskMiniのpollerが候補を含む版で動き出すのを待っています。更新・再起動を確認すると自動で再評価します。",
+  ops_unknown: "DeskMiniの稼働状態（オンラインか・起動時のコミット）を確認できないため、自動では開始しません。",
   verify_host_not_updated:
-    "統合検証の証跡を持つサブPCが、更新済み・全体レビュー対応・オンラインのいずれかを満たさないため、自動では開始しません。",
-  no_eligible_host: "更新済みで全体レビューを実行できるサブPCが無いため、自動では開始しません。",
+    "統合検証の証跡を持つDeskMiniが、更新済み・全体レビュー対応・オンラインのいずれかを満たさないため、自動では開始しません。",
+  no_eligible_host: "更新済みで全体レビューを実行できるDeskMiniが無いため、自動では開始しません。",
   same_host_facts: "このレビューは、いま稼働しているpollerの版で実行済みです。同じ事実では結果が変わらないため、自動では再実行しません。",
   already_reevaluated: "いま稼働しているpollerの版で自動再評価済みです。残っている項目は対応・判断が必要です。",
 };
