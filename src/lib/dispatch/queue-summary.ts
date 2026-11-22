@@ -1,5 +1,6 @@
 import {
   isActiveDispatchJobStatus,
+  resolveDispatchAgentRejection,
   isDispatchHostAtSessionCapacity,
   isSessionControlJobKind,
   isSessionLaunchJobKind,
@@ -355,6 +356,73 @@ export function describeDispatchJobWaitReason(
     return `${formatDispatchHostName(host.name)}の${formatLaunchHoldMetric(host.launchHold)}のため、まだ起動できません。走っている作業が終わって余力が戻ると順に起動します。`;
   }
   return null;
+}
+
+/** そのホストの順番待ち（`summary.queued`の並びのまま。#5589） */
+export function selectHostQueuedJobs(
+  queued: readonly DispatchJobView[],
+  hostName: string,
+): DispatchJobView[] {
+  return queued.filter((job) => job.targetHost === hostName);
+}
+
+/** ホスト別の順番待ち件数（スマホのコンパクトカード用。#5589） */
+export function countQueuedJobsByHost(queued: readonly DispatchJobView[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const job of queued) counts[job.targetHost] = (counts[job.targetHost] ?? 0) + 1;
+  return counts;
+}
+
+/** ホストの一覧に載っていないホスト宛ての順番待ち（カードが無いので外側の節に残す。#5589） */
+export function selectQueuedJobsWithoutHost(
+  queued: readonly DispatchJobView[],
+  hosts: readonly DispatchHostView[],
+): DispatchJobView[] {
+  const names = new Set(hosts.map((host) => host.name));
+  return queued.filter((job) => !names.has(job.targetHost));
+}
+
+/**
+ * 順番待ちの行から別のホストへ移せるか（#5589）。サーバーの`reassignDispatchJob`と同じ線引きで、
+ * **移せない行にはボタンを出さない**（理由は`blockedReason`で返し、出す場所は画面が決める）。
+ * 起動（`LAUNCH`）以外と引き継ぎ起動は、移し先の申告・元セッションの所在が絡むため移せない。
+ */
+export type JobReassignOptions = {
+  /** ジョブそのものが移せない理由。`null`なら`targets`を見る */
+  blockedReason: string | null;
+  targets: { hostName: string; label: string; blockedReason: string | null }[];
+};
+
+export function resolveJobReassignOptions(
+  job: DispatchJobView,
+  hosts: readonly DispatchHostView[],
+): JobReassignOptions {
+  if (job.status !== "QUEUED") {
+    return { blockedReason: "順番待ちのジョブだけを移せます。", targets: [] };
+  }
+  if (job.kind !== "LAUNCH") {
+    return { blockedReason: "この種別のジョブは別のホストへ移せません。", targets: [] };
+  }
+  if (job.handoffFrom) {
+    return {
+      blockedReason: "別のAIへの引き継ぎ起動は、元のセッションがあるホストでしか実行できません。",
+      targets: [],
+    };
+  }
+  const targets = hosts
+    .filter((host) => host.name !== job.targetHost)
+    .map((host) => {
+      const label = formatDispatchHostName(host.name);
+      let blockedReason: string | null = null;
+      if (!host.online) blockedReason = `${label}は応答していません。`;
+      else if (!host.repositories.includes(job.repositoryFullName)) {
+        blockedReason = `${label}にこのリポジトリのチェックアウトがありません。`;
+      } else {
+        blockedReason = resolveDispatchAgentRejection(host, job.agent);
+      }
+      return { hostName: host.name, label, blockedReason };
+    });
+  return { blockedReason: null, targets };
 }
 
 /** まとめて取り消せるジョブ（`queued`・`claimed`まで。`running`は途中で止めると中途半端なworktreeが残る） */

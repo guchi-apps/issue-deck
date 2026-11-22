@@ -3641,7 +3641,7 @@ export function POST(request: NextRequest) {
   使わない**）。**ヘッダーの実行キューのバッジの数字も同じ`liveSessions`**（#2265。
   `countDispatchQueueBadge`。ジョブの件数はセッションが立った時点で0へ戻るため、
   混み具合を映せなかった）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
-  （#1541。`POST /api/dispatch/<id>/prioritize`。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
+  （#1541。`POST /api/dispatch/<id>/prioritize`。順番待ちは待っているホストのカード内に出し、別ホストへは`POST /api/dispatch/<id>/reassign`で移せる〈#5589。[subpc-dispatch.md](multi-agent/subpc-dispatch.md)「順番待ちはホストのカードの中に出て」〉。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
   **見えている順番と走る順番を一致させる**。任意の並べ替えは持たない）。
   「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は

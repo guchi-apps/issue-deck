@@ -42,6 +42,7 @@ import {
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import { countQueuedJobsByHost, summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { NavViewId } from "@/types/issue";
@@ -324,6 +325,10 @@ export function MobileHomeScreenView({
                     sessions={dispatch.sessions}
                     remoteSessions={dispatch.remoteSessions}
                     compact
+                    queuedCounts={countQueuedJobsByHost(
+                      summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts)
+                        .queued,
+                    )}
                     onOpenDetail={() => setDispatchStatusOpen(true)}
                   />
                 </div>

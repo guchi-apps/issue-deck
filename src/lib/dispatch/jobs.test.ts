@@ -143,6 +143,7 @@ const {
   expireStaleDispatchJobs,
   listDispatchState,
   prioritizeDispatchJob,
+  reassignDispatchJob,
   reportDispatchJob,
   setAgentDispatchPause,
   sweepAgentUsageLimitPause,
@@ -1666,6 +1667,92 @@ describe("dismissDispatchJob", () => {
  * 先頭へ上げる（#1541）。夜にまとめて積んだあと「これを次に流したい」が出てくるが、
  * キューは`createdAt`の昇順で固定されていて、取り消して積み直すと最後尾へ回るだけだった。
  */
+describe("reassignDispatchJob", () => {
+  function queuedLaunch(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 5589,
+      targetHost: "macmini",
+      agent: "claude",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      handoffFrom: null,
+      queuePriority: 2,
+      createdAt: NOW,
+      ...overrides,
+    };
+  }
+
+  it("順番待ちの起動ジョブの割り当て先を移し先ホストへ書き換える", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(queuedLaunch())
+      .mockResolvedValueOnce(queuedLaunch({ targetHost: "deskmini", queuePriority: 0 }));
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "QUEUED", targetHost: "macmini" },
+      data: { targetHost: "deskmini", queuePriority: 0 },
+    });
+  });
+
+  it("起動以外の種別は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ kind: "CODE_REVIEW" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("引き継ぎ起動（handoffFromあり）は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ handoffFrom: "codex" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("順番待ち以外は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ status: "RUNNING" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+
+  it("同じホストへは移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "macmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+
+  it("移し先がオフライン・未知ならtarget_rejectedで書き換えない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    dispatchHostFindUnique.mockResolvedValue(null);
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "target_rejected" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("払い出しや取り消しと競合して更新できなければ失敗を返す", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    dispatchJobUpdateMany.mockResolvedValue({ count: 0 });
+
+    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+});
+
 describe("prioritizeDispatchJob", () => {
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
