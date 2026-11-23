@@ -968,7 +968,7 @@ export function CreateIssueDialog({
               onToggle={toggleLabel}
               isLoading={isMetaLoading}
               trigger={
-                <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                <Button variant="outline" className="h-9 w-fit px-3 md:pointer-coarse:h-11" disabled={isMetaLoading}>
                   {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
                   <ChevronDown className="size-3.5" />
                 </Button>
@@ -1104,7 +1104,7 @@ export function CreateIssueDialog({
               段数を数える`grid-rows-*`は使わない・#2402）。本文の`-mx-1 px-1`は、入力欄の
               フォーカスリング（`ring-3`）がスクロール領域で切れないための余白 */}
           <DialogContent
-            className="flex flex-col gap-0 overflow-hidden sm:max-w-lg"
+            className="flex flex-col gap-0 overflow-hidden sm:max-w-lg md:pointer-coarse:max-w-2xl"
             onKeyDown={handleKeyDown}
           >
             <div className="pb-3 sm:pb-4">{header}</div>

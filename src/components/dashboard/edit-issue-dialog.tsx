@@ -93,7 +93,7 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg md:pointer-coarse:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             #{issue.number} を編集

@@ -33,7 +33,8 @@ src/
     github/setup    GitHub Appインストール後の受け口
   components/
     dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
-    ui/             shadcn/uiの生成物。手で書き換えない
+    ui/             shadcn/uiの生成物。ただしボタン・入力欄・選択欄は、指で操作する端末（iPad等）で
+                    `md`以上でも44px基準を保つため`md:pointer-coarse:`の指定を足してある（#5617）
   hooks/            use-* のクライアントフック。データ取得・更新はここに集約する
   lib/
     github/         GitHub APIとの境界。コンポーネントから直接叩かない
