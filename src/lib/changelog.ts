@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.110.1",
+    date: "2026-11-23",
+    changes: [
+      "全ホスト向けの手作業Issueで、VPSの手順について、VPSに対応していないホストが適用状況の対象に含まれてしまう問題を直しました。また、完了確認の巡回で、同じ種類の実行先が別のリポジトリのものと取り違えられないようにしました。",
+    ],
+  },
+  {
     version: "8.110.0",
     date: "2026-11-23",
     changes: [

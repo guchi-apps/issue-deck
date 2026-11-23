@@ -519,10 +519,15 @@ async function findNextPatrolTarget(
 
   // **VPSの確認コマンドは、そこへ到達できるホストが居るときだけ候補にする**（#2901）。
   // 積んでも`manual_step_vps_unsupported`で弾かれ、巡回の記録だけが失敗として残る
-  const runTargets = new Map<number, string>();
+  const runTargets = new Map<string, string>();
   const candidates = issues.filter((issue) => {
     const target = resolveManualStepPatrolTarget(issue.body, true, toPatrolAuthor(issue));
-    if (target.patrollable) runTargets.set(issue.number, String(target.runTarget));
+    if (target.patrollable) {
+      runTargets.set(
+        buildDispatchActiveKey(issue.repository.fullName, issue.number),
+        String(target.runTarget),
+      );
+    }
     return target.patrollable && (target.runTarget !== "vps" || vpsHostNames.length > 0);
   });
   if (candidates.length === 0) return null;
@@ -582,7 +587,7 @@ async function findNextPatrolTarget(
     if (busy.has(key)) continue;
     const pendingHost = pickPendingManualStepHost(
       applications.get(`${issue.repository.fullName}#${issue.number}`) ?? [],
-      runTargets.get(issue.number) === "vps" ? vpsHostNames : onlineHostNames,
+      runTargets.get(key) === "vps" ? vpsHostNames : onlineHostNames,
     );
     const last = checkedAt.get(key);
     if (last && now.getTime() - last.getTime() < PATROL_INTERVAL_MS) {
@@ -593,7 +598,7 @@ async function findNextPatrolTarget(
     return {
       repositoryFullName: issue.repository.fullName,
       issueNumber: issue.number,
-      runTarget: runTargets.get(issue.number),
+      runTarget: runTargets.get(key),
       ...(pendingHost === null ? {} : { hostName: pendingHost }),
     };
   }
