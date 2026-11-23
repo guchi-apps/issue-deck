@@ -72,7 +72,7 @@ export function describeInstructionJobFailure(
     case "FAILED":
       return `再開の指示を送れませんでした（通信失敗・送信失敗）${detail}`;
     case "TIMEOUT":
-      return `再開の指示がサブPCに処理されないまま期限を過ぎました${detail}`;
+      return `再開の指示がDeskMiniに処理されないまま期限を過ぎました${detail}`;
     case "CANCELED":
       return `再開の指示が取り消されました${detail}`;
   }

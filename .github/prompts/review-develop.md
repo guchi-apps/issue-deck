@@ -41,7 +41,7 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
 - 全アプリ共通の共有知識と矛盾していないか（下記「共有知識との整合性」参照）
 - `.shared-context/`配下（共有知識リポジトリのcheckout）がPRの差分に混入していないか。
   混入していれば必ず指摘し、自動マージ不可として扱う
-- **VPS・サブPCの設定ファイルの変更（Apacheのvhost・systemdユニット・cron・fail2ban・
+- **VPS・DeskMiniの設定ファイルの変更（Apacheのvhost・systemdユニット・cron・fail2ban・
   netplan・`~/.bashrc.local`など）が、実機を直接書き換える手順として書かれていないか**（#2021）。
   これらは`guchi-apps/vps`・`guchi-apps/subpc`のIssueへ切り出すのが正しく、手作業Issueに残すのは
   「切り出したPRのマージ→`develop`→`main`のリリース→反映の確認」だけ。切り出し済みなら
@@ -59,7 +59,7 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
   6見出しの本文は互換として従来どおり読み、書式の不足だけで「要修正」にしない。
   [docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)「本文」）
 - **逆に、起票しない決まりのものを手作業Issueにしていないか。** issue-deck画面のボタンで
-  実行できる操作（サブPC上のチェックアウトの更新・再起動）・繰り返し発生する作業・openな
+  実行できる操作（DeskMini上のチェックアウトの更新・再起動）・繰り返し発生する作業・openな
   同内容の手作業Issueが既にあるものは起票しない（[docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)「起票しない条件」・#2009）。
   該当する場合は、起票を取り下げて既存Issueか画面の操作へ寄せるよう指摘する
 

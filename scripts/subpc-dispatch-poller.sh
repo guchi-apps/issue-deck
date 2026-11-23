@@ -84,7 +84,8 @@
 #   DISPATCH_SESSION_MEMORY_RESERVE_MB
 #                                   上の見積りで常に残しておく余白MB（省略時は2048）
 #   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
-#   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
+#   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時はLinuxが50・macOSが80・0で無効）
+#   DISPATCH_CPU_HOLD_PERCENT       起動を見送るCPU使用率（省略時は90・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_FAST_POLL_INTERVAL_SECONDS
 #                                   枠外ジョブだけを取りに行く軽い巡回の秒数（省略時は3・0で無効）
@@ -500,7 +501,14 @@ require_percent() {
 # 別の値にすると「赤いのに起動する」「赤くないのに止まっている」が起きる。
 # SWAPの50%は、平常時（実装セッション6本前後）の実測が20%程度であることから取った値。
 MEMORY_HOLD_PERCENT="$(require_percent DISPATCH_MEMORY_HOLD_PERCENT "${DISPATCH_MEMORY_HOLD_PERCENT:-}" 85)"
-SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" 50)"
+# SWAPの省略時既定はOSで分ける（#5591）。Linuxは固定サイズのSWAPファイルで平常時20%程度のため50。
+# macOSのSWAPは必要に応じて増減する動的ファイルで、総量が小さいまま使用率だけ高く出やすい
+# （Mac miniで2GiB中61%＝1.2GiBでも見送っていた）ため、80まで緩める。
+if os_compat_is_darwin; then SWAP_HOLD_DEFAULT=80; else SWAP_HOLD_DEFAULT=50; fi
+SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" "$SWAP_HOLD_DEFAULT")"
+# CPUの上限（#5591）。90%以上で起動を見送る。瞬間値で揺れるが、見送りは1巡だけで次の巡に自動再開し、
+# 実行中のセッションは落とさない。常時高いホストは0で無効にできる。
+CPU_HOLD_PERCENT="$(require_percent DISPATCH_CPU_HOLD_PERCENT "${DISPATCH_CPU_HOLD_PERCENT:-}" 90)"
 
 # 空きメモリに応じて本数の上限を絞る（#3780）。**0（既定）で無効**＝`DISPATCH_MAX_SESSIONS`のまま。
 # 実効上限は`min(DISPATCH_MAX_SESSIONS, 生きている本数 + (空き - 余白) ÷ 1本あたりの見積り)`。
@@ -908,6 +916,17 @@ remote_session_idle_ended_json() {
 #
 # `gh`を必須にしているのは、**実行するコマンドがGitHub上の手作業Issueの本文に書かれたものか**を
 # サブPC側でも確かめるため（issue-deck側の照合だけに頼らない多層防御）。
+# 手作業の代行・巡回でこのホストを選ぶ優先順（#5568）。`DISPATCH_HOST_PRIORITY`（0以上の整数。
+# 小さい方が先）をそのまま申告し、未設定・不正値は`null`（最後尾。同順位はホスト名順）。
+# **サーバー側の選び方を決定的にするための材料**で、ここでは判定しない。
+host_priority_json() {
+  if [[ "${DISPATCH_HOST_PRIORITY:-}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$DISPATCH_HOST_PRIORITY"
+  else
+    printf 'null'
+  fi
+}
+
 manual_step_capable() {
   if [[ -f "$MANUAL_STEP_RUNNER" ]] && command -v gh >/dev/null 2>&1; then
     printf 'true'
@@ -1481,7 +1500,7 @@ announce() {
 
   # 集めた使用率から「この巡は起動ジョブを見送るか」を決める（#2095）。**申告と判定を同じ
   # 場所で行う**ので、画面に出る理由と実際の動きが必ず一致する。取れなかった巡は見送らない
-  resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT"
+  resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT" "$CPU_HOLD_PERCENT"
 
   # 空きメモリから本数の上限を絞る（#3780）。**申告する`maxSessions`も実効上限にする**ので、
   # 絞って見送った巡は画面の既存の「上限に達している」表示で理由が出る（issue-deck側は変えない）
@@ -1564,6 +1583,7 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson manualStepVps "$MANUAL_STEP_VPS_CAPABLE" \
     --argjson manualStepSession "$(manual_step_session_capable)" \
+    --argjson priority "$(host_priority_json)" \
     --argjson remoteSession "$(remote_session_capable)" \
     --argjson remoteSessions "$(remote_session_list_json)" \
     --argjson remoteSessionsIdleEnded "$(remote_session_idle_ended_json)" \
@@ -1587,7 +1607,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, priority: $priority, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3372,7 +3392,7 @@ check_login_expiry() {
     return 0
   fi
 
-  LOGIN_EXPIRY_MESSAGE="サブPCのClaude Codeのログインが切れているため、起動ジョブは取りに行きません（止まっているセッション ${count} 本。サブPCで /login してください）。"
+  LOGIN_EXPIRY_MESSAGE="DeskMiniのClaude Codeのログインが切れているため、起動ジョブは取りに行きません（止まっているセッション ${count} 本。DeskMiniで /login してください）。"
   login_expiry_notified && return 0
   [[ "$DRY_RUN" -eq 0 ]] || return 0
 
@@ -3381,7 +3401,7 @@ check_login_expiry() {
   repo_name="${BASH_REMATCH[1]}"
   issue_number="${BASH_REMATCH[2]}"
   full_name="$(resolve_session_repository "$first" "$repo_name" || true)"
-  detail="サブPCで\`/login\`してください。ログインが切れている間は新しいセッションの起動を見送ります。止まっているセッション（${count}本）: $(printf '%s, ' "${LOGIN_EXPIRED_SESSIONS[@]:0:10}" | sed 's/, $//')"
+  detail="DeskMiniで\`/login\`してください。ログインが切れている間は新しいセッションの起動を見送ります。止まっているセッション（${count}本）: $(printf '%s, ' "${LOGIN_EXPIRED_SESSIONS[@]:0:10}" | sed 's/, $//')"
   echo "$LOGIN_EXPIRY_MESSAGE"
   notify_session_interrupted "$first" "$repo_name" "$issue_number" "${full_name:-}" "$detail" login_expired
   login_expiry_record_notified
@@ -4018,9 +4038,9 @@ run_manual_step_job() {
 
   # 実行を始めたことを先に伝える（届くまで最大1巡ぶん遅れるので、画面が黙る時間を短くする）
   if [[ "$run_target" == "vps" ]]; then
-    where="サブPCからVPSへ接続して"
+    where="DeskMiniからVPSへ接続して"
   else
-    where="サブPCで"
+    where="DeskMiniで"
   fi
   report_job "$job_id" running "${where}実行しています"
 
@@ -4819,7 +4839,7 @@ run_remote_session_job() {
       [[ -n "$url" ]] && break
       # 起動直後にClaude Codeが落ちた（未ログイン・設定の誤りなど）。最後の出力を理由として返す
       if ! tmux has-session -t "=$session" 2>/dev/null; then
-        report_job "$job_id" failed "Claude Codeが起動直後に終了しました。サブPCで claude を一度起動して状態を確認してください。"
+        report_job "$job_id" failed "Claude Codeが起動直後に終了しました。DeskMiniで claude を一度起動して状態を確認してください。"
         return 0
       fi
       sleep 3

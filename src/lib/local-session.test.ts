@@ -49,7 +49,7 @@ describe("parseRepositoryFullName", () => {
 });
 
 describe("buildLocalSessionCommand", () => {
-  it("サブPCのpollerが呼ぶのと同じstart-local-session.shを同じ引数で呼ぶ", () => {
+  it("DeskMiniのpollerが呼ぶのと同じstart-local-session.shを同じ引数で呼ぶ", () => {
     expect(buildLocalSessionCommand("guchi-apps/issue-deck", 1049)).toBe(
       "~/apps/issue-deck/scripts/start-local-session.sh guchi-apps issue-deck 1049",
     );

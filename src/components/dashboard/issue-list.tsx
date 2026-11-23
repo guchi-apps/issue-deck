@@ -28,7 +28,7 @@ import { ParentRunBadge, ParentRunChildBadge } from "@/components/dashboard/pare
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
-import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
+import { IssueSessionRuntime } from "@/components/dashboard/issue-session-runtime";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseBulkReserveModelChoice } from "@/lib/app-settings";
@@ -72,7 +72,6 @@ import {
 import {
   describeSessionPermission,
   findSessionForIssue,
-  resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
 import {
@@ -1171,7 +1170,7 @@ export function IssueList({
             </span>
             {/* 進捗が円（18px）から横棒（40px）になり、右側のクラスタが22px広くなった（#2516）。
                 `shrink-0`のままだと、一覧カラムを最小幅（280px）まで詰めたときに逃げ場が無く
-                行からはみ出す。縮められるようにして、**添える字（「実装中（サブPC）」）だけが
+                行からはみ出す。縮められるようにして、**添える字（「実装中（DeskMini）」）だけが
                 切り詰められる**ようにする（アイコン・バー・アバターは`shrink-0`のまま） */}
             <span className="flex min-w-0 items-center gap-1.5">
               <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />
@@ -1240,7 +1239,13 @@ export function IssueList({
               #{issue.number} {issue.title}
             </span>
           </p>
-          {attention && <IssueAttentionLine attention={attention} compact />}
+          {attention && (
+            <IssueAttentionLine
+              attention={attention}
+              compact
+              trailing={issueSession ? <IssueSessionRuntime session={issueSession} /> : null}
+            />
+          )}
           {planReviewState && (
             <div>
               <PlanReviewStateBadge state={planReviewState} />
@@ -1279,9 +1284,6 @@ export function IssueList({
                   : undefined
               }
             >
-              {issueSession && (
-                <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
-              )}
               {dependencyWait && <DependencyWaitBadge wait={dependencyWait} />}
               {parentRun && <ParentRunBadge run={parentRun} />}
               {issue.parentRunChild && <ParentRunChildBadge mark={issue.parentRunChild} />}

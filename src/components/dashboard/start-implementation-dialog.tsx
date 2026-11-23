@@ -132,7 +132,7 @@ function describeNextWindowTarget(
 ): string {
   const nextWindow = settings?.nextWindow ?? null;
   const lead = nextWindow ? `${nextWindow.leadMinutes}分` : "設定した時間";
-  const where = hostName ? formatDispatchHostName(hostName) : "サブPC";
+  const where = hostName ? formatDispatchHostName(hostName) : "DeskMini";
   const tail =
     nextWindow && !nextWindow.enabled
       ? "次枠実行はOFFなので、「予約実行」画面でONにするまで起動しません"
@@ -260,6 +260,8 @@ type StartImplementationDialogProps = {
   /** 呼び出し側で開閉状態を制御したい場合に指定する（Issue作成画面での利用を想定） */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** 開いたときに選択済みにする実行先ホスト名（分割ボタンの▼から選んだ場合。#5569）。省略時は既定 */
+  presetHost?: string | null;
   /** ホスト・次枠・コピーの実行先を選ぶ欄を表示する（既定true）。 */
   includeDispatchTargets?: boolean;
   /**
@@ -306,6 +308,7 @@ export function StartImplementationDialog({
   renderTrigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
+  presetHost = null,
   includeDispatchTargets = true,
   dispatch: injectedDispatch,
   comments = [],
@@ -430,6 +433,11 @@ export function StartImplementationDialog({
    * 「外したのに削除が効かない」という実害になるため、一度でも触ったら以後は再適用しない。
    */
   const artifactRequiredTouchedRef = useRef(false);
+  /** 開く瞬間の`presetHost`だけを読む（開いている間の変化で選択をやり直さない） */
+  const presetHostRef = useRef(presetHost);
+  useEffect(() => {
+    presetHostRef.current = presetHost;
+  }, [presetHost]);
   /** 使用者がエージェントを選び直したら、非同期の使用量取得で既定を上書きしない。 */
   const agentTouchedRef = useRef(false);
 
@@ -443,7 +451,7 @@ export function StartImplementationDialog({
     // 「触った」フラグも開くたびにリセットする（前回開いたときの操作を持ち越さない）
     artifactRequiredTouchedRef.current = false;
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
-    setTarget(undefined);
+    setTarget(presetHostRef.current ? { kind: "host", host: presetHostRef.current } : undefined);
     setStartedTarget(null);
     agentTouchedRef.current = false;
     setAgent(defaultDispatchAgent);
@@ -542,7 +550,7 @@ export function StartImplementationDialog({
   const nightlyProjectedLabelNames = new Set(startImplementationLabelsToRemove(options));
   const nightlyRejection =
     nightlyHost === null
-      ? "このリポジトリを実行できるサブPCが登録されていません"
+      ? "このリポジトリを実行できるDeskMiniが登録されていません"
       : resolveNightlyRunLabelRejection(
           issue.labels.filter((label) => !nightlyProjectedLabelNames.has(label.name)),
           scheduledKind,
@@ -1072,7 +1080,7 @@ export function StartImplementationDialog({
             </div>
           )}
           {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
-              実行先（サブPC）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
+              実行先（DeskMini）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
               対応を申告していないホストでは欄ごと出さない */}
           {!isTargetPending && showAgents && (
             <div className="flex flex-col gap-2">

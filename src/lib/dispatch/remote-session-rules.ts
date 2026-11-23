@@ -102,19 +102,19 @@ export function resolveRemoteSessionRejection(
 export function describeRemoteSessionRejection(rejection: RemoteSessionRejection): string {
   switch (rejection) {
     case "no_host":
-      return "起動できるホストがありません。サブPCのpollerが動いているか確認してください。";
+      return "起動できるホストがありません。DeskMiniのpollerが動いているか確認してください。";
     case "host_offline":
-      return "サブPCがオフラインです。";
+      return "DeskMiniがオフラインです。";
     case "unsupported":
-      return "サブPCのpollerがリモートセッションに対応していません。設定の実行環境から「更新して再起動」を押してください。";
+      return "DeskMiniのpollerがリモートセッションに対応していません。設定の実行環境から「更新して再起動」を押してください。";
     case "repository_not_runnable":
-      return "このリポジトリはサブPCに登録されていません。";
+      return "このリポジトリはDeskMiniに登録されていません。";
     case "limit_reached":
       return `同時に動かせるリモートセッションは${REMOTE_SESSION_MAX_PER_HOST}本までです。使っていないセッションを終了してください。`;
     case "resume_unsupported":
-      return "サブPCのpollerがセッションの再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
+      return "DeskMiniのpollerがセッションの再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
     case "initial_prompt_unsupported":
-      return "サブPCのpollerが最初の指示の事前入力に対応していません。設定の実行環境から「更新して再起動」を押すか、指示を空にして起動してください。";
+      return "DeskMiniのpollerが最初の指示の事前入力に対応していません。設定の実行環境から「更新して再起動」を押すか、指示を空にして起動してください。";
   }
 }
 

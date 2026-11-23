@@ -127,7 +127,7 @@ warn_launcher_scripts_stale() {
   # 何なのかを言い切らないと、pullすべきかどうかを判断できない。**
   if [[ -n "${ISSUE_DECK_LAUNCHER_SCRIPTS_SHA:-${LAUNCHER_SCRIPTS_SHA:-}}" ]]; then
     echo "  セッション側（run-issue-session.sh・session-notify.sh・prompts/）は $LAUNCHER_SYNC_REF の" >&2
-    echo "  同期コピーから読むため新しいままですが、この起動スクリプト自身とサブPCのpollerは" >&2
+    echo "  同期コピーから読むため新しいままですが、この起動スクリプト自身とDeskMiniのpollerは" >&2
     echo "  本体の作業ツリーから動きます（横断質問のランチャーだけは同期コピーから実行し直します。" >&2
     echo "  #1438・#1583）。" >&2
   else

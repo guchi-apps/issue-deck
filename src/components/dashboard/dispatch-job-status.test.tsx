@@ -71,7 +71,7 @@ describe("DispatchJobStatus", () => {
     });
     renderStatus();
 
-    fireEvent.click(screen.getByRole("button", { name: /サブPCで起動しました/ }));
+    fireEvent.click(screen.getByRole("button", { name: /DeskMiniで起動しました/ }));
 
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith("tmux attach -t issue-deck-issue-1468"),
@@ -83,7 +83,7 @@ describe("DispatchJobStatus", () => {
   it("セッション名が無ければ押せる表示にしない", () => {
     renderStatus(makeJob({ status: "QUEUED", tmuxSessionName: null, finishedAt: null }));
 
-    expect(screen.queryByRole("button", { name: /サブPCで/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /DeskMiniで/ })).toBeNull();
   });
 
   it("失敗の理由は本文として出す（スマホではホバーできない）", () => {

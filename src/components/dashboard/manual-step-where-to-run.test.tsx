@@ -19,7 +19,7 @@ afterEach(cleanup);
 
 const BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）
 - カレントディレクトリ: \`~/apps/issue-deck\`
 - Gitブランチ: \`develop\`
 `;
@@ -88,7 +88,7 @@ describe("ManualStepWhereToRun", () => {
       />,
     );
 
-    expect(screen.getByText("手元で実行する（サブPC）")).toBeTruthy();
+    expect(screen.getByText("手元で実行する（DeskMini）")).toBeTruthy();
     expect(screen.getByText("ssh subpc 'cd ~/apps/issue-deck && git pull --ff-only'")).toBeTruthy();
     expect(screen.queryByRole("list")).toBeNull();
 

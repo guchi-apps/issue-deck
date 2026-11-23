@@ -10,7 +10,6 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
-  Play,
   RotateCcw,
   SlidersHorizontal,
   TerminalSquare,
@@ -54,6 +53,7 @@ import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartSplitTrigger } from "@/components/dashboard/start-split-trigger";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import {
   findBlockingSession,
@@ -310,6 +310,9 @@ export function IssueDetail({
     setError: setDeleteError,
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // 「実装を開始」分割ボタン（#5569）。▼で選んだ実行先を選択済みにしてダイアログを開く
+  const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
+  const [startPresetHost, setStartPresetHost] = useState<string | null>(null);
   const {
     createComment,
     updateComment,
@@ -885,12 +888,23 @@ export function IssueDetail({
                   defaultDispatchAgent={defaultDispatchAgent}
                   dispatchFailoverEnabled={dispatchFailoverEnabled}
                   dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                  renderTrigger={(isSubmitting) => (
-                    <Button size="sm" disabled={isSubmitting}>
-                      {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                      {startLabel}
-                    </Button>
-                  )}
+                  open={isStartDialogOpen}
+                  onOpenChange={setIsStartDialogOpen}
+                  presetHost={startPresetHost}
+                />
+              )}
+              {showStartDialog && (
+                <StartSplitTrigger
+                  label={startLabel}
+                  hostNames={dispatch.hosts.map((host) => host.name)}
+                  onStartDefault={() => {
+                    setStartPresetHost(null);
+                    setIsStartDialogOpen(true);
+                  }}
+                  onStartOnHost={(hostName) => {
+                    setStartPresetHost(hostName);
+                    setIsStartDialogOpen(true);
+                  }}
                 />
               )}
               {canCloseQuestion && (
@@ -904,10 +918,10 @@ export function IssueDetail({
                   回答を確認してクローズ
                 </Button>
               )}
-              {/* サブPCへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
+              {/* DeskMiniへ積んだジョブの状態（順番待ち・起動中・失敗）を出す場所（#1248）。
                   起動ボタンは「実装を開始」のトリガーが出ていないときだけ出す（#1349）。
                   あちらの文言は既定の実行先そのもの（#1262）なので、両方出すと
-                  「サブPCで開始」が2つ並ぶ。もう走っているIssueではどちらも出さない（#1667）。
+                  「DeskMiniで開始」が2つ並ぶ。もう走っているIssueではどちらも出さない（#1667）。
                   `11.local`だけが付いている状態（#1815）ではここが唯一の起動導線になる
                   ——主導線は引っ込めるが、落ちたセッションの立て直しまで塞がない */}
               <StartLocalSessionButton
@@ -1163,6 +1177,7 @@ export function IssueDetail({
                   prerequisiteSummary={manualStepPrerequisites.summary}
                   dependents={manualStepPrerequisites.dependents}
                   verifiedAt={issue.manualStepVerifiedAt}
+                  hostApplications={issue.manualStepHostApplications}
                   comments={comments}
                   configTargets={infraConfigTargets}
                   onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}

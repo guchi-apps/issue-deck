@@ -32,6 +32,12 @@ describe("手作業セッションの自律実行プロンプト（#3870）", ()
     expect(prompt).not.toContain("完了としてクローズする」「画面からクローズする");
   });
 
+  it("全ホスト対象は、全ホストの確認が揃うまでクローズしない（#5588）", () => {
+    expect(prompt).toContain("既知の全ホスト");
+    expect(prompt).toContain("`gh issue close`を実行しません");
+    expect(prompt).toContain("再開条件");
+  });
+
   it("VPSでは所有者を確認し、cd && …とユーザー切り替えを1行に含める（#4315）", () => {
     expect(prompt).toContain("対象サービス・ファイルの所有者と実行環境を先に確認します");
     expect(prompt).toContain("`cd … && …`から始めます");

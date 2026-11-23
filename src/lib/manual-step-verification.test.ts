@@ -155,7 +155,7 @@ describe("isReadOnlyVerificationCommand", () => {
 const BODY = [
   "## 前提条件",
   "",
-  "- 実行するデバイス: **サブPC**（メインPCからなら `ssh subpc`）",
+  "- 実行するデバイス: **DeskMini**（メインPCからなら `ssh subpc`）",
   "",
   "## やること",
   "",
@@ -234,8 +234,8 @@ describe("resolveManualStepPatrolTarget", () => {
     ).toBe(true);
   });
 
-  it("サブPC・VPS以外のデバイスは対象外", () => {
-    const body = BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "ブラウザ");
+  it("DeskMini・VPS以外のデバイスは対象外", () => {
+    const body = BODY.replace("**DeskMini**（メインPCからなら `ssh subpc`）", "ブラウザ");
     expect(resolveManualStepPatrolTarget(body, true, OWNER_AUTHOR)).toEqual({
       patrollable: false,
       rejection: "device_not_runnable",
@@ -245,7 +245,7 @@ describe("resolveManualStepPatrolTarget", () => {
   // #2901。VPSの確認コマンドも巡回できる。**どこで流すかを返す**ので、
   // 呼び出し側はSSHへ到達できるホストが居るときだけ積める
   it("VPSのデバイスは実行先つきで対象にする", () => {
-    const body = BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "VPS");
+    const body = BODY.replace("**DeskMini**（メインPCからなら `ssh subpc`）", "VPS");
     const target = resolveManualStepPatrolTarget(body, true, OWNER_AUTHOR);
     expect(target.patrollable).toBe(true);
     if (!target.patrollable) return;
@@ -266,12 +266,12 @@ describe("resolveManualStepPatrolTarget", () => {
     const body = [
       "## 前提条件",
       "",
-      "- **実行するデバイス**: サブPC（`subpc`）。Tailscale SSH で入る（`ssh subpc`）",
+      "- **実行するデバイス**: DeskMini（`subpc`）。Tailscale SSH で入る（`ssh subpc`）",
       "- **カレントディレクトリ**: `/home/guchi/apps/claude-config`",
       "",
       "## やること",
       "",
-      "- [ ] サブPCで本体チェックアウトへ移動し、`claude` を起動する",
+      "- [ ] DeskMiniで本体チェックアウトへ移動し、`claude` を起動する",
       "",
       "  ```bash",
       "  cd /home/guchi/apps/claude-config && claude",

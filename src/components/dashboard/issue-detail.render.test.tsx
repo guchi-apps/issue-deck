@@ -573,7 +573,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
   it("PCは、Actionsの実行が終わっていれば従来どおり出す（立て直しの導線を塞がない）", () => {
     withState({ status: "completed" }, () => {
       renderDetail(runningIssue());
-      expect(screen.getByRole("button", { name: "サブPCで開始" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "DeskMiniで開始" })).toBeTruthy();
     });
   });
 
@@ -587,7 +587,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
   it("スマホも、実行が終わっていれば従来どおり出す", () => {
     withState({ status: "completed" }, () => {
       renderMobileDetail(runningIssue());
-      expect(screen.getByRole("button", { name: "サブPCで開始" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "DeskMiniで開始" })).toBeTruthy();
     });
   });
 });
@@ -657,7 +657,7 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
 
   const checkUserIssue = () =>
     buildIssue({
-      title: "サブPCで実装中のIssue",
+      title: "DeskMiniで実装中のIssue",
       labels: ["00.check-user", "01.check-input", "11.local"].map((name) => ({
         name,
         color: "d73a4a",

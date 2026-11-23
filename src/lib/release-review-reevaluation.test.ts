@@ -54,7 +54,7 @@ describe("reviewDependsOnEvidence", () => {
   it("証跡を指さない未確認（運用作業・観点の読み残し）は依存に数えない（#4767）", () => {
     expect(
       reviewDependsOnEvidence({
-        checks: [{ status: "unconfirmed", evidence: "サブPCのpollerを更新・再起動する必要があります" }],
+        checks: [{ status: "unconfirmed", evidence: "DeskMiniのpollerを更新・再起動する必要があります" }],
         unverifiedScope: null,
       }),
     ).toBe(false);
@@ -70,7 +70,7 @@ describe("reviewDependsOnHost（#4799）", () => {
   it("pollerの更新・再起動を指す未確認だけを依存に数える", () => {
     const u = (evidence: string) => ({ checks: [{ status: "unconfirmed", evidence }], unverifiedScope: null });
     expect(reviewDependsOnHost(u("実機pollerの起動時コミットが候補headを含むか確認できない"))).toBe(true);
-    expect(reviewDependsOnHost({ checks: [], unverifiedScope: "サブPCの再起動の証跡待ち" })).toBe(true);
+    expect(reviewDependsOnHost({ checks: [], unverifiedScope: "DeskMiniの再起動の証跡待ち" })).toBe(true);
     expect(reviewDependsOnHost(u("コードを読めていない"))).toBe(false);
     expect(reviewDependsOnHost({ checks: [{ status: "confirmed", evidence: "pollerを確認" }], unverifiedScope: null })).toBe(false);
   });
@@ -270,7 +270,7 @@ describe("describeReviewEvidenceStage", () => {
         findingsCount: 1,
         updatedAt: t("05:28").toISOString(),
         autoReevaluation: marker,
-        checks: [{ status: "unconfirmed", evidence: "サブPCのpollerを更新・再起動する必要があります" }],
+        checks: [{ status: "unconfirmed", evidence: "DeskMiniのpollerを更新・再起動する必要があります" }],
         openFiles: 2,
       }),
       { state: "passed", updatedAt: t("05:25").toISOString() },

@@ -3641,7 +3641,7 @@ export function POST(request: NextRequest) {
   使わない**）。**ヘッダーの実行キューのバッジの数字も同じ`liveSessions`**（#2265。
   `countDispatchQueueBadge`。ジョブの件数はセッションが立った時点で0へ戻るため、
   混み具合を映せなかった）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
-  （#1541。`POST /api/dispatch/<id>/prioritize`。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
+  （#1541。`POST /api/dispatch/<id>/prioritize`。順番待ちは待っているホストのカード内に出し、別ホストへは`POST /api/dispatch/<id>/reassign`で移せる〈#5589。[subpc-dispatch.md](multi-agent/subpc-dispatch.md)「順番待ちはホストのカードの中に出て」〉。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
   **見えている順番と走る順番を一致させる**。任意の並べ替えは持たない）。
   「どのリポジトリを起動できるか」はサブPCが申告し、
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
@@ -3759,6 +3759,8 @@ export function POST(request: NextRequest) {
   （`decidePlan`の`revise`）、無人実行の計画は対応PRより上に単独で出して承認欄の「修正」と同じ
   `handleReject`（`@claude`コメント）で送る。**無人実行向けのカードは`expectsActionsRun`の
   ときだけ出す**（ローカルでも出すと、パネル内のカードと送信ボタンが2つ並ぶ）。
+  **各指摘は、閉じている間は指摘＋提案をつないだ要約（`buildFindingSummary`・最大3行）だけを出し、
+  「詳細を開く」で指摘・提案・根拠の全文を出す**（#5579。根拠が無く短い指摘には詳細ボタンを出さない）。
   **送る文は番号・見出し・判断・見送る理由だけ**（`buildPlanReviewDecisionRequestText`）。
   本文はレビューコメントを読ませる——引用すると修正の上限（`SESSION_PLAN_REVISION_MAX_LENGTH`）に
   3件ほどで届く。**分けられないレビューは本文を1枚で出し、従来の一括の依頼文

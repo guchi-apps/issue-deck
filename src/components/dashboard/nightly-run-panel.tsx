@@ -101,7 +101,7 @@ export function NightlyRunPanel({
             予約実行
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            積んだIssueは、窓が開いた時点でサブPCの巡回が順に起動します
+            積んだIssueは、窓が開いた時点でDeskMiniの巡回が順に起動します
           </p>
         </div>
         <Button variant="outline" size="icon" className="size-7" onClick={onRefresh} title="更新">
@@ -552,7 +552,7 @@ function BulkModelSettings({
       {!compact && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Issue一覧の「まとめて予約」を開いたときに最初から選ばれるモデルです。予約のたびにバーで変えられます。
-          Codexを選ぶと、Codexを使えるサブPCのあるリポジトリだけ選べます。
+          Codexを選ぶと、Codexを使えるDeskMiniのあるリポジトリだけ選べます。
         </p>
       )}
     </div>

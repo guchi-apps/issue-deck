@@ -345,7 +345,7 @@ function ApprovalActions({
       ) : (
         <p className="mb-2 text-sm font-medium">ユーザーの承認が必要です</p>
       )}
-      {/* サブPCで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
+      {/* DeskMiniで走っているIssueでは、承認コメントを投稿しても`11.local`により無人実行が
           反応しない（#1264）。押しても何も起きないことを、押す前に出す */}
       {localSessionNotice}
       {/* 承認するかどうかを決める場所で、計画レビューを起こせるようにする（#1855） */}

@@ -948,7 +948,7 @@ function SessionName({
         )}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
           <span className="truncate">
-            {/* 「CI/CD・レビュー」は場所がActionsとサブPCに分かれるので、種別ではなく実行場所を出す（#3995） */}
+            {/* 「CI/CD・レビュー」は場所がActionsとDeskMiniに分かれるので、種別ではなく実行場所を出す（#3995） */}
             {entry.source === "github-actions" || entry.kind === "actions"
               ? sessionUsageLocationLabel(entry)
               : sessionUsageKindLabel(entry.kind)}{" "}
@@ -1002,7 +1002,7 @@ function UsageCoverageNote({ gaps }: { gaps: SessionUsageSummary["usageGaps"] })
   return (
     <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
       <p>
-        「CI/CD・レビュー」は、GitHub ActionsでのClaude Codeの実行と、サブPCで走るCodex PRレビューの使用量です。
+        「CI/CD・レビュー」は、GitHub ActionsでのClaude Codeの実行と、DeskMiniで走るCodex PRレビューの使用量です。
         build・test・lintなどAIを使わないCIは含みません。実行場所・エージェントは明細の各行に出ます。
       </p>
       <p>
@@ -2164,7 +2164,7 @@ export function SessionUsagePanel({
             <span className="text-xs font-semibold">Issue・PR別</span>
             {issues.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                記録がありません。サブPCまたはGitHub Actionsから報告されると出ます。
+                記録がありません。DeskMiniまたはGitHub Actionsから報告されると出ます。
               </p>
             ) : (
               <>

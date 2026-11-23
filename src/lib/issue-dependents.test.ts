@@ -42,7 +42,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 /** guchi-apps/subpc の #38（対応Issue）と #39（先に実施する手作業） */
 const MANUAL_STEP = makeIssue({
   number: 39,
-  title: "[手作業] サブPC: 停止しているセルフホストランナーを起こす",
+  title: "[手作業] DeskMini: 停止しているセルフホストランナーを起こす",
   labels: [MANUAL_STEP_LABEL],
   body: "## 関連\n\n- 起点: #38\n",
 });

@@ -134,6 +134,29 @@ describe("resolveHostMetricTone", () => {
   });
 });
 
+describe("describeDispatchHostMetrics: 見送り中の項目は赤（#5591）", () => {
+  it("見送っているSWAPの行だけ、使用率が橙の範囲でも赤になる", () => {
+    const rows = describeDispatchHostMetrics(
+      host({
+        metrics: { ...host().metrics!, swapUsedMb: 1250, swapTotalMb: 2048 },
+        launchHold: { reason: "SWAP", percent: 61, thresholdPercent: 50 },
+      }),
+    );
+    expect(rows?.find((r) => r.label === "SWAP")?.tone).toBe("critical");
+    expect(rows?.find((r) => r.label === "メモリ")?.tone).not.toBe("critical");
+  });
+
+  it("CPUの見送りはCPUの行が赤になる。見送りが無ければ色は使用率だけで決まる", () => {
+    const m = { ...host().metrics!, cpuPercent: 92 };
+    const held = describeDispatchHostMetrics(
+      host({ metrics: m, launchHold: { reason: "CPU", percent: 92, thresholdPercent: 90 } }),
+    );
+    expect(held?.[0]).toMatchObject({ label: "CPU", tone: "critical" });
+    const free = describeDispatchHostMetrics(host({ metrics: { ...m, cpuPercent: 65 } }));
+    expect(free?.[0].tone).toBe("warn");
+  });
+});
+
 describe("describeDispatchHostMetrics", () => {
   it("CPU・メモリ・SWAP・ディスクの4行を返す", () => {
     const rows = describeDispatchHostMetrics(host());
@@ -216,7 +239,7 @@ describe("parseDispatchHostLaunchHold（#2095）", () => {
 
   // 部分的に採用すると「理由は分かるが割合が0%」という、読んでも判断できない表示になる
   it("理由・使用率・閾値のどれかが欠けている・壊れていれば全体をnullにする", () => {
-    expect(parseDispatchHostLaunchHold({ reason: "CPU", percent: 92, thresholdPercent: 85 })).toBeNull();
+    expect(parseDispatchHostLaunchHold({ reason: "DISK", percent: 92, thresholdPercent: 85 })).toBeNull();
     expect(parseDispatchHostLaunchHold({ reason: "MEMORY", thresholdPercent: 85 })).toBeNull();
     expect(parseDispatchHostLaunchHold({ reason: "MEMORY", percent: 92 })).toBeNull();
     expect(

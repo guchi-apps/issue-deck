@@ -206,13 +206,13 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
     );
   }
 
-  it("無人実行もサブPCも対応していないリポジトリには印を出す", () => {
+  it("無人実行もDeskMiniも対応していないリポジトリには印を出す", () => {
     renderWith([repository({ hasClaudeWorkflow: false, dispatchRunnable: false })]);
 
     expect(screen.getByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeTruthy();
   });
 
-  it("無人実行が無くてもサブPCで起動できるリポジトリには印を出さない（vps・subpc・docs）", () => {
+  it("無人実行が無くてもDeskMiniで起動できるリポジトリには印を出さない（vps・subpc・docs）", () => {
     renderWith([repository({ hasClaudeWorkflow: false, dispatchRunnable: true })]);
 
     expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();

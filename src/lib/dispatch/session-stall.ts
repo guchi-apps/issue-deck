@@ -113,7 +113,7 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
     title: "APIエラーで中断したまま止まっています",
     detail: [
       "Claude CodeがAPIの一時エラー（529 Overloaded など）を再試行しきるとturnが打ち切られ、`Stop`フックが飛ばないままセッションが入力欄で止まります。",
-      "サブPCのpollerが固定の1行を上限回数まで送りましたが、復帰しませんでした。同じ1行をここから送り直せます。",
+      "DeskMiniのpollerが固定の1行を上限回数まで送りましたが、復帰しませんでした。同じ1行をここから送り直せます。",
     ],
     presets: [{ label: "中断したところから続けるよう送る", body: API_ERROR_BODY }],
   },
@@ -122,7 +122,7 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
     title: "ツールを呼び出さないまま応答を終えています",
     detail: [
       "ツール（`Agent`など）を呼び出すつもりで、実際にはtool_useとして呼び出さずコード風のテキストを出力するだけでターンを終えた可能性があります。`Stop`は正常に発火するため、画面からは「正常に応答した」ようにしか見えません。",
-      "サブPCのpollerが同じ固定文面を上限回数まで自動で送りましたが、復帰しませんでした（#2896）。同じ1行をここから送り直せます。",
+      "DeskMiniのpollerが同じ固定文面を上限回数まで自動で送りましたが、復帰しませんでした（#2896）。同じ1行をここから送り直せます。",
       "「進めて」のような曖昧な継続指示では解けません（直前の自分の発言を「既に呼び出した」と誤認したまま再び止まります）。呼ばれていないことを事実として伝える文面を送ります。",
     ],
     presets: [
@@ -134,7 +134,7 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
     title: "ターンが完了しないまま止まっています",
     detail: [
       "Codexのセッションが、ターンの開始（`task_started`）だけを転記へ書いたまま、完了（`task_complete`）も中断（`turn_aborted`）も書かずに止まっています。tmuxの中では生きているため、画面からは「実行中」にしか見えません。",
-      "サブPCのpollerが固定の1行を上限回数まで`codex queue`で送りましたが、復帰しませんでした（#3174）。同じ1行をここから送り直せます。",
+      "DeskMiniのpollerが固定の1行を上限回数まで`codex queue`で送りましたが、復帰しませんでした（#3174）。同じ1行をここから送り直せます。",
       "送っても変わらない場合、Codex自体が応答しなくなっている可能性があります（`codex queue`が`No active session found`で失敗します）。端末から見て、駄目なら起こし直してください。",
     ],
     presets: [{ label: "中断したところから続けるよう送る", body: TURN_STALL_BODY }],
@@ -173,10 +173,10 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
   },
   login_expired: {
     reason: "login_expired",
-    title: "サブPCのClaude Codeのログインが切れています",
+    title: "DeskMiniのClaude Codeのログインが切れています",
     detail: [
-      "`Login reached its time limit · Please run /login` で止まっています（転記の末尾が`authentication_failed`）。**サブPC全体の問題**で、ログインが切れている間は新しいセッションの起動も見送られます（見送った起動は消えず、ログインが直れば流れます）。",
-      "`/login`は人がブラウザで認証する必要があり、この画面の追加指示では直せません。サブPCのtmuxで`claude`を開いて`/login`を実行してから、下のボタンで続けるよう送ってください。ログインが切れたままでは送っても同じエラーで止まります。",
+      "`Login reached its time limit · Please run /login` で止まっています（転記の末尾が`authentication_failed`）。**DeskMini全体の問題**で、ログインが切れている間は新しいセッションの起動も見送られます（見送った起動は消えず、ログインが直れば流れます）。",
+      "`/login`は人がブラウザで認証する必要があり、この画面の追加指示では直せません。DeskMiniのtmuxで`claude`を開いて`/login`を実行してから、下のボタンで続けるよう送ってください。ログインが切れたままでは送っても同じエラーで止まります。",
     ],
     presets: [{ label: "ログインし直したので続けるよう送る", body: LOGIN_EXPIRED_BODY }],
   },

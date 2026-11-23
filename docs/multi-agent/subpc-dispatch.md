@@ -1646,7 +1646,9 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
 [`scripts/lib/launch-hold.sh`](../../scripts/lib/launch-hold.sh)の`resolve_launch_hold`が持つ。
 
 - **閾値は`dispatch.env`の設定値**（`DISPATCH_MEMORY_HOLD_PERCENT`・既定85、
-  `DISPATCH_SWAP_HOLD_PERCENT`・既定50。どちらも**0で無効**）。コードに埋め込まないのは
+  `DISPATCH_SWAP_HOLD_PERCENT`・省略時はLinuxが50・macOSが80、`DISPATCH_CPU_HOLD_PERCENT`・既定90。
+  いずれも**0で無効**。#5591でCPUを足し、macOSのSWAPを緩めた。macOSのSWAPは動的ファイルで総量が
+  小さく、50%だと2GiB中1.2GiBでも止まるため）。コードに埋め込まないのは
   `DISPATCH_MAX_SESSIONS`と同じ理由で、ホストの搭載メモリで決まる値だから（#1176）
 - **メモリの既定85%は、画面の使用率が赤くなる境目**（`host-metrics.ts`の`CRITICAL_PERCENT`）
   に合わせてある。見た目の警告と実際の見送りを同じ線に置くためで、別の値にすると
@@ -1660,7 +1662,10 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
   申告と同じ場所で決める**（新しい絞りを足すときも同じ）。1巡の入口で決めた結果を使う
   ぶん、直後の回収（`reap_sessions`）で空いたメモリは次の巡まで反映されないが、ずれは最大で
   ポーリング間隔（既定30秒）——`liveSessions`の申告と同じ性質の遅れ
-- **どちらも超えていれば理由はメモリ。** SWAPが増えるのはメモリが足りなくなった結果なので、
+- **見送った項目は画面でメーターが赤になる**（#5591。`describeDispatchHostMetrics`が申告された
+  `launchHold.reason`の行を`critical`へ上げる。閾値は持たず判定し直さない）。使用率だけの色
+  （60%橙・85%赤）では、上限50%で止まっていても橙のままで理由が読めなかった
+- **複数超えていれば理由はメモリ→CPU→SWAPの順。** SWAPが増えるのはメモリが足りなくなった結果なので、
   原因の側を出した方が読み手の次の行動（何を畳むか）に繋がる
 - **SWAPを持たないホスト（総量0）ではSWAPを見ない。** 割合を出せず、0%として扱うと
   「常に空いている」と読める（画面の`describeSwapRow`と同じ向き）
@@ -2048,13 +2053,13 @@ Codexで効かなくなる連携（通知・計画の承認・Remote Control）�
 メニュー項目で、エージェントを掛け合わせると項目数が倍になる。**同じ選択を2か所に持つより、
 選ぶ場所を1つに決める方が、押した結果が読める。**
 
-### ホスト名は表示するときだけ日本語表記に直す（#1416）
+### ホスト名は表示するときだけ機体名に直す（#1416）
 
 ホスト名（`DispatchHost.name`）は`hostname`そのままの識別子で、pollerの申告・tmux・
 `local-repos.conf`・DBの照合キーを兼ねている。**識別子は変えられないが、人が読む場所に`subpc`と
 いう綴りが出るのは表記として揃っていない**ため、表示の直前に
 [src/lib/dispatch/host-label.ts](../../src/lib/dispatch/host-label.ts)の
-`formatDispatchHostName()`で置き換える（`subpc` → `サブPC`）。対応表に無いホストはそのまま出す。
+`formatDispatchHostName()`で置き換える（`subpc` → `DeskMini`、`macmini` → `Mac mini`）。役割（「サブ」）ではなく機体の名前で表示する。対応表に無いホストはそのまま出す。
 
 適用するのは**地の文だけ**にする。次のものは識別子のまま残す。コピーしてそのまま使う値だからで、
 表記を揃えるために書き換えると動かないコマンドを案内することになる。
@@ -2342,6 +2347,26 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
   同じ×印でも役割が違うため、`QueueSection`のpropsも`onCancel`／`onDismiss`で分けている
 - 消した失敗はIssue詳細のジョブ状態表示（`dispatch-job-status.tsx`）からも同時に消える。
   どちらも`GET /api/dispatch`の同じ`jobs`を読んでいるため
+
+### 順番待ちはホストのカードの中に出て、別のホストへ移せる（#5589）
+
+実行状況の「順番待ち」は、**待っているホスト（`DispatchJob.targetHost`）のカードの内側の下**に出る
+（従来は全ホスト共通の枠の外で、MacminiとDeskMiniのどちらで待っているか分からなかった）。
+進まない理由（セッション上限・メモリ逼迫・オフライン）もそのカードへ出す。ホストの一覧に載っていない
+ホスト宛てのジョブだけは、従来どおり外側の節に残す。スマホのコンパクトカードには件数だけ出す。
+
+各行の「<他ホスト>へ移す」（`POST /api/dispatch/<id>/reassign`、本文`{ "toHostName": "…" }`）は、
+**人が押した1回の操作だけ**で、自動の振り替えは作らない。払い出しは`targetHost`が自分のジョブだけを
+取るので、`targetHost`を書き換えるだけで移る（順番は移し先の末尾・優先度は0へ戻す）。
+
+- **移せるのは`kind=LAUNCH`かつ`handoffFrom`なしの`QUEUED`だけ。** コードレビュー・手作業・レビュー
+  修正は移し先の申告（`*Capable`）が別に要り、引き継ぎ起動は元セッションのあるホストのtmuxから
+  要約を書き出す作りで、別ホストでは元セッションが見つからない。サーバー（`reassignDispatchJob`）が
+  弾き、画面（`resolveJobReassignOptions`）はその行にボタンを出さない
+- **移し先の可否は積む時と同じ判定**（`jobs.ts`の`checkLaunchTarget`。ホストの存在・オンライン・
+  登録リポジトリ・エージェント対応・一時停止）。`enqueueDispatchJob`から切り出して共有している。
+  移し先が使えないときは、画面では押せない状態にして理由をツールチップに出す
+- 更新は`status=QUEUED`と元の`targetHost`を条件にした`updateMany`で、払い出し・取り消しと競合したら失敗を返す
 
 ### 順番待ちは「先頭へ上げる」だけができる（#1541）
 
@@ -2637,6 +2662,7 @@ poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaude
 | `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
 | `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`のセッションを立てるジョブのみ。#1541） |
+| `POST /api/dispatch/<id>/reassign` | ログインセッション | 順番待ちの起動ジョブを別のホストへ移す（`LAUNCH`・引き継ぎなしの`QUEUED`のみ。#5589） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・セッションの本数と上限・リソース使用率も申告する） |
@@ -3185,3 +3211,16 @@ issue-deck(VPS) --POST /wake(署名付き・本文なし)--> 受信サービス 
   VPS側のログの`ジョブ即時通知を送れませんでした`を見る。tailnetのACL・待ち受けアドレス・時刻のずれ（±60秒）が主な原因
 - 受信サービスが落ちている: 再起動してよい（実行中のセッションは無関係）。直るまでは30秒の定期巡回で動く
 - 通知を止めたい: VPSの`DISPATCH_WAKE_TARGETS`を空にする
+
+
+### セッション詳細の「ターミナルで開く」（#5574）
+
+セッション詳細の「セッションの情報」の下に、そのセッションのtmuxへ入るコマンドをコピーできる欄を出す。
+組み立ては[src/lib/dispatch/session-terminal-command.ts](../../src/lib/dispatch/session-terminal-command.ts)。
+
+- 既定は「そのホスト上で」: `tmux attach -t <セッション名>`（サブPC・Mac miniのターミナルで直接実行する）
+- 「別の端末から（SSH）」: `ssh -t <ホスト識別子> 'exec "$SHELL" -lc "tmux attach -t <セッション名>"'`。
+  ホスト識別子をそのままTailscale MagicDNSの短い名前として使う。非対話のSSHはmacOSでHomebrewのPATHを持たないため、
+  ログインシェル経由でtmuxを見つけさせる
+- ホスト名・セッション名が英数字・`.`・`_`・`-`以外を含むときはコマンドを組み立てず、欄ごと出さない（シェル注入の防止）。
+  消えた（GONE）セッションにも出さない

@@ -68,15 +68,15 @@ export class AppAiCodexError extends Error {
 /** 利用者へ出す文言。Claudeへ切り替えていないことを必ず添える（代替経路と誤認させない） */
 export function describeAppAiCodexError(kind: AppAiCodexErrorKind): string {
   const reason = {
-    offline: "サブPCがオフラインです",
-    unsupported_host: "サブPCのpollerがCodex実行に未対応です（サブPCのチェックアウトを更新してください）",
+    offline: "DeskMiniがオフラインです",
+    unsupported_host: "DeskMiniのpollerがCodex実行に未対応です（DeskMiniのチェックアウトを更新してください）",
     unsupported_model: "選んだモデルはCodex CLIで動かせません",
-    not_claimed: "サブPCがジョブを受け取りませんでした",
+    not_claimed: "DeskMiniがジョブを受け取りませんでした",
     document_unsupported: "PDFなどの文書を含む処理はCodex経路に未対応です。Claudeへ切り替えて実行してください",
-    image_host_outdated: "サブPCのチェックアウトが画像の受け渡しに未対応です（サブPCのチェックアウトを更新してください）",
+    image_host_outdated: "DeskMiniのチェックアウトが画像の受け渡しに未対応です（DeskMiniのチェックアウトを更新してください）",
     feature_unsupported: "この機能はCodex経路に未対応です",
-    not_logged_in: "サブPCのCodex CLIがログインしていません（`codex login`でChatGPTにログインしてください）",
-    api_key_auth: "サブPCのCodex CLIがAPIキーでログインしています（従量課金になるため使いません）",
+    not_logged_in: "DeskMiniのCodex CLIがログインしていません（`codex login`でChatGPTにログインしてください）",
+    api_key_auth: "DeskMiniのCodex CLIがAPIキーでログインしています（従量課金になるため使いません）",
     usage_limit: "Codex（ChatGPTサブスク）の利用枠の上限に達しています",
     timeout: "Codexの応答が時間切れになりました",
     bad_output: "Codexの応答を読み取れませんでした",
@@ -386,7 +386,7 @@ async function waitForRun(params: {
     if (["FAILED", "SKIPPED", "CANCELED"].includes(job.status)) throw new AppAiCodexError("codex_error");
     const elapsed = params.clock() - startedAt;
     if (job.status === "QUEUED" && elapsed >= params.claimWaitMs) {
-      await abandonChatTurnJob(params.jobId, "サブPCに受け取られませんでした");
+      await abandonChatTurnJob(params.jobId, "DeskMiniに受け取られませんでした");
       throw new AppAiCodexError("not_claimed");
     }
     if (elapsed >= params.timeoutMs) {

@@ -103,6 +103,27 @@ describe("SessionDetail（#3991）", () => {
     expect(screen.queryByRole("button", { name: "セッションを終了" })).toBeNull();
   });
 
+  it("「ターミナルで開く」は既定でホスト上のコマンドを出し、SSHタブで切り替わりコピーできる（#5574）", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<SessionDetail session={session({ host: "macmini", tmuxSessionName: "aide-issue-888" })} dispatch={dispatchHandle()} />);
+    fireEvent.click(screen.getByRole("button", { name: "セッション詳細" }));
+
+    expect(screen.getByTestId("terminal-command").textContent).toBe("tmux attach -t aide-issue-888");
+    fireEvent.click(screen.getByRole("button", { name: "コピー" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("tmux attach -t aide-issue-888"));
+
+    fireEvent.click(screen.getByRole("button", { name: "別の端末から（SSH）" }));
+    expect(screen.getByTestId("terminal-command").textContent).toContain("ssh -t macmini");
+  });
+
+  it("消えたセッションには「ターミナルで開く」を出さない（#5574）", () => {
+    render(<SessionDetail session={session({ state: "GONE" })} dispatch={dispatchHandle()} />);
+    fireEvent.click(screen.getByRole("button", { name: "セッション詳細" }));
+
+    expect(screen.queryByText("ターミナルで開く")).toBeNull();
+  });
+
   it("作業ログのステップコードを日本語で出す（#4124）", async () => {
     vi.stubGlobal(
       "fetch",

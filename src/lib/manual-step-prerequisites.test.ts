@@ -466,14 +466,14 @@ describe("appendPrerequisiteReference", () => {
   it("節はあるが行が無ければ、節の末尾へ足す", () => {
     const body = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 
 ## やること
 `;
     const updated = appendPrerequisiteReference(body, "guchi-apps/subpc#12");
     const lines = updated.split("\n");
     expect(lines.indexOf("- 先に完了している必要があるIssue・PR: guchi-apps/subpc#12")).toBe(
-      lines.indexOf("- 実行するデバイス: **サブPC**") + 1,
+      lines.indexOf("- 実行するデバイス: **DeskMini**") + 1,
     );
   });
 

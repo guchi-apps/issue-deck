@@ -8,7 +8,11 @@ import {
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
   describeDispatchSessionLoad,
+  countQueuedJobsByHost,
+  resolveJobReassignOptions,
   selectHostCodexPairingJob,
+  selectHostQueuedJobs,
+  selectQueuedJobsWithoutHost,
   selectHostSelfUpdateJob,
   selectHostSessions,
   summarizeDispatchQueue,
@@ -418,7 +422,7 @@ describe("describeDispatchQueueStall", () => {
 
   it("上限に達しているホストがあれば理由を出す", () => {
     expect(describeDispatchQueueStall(queued, [host({ liveSessions: 12 })])).toContain(
-      "サブPC（12/12本）",
+      "DeskMini（12/12本）",
     );
   });
 
@@ -442,7 +446,7 @@ describe("describeDispatchQueueStall", () => {
   // 出さないと「順番待ちのまま進まない」としか見えず、pollerが落ちている状態と区別が付かない
   it("メモリ・SWAPの逼迫で見送っているホストがあれば理由を出す", () => {
     const reason = describeDispatchQueueStall(queued, [host({ launchHold: MEMORY_HOLD })]);
-    expect(reason).toContain("サブPC（メモリ 92%（上限 85%））");
+    expect(reason).toContain("DeskMini（メモリ 92%（上限 85%））");
     expect(reason).toContain("余力が戻ると自動で再開");
   });
 
@@ -497,7 +501,7 @@ describe("describeDispatchJobWaitReason", () => {
   // 本数の上限とは待っている人にできることが違うため、別の文で説明する（#2095）
   it("メモリ・SWAPの逼迫で見送っている場合はその理由を添える", () => {
     const reason = describeDispatchJobWaitReason(job(), [host({ launchHold: MEMORY_HOLD })]);
-    expect(reason).toContain("サブPCのメモリ 92%（上限 85%）のため、まだ起動できません");
+    expect(reason).toContain("DeskMiniのメモリ 92%（上限 85%）のため、まだ起動できません");
   });
 
   it("本数の上限にも達していれば、そちらを理由に添える", () => {
@@ -616,5 +620,46 @@ describe("selectHostCodexPairingJob", () => {
 
   it("そのホストのペアリングが無ければnull", () => {
     expect(selectHostCodexPairingJob([job({ kind: "LAUNCH" })], "subpc")).toBeNull();
+  });
+});
+
+describe("順番待ちのホスト別表示と移し先（#5589）", () => {
+  const mac = host({ name: "macmini" });
+  const desk = host({ name: "deskmini" });
+
+  it("ホスト別に順番待ちを抜き出し、件数を数え、カードが無いホスト宛ては外側に残す", () => {
+    const queued = [
+      job({ id: "a", targetHost: "macmini" }),
+      job({ id: "b", targetHost: "deskmini" }),
+      job({ id: "c", targetHost: "gone" }),
+    ];
+    expect(selectHostQueuedJobs(queued, "macmini").map((j) => j.id)).toEqual(["a"]);
+    expect(countQueuedJobsByHost(queued)).toEqual({ macmini: 1, deskmini: 1, gone: 1 });
+    expect(selectQueuedJobsWithoutHost(queued, [mac, desk]).map((j) => j.id)).toEqual(["c"]);
+  });
+
+  it("起動ジョブは他のホストを移し先の候補にする", () => {
+    const result = resolveJobReassignOptions(job({ targetHost: "macmini" }), [mac, desk]);
+    expect(result.blockedReason).toBeNull();
+    expect(result.targets).toEqual([
+      { hostName: "deskmini", label: expect.any(String), blockedReason: null },
+    ]);
+  });
+
+  it("起動以外・引き継ぎ起動は移せない", () => {
+    expect(
+      resolveJobReassignOptions(job({ kind: "CODE_REVIEW" }), [mac, desk]).blockedReason,
+    ).not.toBeNull();
+    expect(
+      resolveJobReassignOptions(job({ handoffFrom: "codex" }), [mac, desk]).blockedReason,
+    ).not.toBeNull();
+  });
+
+  it("移し先がオフライン・リポジトリ未登録なら候補ごと理由を返す", () => {
+    const offline = host({ name: "deskmini", online: false });
+    const noRepo = host({ name: "deskmini", repositories: [] });
+    const j = job({ targetHost: "macmini" });
+    expect(resolveJobReassignOptions(j, [mac, offline]).targets[0].blockedReason).not.toBeNull();
+    expect(resolveJobReassignOptions(j, [mac, noRepo]).targets[0].blockedReason).not.toBeNull();
   });
 });

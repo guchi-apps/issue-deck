@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
+import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { getPendingDispatchAt, getPendingDispatchAtByIssue } from "@/lib/dispatch/pending-dispatch";
+import { listManualStepHostApplications } from "@/lib/manual-step-host-application";
 import { listManualStepVerifiedAtByIssue } from "@/lib/manual-step-verification-patrol";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import { getParentRunChildMarksByIssue, toParentRunChildMark } from "@/lib/parent-run/child-state-query";
@@ -49,6 +51,23 @@ export async function getIssuesForUser(
     getParentRunChildMarksByIssue(),
   ]);
 
+  // 全ホストで揃える手作業のホストごとの適用状況（#5568）。openの手作業Issueの本文だけ見て、1回で引く
+  const hostApplications =
+    options.bodies === "open"
+      ? await listManualStepHostApplications(
+          issueRows
+            .filter(
+              (row) =>
+                row.state === "OPEN" && row.labels.some((label) => label.name === MANUAL_STEP_LABEL),
+            )
+            .map((row) => ({
+              repositoryFullName: row.repository.fullName,
+              number: row.number,
+              body: openBodies.get(row.id) ?? null,
+            })),
+        )
+      : new Map();
+
   return issueRows.map((row) => {
     const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
     const activeKey = buildDispatchActiveKey(row.repository.fullName, row.number);
@@ -64,6 +83,7 @@ export async function getIssuesForUser(
       dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
       parentRunChild: toParentRunChildMark(parentRunChild),
       manualStepVerifiedAt: verifiedAt?.toISOString() ?? null,
+      manualStepHostApplications: hostApplications.get(`${row.repository.fullName}#${row.number}`) ?? null,
     };
     return shouldOmitBody(issue, options.bodies) ? omitIssueBody(issue) : issue;
   });

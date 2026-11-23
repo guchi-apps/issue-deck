@@ -177,16 +177,16 @@ export type PreviewRejection =
 export function describePreviewRejection(reason: PreviewRejection): string {
   switch (reason) {
     case "host_unknown":
-      return "サブPCの申告がまだ届いていません。";
+      return "DeskMiniの申告がまだ届いていません。";
     case "host_offline":
-      return "サブPCが応答していません（pollerが動いているか確認してください）。";
+      return "DeskMiniが応答していません（pollerが動いているか確認してください）。";
     case "preview_unsupported":
       // **押す場所まで書く**（#2455）。「更新して再起動」はこの画面には無く、実行キュー
       // （PCはトップバー右のアイコン／スマホはヘッダーの「実行状況」）を開いた先の
       // サブPCのカードにしか出ない。ボタン名だけでは探す場所が分からない
-      return "サブPCのpollerが確認環境に対応していません。実行キュー（スマホはヘッダーの「実行状況」）を開き、サブPCのカードにある「更新して再起動」を押してください。";
+      return "DeskMiniのpollerが確認環境に対応していません。実行キュー（スマホはヘッダーの「実行状況」）を開き、DeskMiniのカードにある「更新して再起動」を押してください。";
     case "repository_unavailable":
-      return "このリポジトリはサブPCから起動できません（チェックアウトが登録されていません）。";
+      return "このリポジトリはDeskMiniから起動できません（チェックアウトが登録されていません）。";
     case "no_dev_server":
       return "開発サーバーがありません";
     case "already_queued":

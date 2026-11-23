@@ -566,7 +566,7 @@ describe("time-dependent stats", () => {
       ]);
     });
 
-    it("サブPCへ積んだ未完了ジョブがあるIssueは、進捗がReadyでもnot-startedではなくin-progressに出る（#1347）", () => {
+    it("DeskMiniへ積んだ未完了ジョブがあるIssueは、進捗がReadyでもnot-startedではなくin-progressに出る（#1347）", () => {
       const dispatchPendingAt = "2026-01-09T00:00:00.000Z";
       const issues = [
         makeIssue({ id: "1", dispatchPendingAt }),

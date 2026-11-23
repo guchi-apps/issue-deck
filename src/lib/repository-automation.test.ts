@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isRepositoryAutomationUnsupported } from "@/lib/repository-automation";
 
 describe("isRepositoryAutomationUnsupported", () => {
-  it("無人実行もサブPCも対応していないリポジトリだけ印を出す", () => {
+  it("無人実行もDeskMiniも対応していないリポジトリだけ印を出す", () => {
     expect(
       isRepositoryAutomationUnsupported({ hasClaudeWorkflow: false, dispatchRunnable: false }),
     ).toBe(true);
@@ -15,7 +15,7 @@ describe("isRepositoryAutomationUnsupported", () => {
     ).toBe(true);
   });
 
-  it("無人実行が無くてもサブPCで起動できると申告されていれば印を出さない（#1888。vps・subpc・docs）", () => {
+  it("無人実行が無くてもDeskMiniで起動できると申告されていれば印を出さない（#1888。vps・subpc・docs）", () => {
     expect(
       isRepositoryAutomationUnsupported({ hasClaudeWorkflow: false, dispatchRunnable: true }),
     ).toBe(false);

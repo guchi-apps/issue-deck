@@ -727,7 +727,7 @@ function AiReviewSection({
           label: describeReviewStageLabel(stage),
           detail:
             stage.kind === "awaiting_integration"
-              ? "統合検証が終わると、その証跡を持つサブPCで全体レビューを開始します"
+              ? "統合検証が終わると、その証跡を持つDeskMiniで全体レビューを開始します"
               : stage.kind === "integration_waiting"
                 ? "全体レビューの最終確認は未完了です"
                 : "統合検証の結果に依存する項目だけを自動で再評価しています",
@@ -1186,7 +1186,7 @@ function ReviewContractPanel({
       </div>
       {review.legacy && (
         <p className="text-amber-700 dark:text-amber-400">
-          項目別の確認記録がありません（旧ランナーの結果）。サブPCのpollerを更新して再実行すると、確認項目ごとの結果が残ります。
+          項目別の確認記録がありません（旧ランナーの結果）。DeskMiniのpollerを更新して再実行すると、確認項目ごとの結果が残ります。
         </p>
       )}
       {review.fullReviewReason && <p className="text-muted-foreground">対象全体を確認: {review.fullReviewReason}</p>}

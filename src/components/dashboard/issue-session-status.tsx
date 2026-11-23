@@ -327,7 +327,7 @@ export function IssueSessionStatus({
         align === "responsive" && "md:flex-row md:flex-wrap md:items-center md:gap-x-3",
       )}
     >
-      {/* 畳んだ1行（#1676）。起動ジョブの行（「サブPCで起動しました」）はここへ畳んでいる。
+      {/* 畳んだ1行（#1676）。起動ジョブの行（「DeskMiniで起動しました」）はここへ畳んでいる。
           文言は`compactIssueSessionLabel`＝ホスト名＋短い言い方で、起動時刻は展開側に添える */}
       <div
         className={cn(
@@ -375,7 +375,7 @@ export function IssueSessionStatus({
             {modelLabel}
           </span>
         )}
-        {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「サブPC・応答を
+        {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「DeskMini・応答を
             終えています・あと3分」と1つのピルに詰まり、状態と予定のどちらが今の話なのか
             読み取れない。配色は入力待ち（waiting）と同じ琥珀色で、**押す操作は無い** */}
         {reapNotice && (

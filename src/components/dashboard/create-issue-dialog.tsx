@@ -1067,7 +1067,7 @@ export function CreateIssueDialog({
         {isSubmitting ? "作成中..." : "作成"}
       </Button>
       {/* Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
-          実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
+          実行先の選択がこの先のダイアログにある以上、押せないとDeskMiniでの起動まで塞がる。
           理由はダイアログのGitHub Actionsの選択肢の説明として出す。
           タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
       <Button
@@ -1128,7 +1128,7 @@ export function CreateIssueDialog({
           </DialogContent>
         </Dialog>
       )}
-      {/* 作成直後のオプション・実行先の選択（#1323・#1580）。実行先の既定はサブPCで、
+      {/* 作成直後のオプション・実行先の選択（#1323・#1580）。実行先の既定はDeskMiniで、
           GitHub Actionsはフォールバック。作成フォームは閉じているため、Dialogの外側に並べて描画する */}
       {startTargetIssue && (
         <StartImplementationDialog

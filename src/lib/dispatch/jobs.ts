@@ -1,5 +1,6 @@
 import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import {
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
@@ -282,6 +283,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
     manualStepSessionCapable: host.manualStepSessionCapable,
+    priority: host.priority,
     reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
     releaseVerifyCapable: host.releaseVerifyCapable,
@@ -722,6 +724,100 @@ export function modelPickRecordColumns(record: ModelPickRecord | null | undefine
   };
 }
 
+type LaunchTargetHost = NonNullable<Awaited<ReturnType<typeof db.dispatchHost.findUnique>>>;
+
+export type LaunchTargetCheck =
+  | { ok: true; host: LaunchTargetHost }
+  | { ok: false; rejection: DispatchEnqueueRejection; message: string };
+
+/**
+ * 起動ジョブをそのホストへ置いてよいかの判定（積む時と、順番待ちを別ホストへ移す時で共通。#5589）。
+ *
+ * **2か所に別々に書くと、文言や条件が将来ずれる**ため`enqueueDispatchJob`から切り出した。
+ * `skipAliveSessionCheck`は引き継ぎ起動（`handoffFrom`）のように、生きているセッションを
+ * 承知で積む場合に立てる。
+ */
+async function checkLaunchTarget(params: {
+  hostName: string;
+  repositoryFullName: string;
+  issueNumber: number;
+  agent: DispatchAgent;
+  skipAliveSessionCheck: boolean;
+  now: Date;
+}): Promise<LaunchTargetCheck> {
+  const { now, agent } = params;
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  // そのエージェントの新規実行が一時停止されていないか（#2994）。**先に読んでおき、
+  // `reject`のメッセージ組み立てにも使う。** 画面の先出し判定（`resolveDispatchTargetRejection`）
+  // と同じ位置（ホストの生存・エージェント対応の直後、未完了ジョブ・生きているセッションの
+  // 判定より前）で弾く。一括投入は先出し判定を通してからオプションの
+  // ラベルを書くため、ここで弾かないと一時停止中の一括投入でラベルだけが書かれてジョブが
+  // 1件も積まれない
+  const agentPauseState = await readAgentDispatchPauseState();
+  const agentPauseReason = agentPauseState[agent];
+  const reject = (
+    rejection: DispatchEnqueueRejection,
+    session?: Pick<DispatchSessionView, "host" | "tmuxSessionName">,
+  ): LaunchTargetCheck => ({
+    ok: false,
+    rejection,
+    message: describeDispatchEnqueueRejection(rejection, {
+      hostName: params.hostName,
+      repositoryFullName: params.repositoryFullName,
+      session,
+      agentPauseReason,
+    }),
+  });
+
+  if (!host) return reject("host_unknown");
+  if (!isDispatchHostOnline(host.lastSeenAt, now)) return reject("host_offline");
+  if (!parseDispatchHostRepositories(host.repositories).includes(params.repositoryFullName)) {
+    return reject("repository_not_runnable");
+  }
+
+  // 既定以外のエージェント（#2505）は、対応を申告しているホストにしか配らない。
+  // **理由の文言は画面と同じ関数から取る**（`resolveDispatchAgentRejection`）。ここは
+  // ホストの行を持っているので`toHostView`を通さず、判定に要る2つだけを渡す
+  const agentRejection = resolveDispatchAgentRejection(
+    { name: host.name, codexCapable: host.codexCapable } as DispatchHostView,
+    agent,
+  );
+  if (agentRejection) {
+    return { ok: false, rejection: "agent_not_capable", message: agentRejection };
+  }
+
+  if (agentPauseReason) return reject("agent_paused");
+
+  // 既に動いているセッションがあれば積ませない（#1311）。**画面側の`findBlockingSession`と
+  // 同じ判定をここでも行う。** 一括投入（`bulk-dispatch-bar.tsx`）は個々のIssueの判定を
+  // API側へ委ねているため、画面だけに置くとそちらが素通りする。
+  //
+  // 判定の材料がDBの行かビューかの違いだけで、中身は`findBlockingSession`と揃えている
+  // （`ALIVE`に限る・所属ホストが応答している場合だけ止める・ホストは問わない）。ホストの
+  // 生存判定を`host.online`ではなく`isDispatchHostOnline`で行うのは、上のhost_offlineの
+  // 判定と同じ理由（サーバー側は生の`lastSeenAt`を持っている）。
+  const aliveSession = await db.dispatchSession.findFirst({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      state: "ALIVE",
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+  if (aliveSession && !params.skipAliveSessionCheck) {
+    // 別ホストで動いている場合もあるため、積み先のホストではなくセッションの所属ホストを見る
+    const sessionHost =
+      aliveSession.host === host.name
+        ? host
+        : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } });
+    if (sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)) {
+      return reject("session_alive", aliveSession);
+    }
+  }
+
+  return { ok: true, host };
+}
+
 export type EnqueueDispatchJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: DispatchEnqueueRejection; message: string };
@@ -783,75 +879,16 @@ export async function enqueueDispatchJob(params: {
   const now = params.now ?? new Date();
   await expireStaleDispatchJobs(now);
 
-  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
   const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
-  // そのエージェントの新規実行が一時停止されていないか（#2994）。**先に読んでおき、
-  // `reject`のメッセージ組み立てにも使う。** 画面の先出し判定（`resolveDispatchTargetRejection`）
-  // と同じ位置（ホストの生存・エージェント対応の直後、未完了ジョブ・生きているセッションの
-  // 判定より前）で弾く。一括投入は先出し判定を通してからオプションの
-  // ラベルを書くため、ここで弾かないと一時停止中の一括投入でラベルだけが書かれてジョブが
-  // 1件も積まれない
-  const agentPauseState = await readAgentDispatchPauseState();
-  const agentPauseReason = agentPauseState[agent];
-  const reject = (
-    rejection: DispatchEnqueueRejection,
-    session?: Pick<DispatchSessionView, "host" | "tmuxSessionName">,
-  ): EnqueueDispatchJobResult => ({
-    ok: false,
-    rejection,
-    message: describeDispatchEnqueueRejection(rejection, {
-      hostName: params.hostName,
-      repositoryFullName: params.repositoryFullName,
-      session,
-      agentPauseReason,
-    }),
-  });
-
-  if (!host) return reject("host_unknown");
-  if (!isDispatchHostOnline(host.lastSeenAt, now)) return reject("host_offline");
-  if (!parseDispatchHostRepositories(host.repositories).includes(params.repositoryFullName)) {
-    return reject("repository_not_runnable");
-  }
-
-  // 既定以外のエージェント（#2505）は、対応を申告しているホストにしか配らない。
-  // **理由の文言は画面と同じ関数から取る**（`resolveDispatchAgentRejection`）。ここは
-  // ホストの行を持っているので`toHostView`を通さず、判定に要る2つだけを渡す
-  const agentRejection = resolveDispatchAgentRejection(
-    { name: host.name, codexCapable: host.codexCapable } as DispatchHostView,
+  const target = await checkLaunchTarget({
+    hostName: params.hostName,
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
     agent,
-  );
-  if (agentRejection) {
-    return { ok: false, rejection: "agent_not_capable", message: agentRejection };
-  }
-
-  if (agentPauseReason) return reject("agent_paused");
-
-  // 既に動いているセッションがあれば積ませない（#1311）。**画面側の`findBlockingSession`と
-  // 同じ判定をここでも行う。** 一括投入（`bulk-dispatch-bar.tsx`）は個々のIssueの判定を
-  // API側へ委ねているため、画面だけに置くとそちらが素通りする。
-  //
-  // 判定の材料がDBの行かビューかの違いだけで、中身は`findBlockingSession`と揃えている
-  // （`ALIVE`に限る・所属ホストが応答している場合だけ止める・ホストは問わない）。ホストの
-  // 生存判定を`host.online`ではなく`isDispatchHostOnline`で行うのは、上のhost_offlineの
-  // 判定と同じ理由（サーバー側は生の`lastSeenAt`を持っている）。
-  const aliveSession = await db.dispatchSession.findFirst({
-    where: {
-      repositoryFullName: params.repositoryFullName,
-      issueNumber: params.issueNumber,
-      state: "ALIVE",
-    },
-    orderBy: { lastReportedAt: "desc" },
+    skipAliveSessionCheck: Boolean(params.handoffFrom),
+    now,
   });
-  if (aliveSession && !params.handoffFrom) {
-    // 別ホストで動いている場合もあるため、積み先のホストではなくセッションの所属ホストを見る
-    const sessionHost =
-      aliveSession.host === host.name
-        ? host
-        : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } });
-    if (sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)) {
-      return reject("session_alive", aliveSession);
-    }
-  }
+  if (!target.ok) return target;
 
   // 高優先度ラベルが付いたIssueは、通常の順番待ち（既定値0）より先に流す。手動の
   // 「先頭へ上げる」は現在の最大値+1を入れるため、既に人が先頭へ上げたジョブを追い越さない。
@@ -888,7 +925,14 @@ export async function enqueueDispatchJob(params: {
   } catch {
     // activeKeyのunique制約違反＝同じIssueの未完了ジョブが既にある。二重クリックの競合を
     // 含めてここで確実に止まる（アプリ側の存在チェックだけでは競合をすり抜ける）
-    return reject("already_queued");
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: describeDispatchEnqueueRejection("already_queued", {
+        hostName: params.hostName,
+        repositoryFullName: params.repositoryFullName,
+      }),
+    };
   }
 }
 
@@ -1189,7 +1233,7 @@ export async function enqueueCodeReviewRerun(params: {
   now?: Date;
 }): Promise<EnqueueCodeReviewRerunResult> {
   const now = params.now ?? new Date();
-  const hosts = await db.dispatchHost.findMany({ orderBy: { name: "asc" } });
+  const hosts = sortDispatchHosts(await db.dispatchHost.findMany({ orderBy: { name: "asc" } }));
   const hostName = resolveDefaultCodeReviewHost(
     hosts.map((host) => toHostView(host, now)),
     params.repositoryFullName,
@@ -2313,6 +2357,106 @@ export async function prioritizeDispatchJob(params: {
   return updated ? { ok: true, job: toJobView(updated) } : { ok: false, reason: "not_found" };
 }
 
+export type ReassignDispatchJobResult =
+  | { ok: true; job: DispatchJobView }
+  | {
+      ok: false;
+      reason: "not_found" | "not_reassignable" | "target_rejected";
+      message: string;
+    };
+
+/**
+ * 順番待ちの起動ジョブを、別のホストへ移す（#5589）。
+ *
+ * **人が押す1回の操作で、自動では移さない。** 片方のホストが逼迫・停止していて順番待ちが
+ * 進まないときに、もう一方のホストで実行できるようにするためのもの。払い出し
+ * （`claimDispatchJobs`）は`targetHost`が自分のジョブだけを取るので、`targetHost`を書き換える
+ * だけで移せる。
+ *
+ * **移せるのは`LAUNCH`（`handoffFrom`なし）の`QUEUED`だけ。** コードレビュー・手作業・レビュー
+ * 修正は移し先の申告（`*Capable`）が別に要り、引き継ぎ起動は元セッションのあるホストの
+ * tmuxから要約を書き出す作りで、別ホストでは元セッションが見つからない。
+ * 移し先の可否は積む時と同じ判定（`checkLaunchTarget`）で確かめる。
+ */
+export async function reassignDispatchJob(params: {
+  jobId: string;
+  /** 操作している利用者。ジョブのリポジトリが利用者のinstallationに属さなければ`not_found`で返す（認可の境界） */
+  userId: string;
+  toHostName: string;
+  now?: Date;
+}): Promise<ReassignDispatchJobResult> {
+  const now = params.now ?? new Date();
+  const job = await db.dispatchJob.findUnique({ where: { id: params.jobId } });
+  if (!job) return { ok: false, reason: "not_found", message: "ジョブが見つかりません。" };
+
+  // 他の利用者のリポジトリのジョブは、存在も明かさず`not_found`で返す
+  const authorized = await db.repository.findFirst({
+    where: {
+      fullName: job.repositoryFullName,
+      installation: { userInstallations: { some: { userId: params.userId } } },
+    },
+    select: { id: true },
+  });
+  if (!authorized) return { ok: false, reason: "not_found", message: "ジョブが見つかりません。" };
+
+  if (job.status !== "QUEUED") {
+    return {
+      ok: false,
+      reason: "not_reassignable",
+      message: "順番待ちのジョブだけを移せます。",
+    };
+  }
+  if (job.kind !== "LAUNCH") {
+    return {
+      ok: false,
+      reason: "not_reassignable",
+      message: "この種別のジョブは別のホストへ移せません。",
+    };
+  }
+  if (job.handoffFrom) {
+    return {
+      ok: false,
+      reason: "not_reassignable",
+      message: "別のAIへの引き継ぎ起動は、元のセッションがあるホストでしか実行できません。",
+    };
+  }
+  if (job.targetHost === params.toHostName) {
+    return { ok: false, reason: "not_reassignable", message: "すでにそのホストの順番待ちです。" };
+  }
+
+  const check = await checkLaunchTarget({
+    hostName: params.toHostName,
+    repositoryFullName: job.repositoryFullName,
+    issueNumber: job.issueNumber,
+    agent: readDispatchAgent(job.agent),
+    // 移すジョブ自身は積み済みで、生きているセッションの有無は積んだ時に確かめている
+    skipAliveSessionCheck: true,
+    now,
+  });
+  if (!check.ok) {
+    return { ok: false, reason: "target_rejected", message: check.message };
+  }
+
+  // `QUEUED`のままであることと元のホストを条件にして競合（払い出し・取り消し）を避ける。
+  // 順番は移し先の末尾（優先度は引き継がず既定へ戻す）にする
+  const result = await db.dispatchJob.updateMany({
+    where: { id: job.id, status: "QUEUED", targetHost: job.targetHost },
+    data: { targetHost: params.toHostName, queuePriority: 0 },
+  });
+  if (result.count === 0) {
+    return {
+      ok: false,
+      reason: "not_reassignable",
+      message: "このジョブはすでに実行が始まったか、取り消されています。",
+    };
+  }
+
+  const updated = await db.dispatchJob.findUnique({ where: { id: job.id } });
+  if (!updated) return { ok: false, reason: "not_found", message: "ジョブが見つかりません。" };
+  notifyDispatchHostWake(updated.targetHost);
+  return { ok: true, job: toJobView(updated) };
+}
+
 export type DismissDispatchJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; reason: "not_found" | "not_dismissable"; message?: string };
@@ -2459,7 +2603,7 @@ export async function listDispatchState(
   // （#2994）も同じ理由でここへ足す
   const [hosts, jobs, sessions, planRequests, questionRequests, concurrency, agentPause] =
     await Promise.all([
-      db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
+      db.dispatchHost.findMany({ orderBy: { name: "asc" } }).then(sortDispatchHosts),
       db.dispatchJob.findMany({
         where: {
           // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、
@@ -2577,6 +2721,8 @@ export async function announceDispatchHost(params: {
   codexRemoteControlCapable: boolean | null;
   /** 手作業セッション（#2771）を起こせるか。申告していないpollerでは`null`＝非対応 */
   manualStepSessionCapable: boolean | null;
+  /** 手作業の担当ホストの優先順（#5568）。未申告は`null`／未定義 */
+  priority?: number | null;
   /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
@@ -2655,6 +2801,7 @@ export async function announceDispatchHost(params: {
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,
     manualStepSessionCapable: params.manualStepSessionCapable,
+    priority: params.priority ?? null,
     reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
     releaseVerifyCapable: params.releaseVerifyCapable ?? null,

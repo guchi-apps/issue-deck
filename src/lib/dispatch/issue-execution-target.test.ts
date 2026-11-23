@@ -171,7 +171,7 @@ describe("resolveIssueExecutionTarget", () => {
 
 describe("describeIssueExecutionTarget", () => {
   it("ホスト名が分かればそれを出す（表記は日本語に直す・#1416）", () => {
-    expect(describeIssueExecutionTarget({ host: "subpc", expectsActionsRun: false })).toBe("サブPC");
+    expect(describeIssueExecutionTarget({ host: "subpc", expectsActionsRun: false })).toBe("DeskMini");
   });
 
   it("対応表に無いホストはそのまま出す", () => {

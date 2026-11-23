@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, ArrowUp, Loader2, X } from "lucide-react";
+import { useState } from "react";
 
 import { AgentBulkControlPanel } from "@/components/dashboard/agent-bulk-control-panel";
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
@@ -17,10 +18,14 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
+  describeDispatchJobWaitReason,
+  resolveJobReassignOptions,
+  type JobReassignOptions,
+  selectHostQueuedJobs,
+  selectQueuedJobsWithoutHost,
   cancelableDispatchJobs,
   countDispatchQueueBadge,
   describeDispatchQueueLoad,
-  describeDispatchQueueStall,
   describeDispatchSessionLoad,
   summarizeDispatchQueue,
   type DispatchQueueSummary,
@@ -92,7 +97,7 @@ export function DispatchQueueContent({
   pinTop?: boolean;
 }) {
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
-  const stall = describeDispatchQueueStall(summary, dispatch.hosts);
+  const orphanQueued = selectQueuedJobsWithoutHost(summary.queued, dispatch.hosts);
   const cancelable = cancelableDispatchJobs(summary);
 
   async function cancelAll() {
@@ -149,15 +154,51 @@ export function DispatchQueueContent({
         }
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
         onRequestReboot={dispatch.requestReboot}
+        renderHostQueue={(host) => {
+          const queued = selectHostQueuedJobs(summary.queued, host.name);
+          if (queued.length === 0) return null;
+          // 進まない理由はそのホストのカードの中へ出す（#5589。どのホストの話か分かる）
+          const reason = describeDispatchJobWaitReason(queued[0], dispatch.hosts);
+          return (
+            <div className="mt-2 border-t border-dashed pt-1">
+              {!host.online && (
+                <p className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">
+                    {formatDispatchHostName(host.name)}が応答していないため、順番待ちは進みません。
+                    もう一方のホストへ移せます。
+                  </span>
+                </p>
+              )}
+              {reason && (
+                <p className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">{reason}</span>
+                </p>
+              )}
+              <QueueSection
+                title="順番待ち"
+                count={queued.length}
+                jobs={queued}
+                onCancel={dispatch.cancel}
+                onPrioritize={dispatch.prioritize}
+                onOpenIssue={onOpenIssue}
+                renderRowAction={(job) => (
+                  <ReassignButton
+                    job={job}
+                    options={resolveJobReassignOptions(job, dispatch.hosts)}
+                    disabled={dispatch.isSubmitting}
+                    onReassign={dispatch.reassign}
+                  />
+                )}
+                showOrder
+                showModel
+                nested
+              />
+            </div>
+          );
+        }}
       />
-
-      {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}
-      {stall && (
-        <p className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{stall}</span>
-        </p>
-      )}
 
       {summary.activeCount === 0 &&
         summary.planReviews.length === 0 &&
@@ -179,7 +220,7 @@ export function DispatchQueueContent({
       />
       <QueueSection
         title="順番待ち"
-        jobs={summary.queued}
+        jobs={orphanQueued}
         onCancel={dispatch.cancel}
         onPrioritize={dispatch.prioritize}
         onOpenIssue={onOpenIssue}
@@ -251,7 +292,7 @@ export function DispatchQueueContent({
       */}
       <ModelDotLegend className="mt-3 border-t pt-2" />
       <p className="mt-2 text-[11px] text-muted-foreground">
-        このキューはサブPCのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
+        このキューはDeskMiniのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
       </p>
 
       {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}
@@ -376,8 +417,13 @@ function QueueSection({
   onOpenIssue,
   showOrder = false,
   showModel = false,
+  renderRowAction = null,
+  nested = false,
+  count = null,
 }: {
   title: string;
+  /** 見出しの横に出す件数（ホストカード内の順番待ち。#5589） */
+  count?: number | null;
   /** 節の見出しの下に出す補足（#1519）。「送信中の操作」が枠を使わないことの説明に使う */
   note?: string | null;
   jobs: DispatchJobView[];
@@ -410,12 +456,19 @@ function QueueSection({
    * 送信中の操作・失敗はどのモデルで立つかを見る場面ではない
    */
   showModel?: boolean;
+  /** 行の操作ボタンの手前へ差し込む操作（順番待ちの「別のホストへ移す」。#5589） */
+  renderRowAction?: ((job: DispatchJobView) => React.ReactNode) | null;
+  /** ホストカードの中に置く（上の余白を詰める。#5589） */
+  nested?: boolean;
 }) {
   if (jobs.length === 0) return null;
 
   return (
-    <div className="mt-3">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
+    <div className={nested ? "mt-2" : "mt-3"}>
+      <p className="text-xs font-medium text-muted-foreground">
+        {title}
+        {count !== null && <span className="ml-1 text-amber-700 dark:text-amber-400">{count}件</span>}
+      </p>
       {note && <p className="text-[11px] text-muted-foreground/80">{note}</p>}
       <ul className="mt-1 flex flex-col gap-1">
         {jobs.map((job, index) => {
@@ -486,6 +539,7 @@ function QueueSection({
                   </span>
                 )}
               </span>
+              {renderRowAction?.(job)}
               {onPrioritize && index > 0 && (
                 <button
                   type="button"
@@ -523,5 +577,52 @@ function QueueSection({
         })}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 順番待ちの起動ジョブを別のホストへ移すボタン（#5589）。**押すのは人で、自動では移さない。**
+ * 移せない行（起動以外・引き継ぎ起動）には出さない。移し先が使えないときは押せない状態にして
+ * 理由をツールチップへ出し、押した結果の失敗は行のそばへ本文で出す。
+ */
+function ReassignButton({
+  job,
+  options,
+  disabled,
+  onReassign,
+}: {
+  job: DispatchJobView;
+  options: JobReassignOptions;
+  disabled: boolean;
+  onReassign: (
+    jobId: string,
+    toHostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  if (options.blockedReason !== null || options.targets.length === 0) return null;
+
+  return (
+    <span className="flex shrink-0 flex-col items-end gap-0.5">
+      {options.targets.map((target) => (
+        <button
+          key={target.hostName}
+          type="button"
+          disabled={disabled || target.blockedReason !== null}
+          aria-label={`#${job.issueNumber}のジョブを${target.label}へ移す`}
+          title={target.blockedReason ?? `${target.label}の順番待ちへ移します`}
+          className="mt-0.5 flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          onClick={async () => {
+            setError(null);
+            const result = await onReassign(job.id, target.hostName);
+            if (!result.ok) setError(result.message);
+          }}
+        >
+          <ArrowRightLeft className="size-3" />
+          {target.label}へ移す
+        </button>
+      ))}
+      {error && <span className="max-w-[12rem] text-right text-[11px] text-destructive">{error}</span>}
+    </span>
   );
 }

@@ -89,7 +89,7 @@ const REPOSITORY = "guchi-apps/issue-deck";
 const BODY = [
   "## 前提条件", // 1
   "", // 2
-  "- 実行するデバイス: **サブPC**（`ssh subpc`）", // 3
+  "- 実行するデバイス: **DeskMini**（`ssh subpc`）", // 3
   "", // 4
   "## やること", // 5
   "", // 6
@@ -189,6 +189,22 @@ describe("runManualStepVerificationPatrol", () => {
     // `## やること`の手順（10行目のrestart）は積まない
     expect(enqueueManualStepJob).not.toHaveBeenCalledWith(
       expect.objectContaining({ stepLine: 7 }),
+    );
+  });
+
+  it("VPSの確認コマンドは、優先順2位以下でもVPS対応のオンラインホストへ積む（#5586）", async () => {
+    issueFindMany.mockResolvedValue([
+      issueRow({ body: BODY.replace("**DeskMini**（`ssh subpc`）", "VPS") }),
+    ]);
+    dispatchHostFindMany.mockResolvedValue([
+      { name: "subpc", manualStepCapable: true, manualStepVpsCapable: null, lastSeenAt: NOW },
+      { name: "macmini", manualStepCapable: true, manualStepVpsCapable: true, lastSeenAt: NOW },
+    ]);
+
+    await patrol.runManualStepVerificationPatrol(NOW);
+
+    expect(enqueueManualStepJob).toHaveBeenCalledWith(
+      expect.objectContaining({ hostName: "macmini" }),
     );
   });
 

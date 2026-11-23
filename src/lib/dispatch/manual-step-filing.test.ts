@@ -10,13 +10,13 @@ const validBody = [
   "- 検証DBで画面を確認できる。実行するまでは確認できない。",
   "",
   "## 前提条件",
-  "- 実行するデバイス: サブPC",
+  "- 実行するデバイス: DeskMini",
   "- カレントディレクトリ: ~/apps/asset-manager",
   "- Gitブランチ: develop",
   "- 先に完了している必要があるIssue・PR: guchi-apps/asset-manager#699",
   "",
   "## やること",
-  "- [ ] （サブPC）DBを作る",
+  "- [ ] （DeskMini）DBを作る",
   "  ```bash",
   "  cd ~/apps/asset-manager && echo create-db",
   "  ```",
@@ -33,7 +33,7 @@ const validBody = [
   "- 起点Issue: guchi-apps/asset-manager#698",
 ].join("\n");
 
-const base = { key: "create-verify-db", targetRepository: "guchi-apps/asset-manager", title: "[手作業] サブPC: 検証DBを作る", body: validBody };
+const base = { key: "create-verify-db", targetRepository: "guchi-apps/asset-manager", title: "[手作業] DeskMini: 検証DBを作る", body: validBody };
 
 describe("parseManualStepRequests", () => {
   it("空・件数超過・不正なkeyを拒否する", () => {

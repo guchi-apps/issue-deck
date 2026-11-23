@@ -504,10 +504,13 @@ function FindingItem({
   onChangeSkipped: (value: boolean) => void;
   onChangeReason: (value: string) => void;
 }) {
-  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const reasonId = `plan-review-skip-reason-${finding.number}`;
   // 3項目が1つも読めなかった指摘は、見出しの下の文章をそのまま本文として出す
   const hasFields = finding.problem !== null || finding.proposal !== null || finding.evidence !== null;
+  const summaryText = buildFindingSummary(finding);
+  // 根拠が無く、要約が短く全文と変わらないときは、開く意味が無いので詳細ボタンを出さない
+  const hasDetail = finding.evidence !== null || summaryText.length > SUMMARY_SHORT_LIMIT || hasMarkdownStructure(finding);
 
   return (
     <li className="flex flex-col gap-1.5 px-3 py-2.5">
@@ -561,34 +564,42 @@ function FindingItem({
       </div>
 
       <div className="flex flex-col gap-1 pl-5 text-xs">
-        {finding.problem && <FindingField label="指摘" content={finding.problem} repositoryFullName={repositoryFullName} />}
-        {finding.proposal && <FindingField label="提案" content={finding.proposal} repositoryFullName={repositoryFullName} />}
-        {!hasFields && finding.rest && (
-          <MarkdownBody content={finding.rest} className="text-xs" repositoryFullName={repositoryFullName} />
+        {/* 閉じている間は、指摘と提案をつないだ要約だけを最大3行で出す。開くと従来の指摘・提案・根拠を出す */}
+        {!isDetailOpen && summaryText !== "" && (
+          <p className="line-clamp-3 text-muted-foreground" data-testid={`finding-summary-${finding.number}`}>
+            {summaryText}
+          </p>
         )}
-        {finding.evidence && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setIsEvidenceOpen((prev) => !prev)}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-              aria-expanded={isEvidenceOpen}
-            >
-              {isEvidenceOpen ? (
-                <ChevronDown aria-hidden className="size-3" />
-              ) : (
-                <ChevronRight aria-hidden className="size-3" />
-              )}
-              根拠
-            </button>
-            {isEvidenceOpen && (
-              <MarkdownBody
+        {isDetailOpen && (
+          <>
+            {finding.problem && <FindingField label="指摘" content={finding.problem} repositoryFullName={repositoryFullName} />}
+            {finding.proposal && <FindingField label="提案" content={finding.proposal} repositoryFullName={repositoryFullName} />}
+            {!hasFields && finding.rest && (
+              <MarkdownBody content={finding.rest} className="text-xs" repositoryFullName={repositoryFullName} />
+            )}
+            {finding.evidence && (
+              <FindingField
+                label="根拠"
                 content={finding.evidence}
-                className="mt-1 text-xs text-muted-foreground"
                 repositoryFullName={repositoryFullName}
               />
             )}
-          </div>
+          </>
+        )}
+        {hasDetail && (
+          <button
+            type="button"
+            onClick={() => setIsDetailOpen((prev) => !prev)}
+            className="flex w-fit items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            aria-expanded={isDetailOpen}
+          >
+            {isDetailOpen ? (
+              <ChevronDown aria-hidden className="size-3" />
+            ) : (
+              <ChevronRight aria-hidden className="size-3" />
+            )}
+            {isDetailOpen ? "詳細を閉じる" : "詳細を開く"}
+          </button>
         )}
         {skipped && (
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
@@ -608,6 +619,36 @@ function FindingItem({
       </div>
     </li>
   );
+}
+
+/** これ以下の文字数なら3行に収まるとみなし、根拠も無ければ詳細ボタンを出さない */
+const SUMMARY_SHORT_LIMIT = 80;
+
+/** 指摘と提案（無ければ本文）をつないだ、Markdown記号を除いた1段落の要約文（#5579） */
+export function buildFindingSummary(finding: PlanReviewFinding): string {
+  const parts = finding.problem !== null || finding.proposal !== null
+    ? [finding.problem, finding.proposal]
+    : [finding.rest];
+  return parts
+    .filter((part): part is string => Boolean(part))
+    .map(toPlainText)
+    .filter((part) => part !== "")
+    .join(" ");
+}
+
+function toPlainText(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/[`*_>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 箇条書き・コードブロック・複数段落は要約で崩れるので、開いて読めるようにする */
+function hasMarkdownStructure(finding: PlanReviewFinding): boolean {
+  return [finding.problem, finding.proposal, finding.rest].some((text) => text !== null && /\n|```/.test(text.trim()));
 }
 
 /**

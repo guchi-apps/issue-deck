@@ -137,6 +137,8 @@ export function DispatchHostPanel({
   onRequestReboot,
   compact = false,
   onOpenDetail,
+  renderHostQueue,
+  queuedCounts,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
@@ -204,6 +206,14 @@ export function DispatchHostPanel({
    * ボタンを持っており、ボタンで包むとその中にボタンが入る。
    */
   onOpenDetail?: () => void;
+  /**
+   * そのホストの順番待ちをカードの下側へ差し込む（#5589）。どのホストで待っているかが分かるよう、
+   * 全ホスト共通の枠ではなくカードの中に置く。渡さなければ出さない。`compact`では使わない
+   * （件数だけを`queuedCount`で出す）。
+   */
+  renderHostQueue?: (host: DispatchHostView) => React.ReactNode;
+  /** `compact`のカードに出す、ホスト別の順番待ち件数（#5589） */
+  queuedCounts?: Readonly<Record<string, number>>;
 }) {
   if (hosts.length === 0) return null;
 
@@ -226,6 +236,8 @@ export function DispatchHostPanel({
           onRequestReboot={onRequestReboot}
           compact={compact}
           onOpenDetail={onOpenDetail}
+          queueSlot={renderHostQueue?.(host) ?? null}
+          queuedCount={queuedCounts?.[host.name] ?? 0}
         />
       ))}
     </div>
@@ -247,8 +259,12 @@ function HostCard({
   onRequestReboot,
   compact,
   onOpenDetail,
+  queueSlot,
+  queuedCount,
 }: {
   host: DispatchHostView;
+  queueSlot: React.ReactNode;
+  queuedCount: number;
   sessions: DispatchSessionView[];
   remoteSessions: RemoteSessionView[];
   selfUpdateJob: DispatchJobView | null;
@@ -314,6 +330,7 @@ function HostCard({
         hasSessionCount={hasSessionCount}
         waitingCount={countWaitingSessions(sessions)}
         remoteCount={remoteSessions.length}
+        queuedCount={queuedCount}
         onOpenDetail={onOpenDetail}
       />
     );
@@ -420,6 +437,8 @@ function HostCard({
           onStopRemoteSession={onStopRemoteSession}
         />
       )}
+      {/* **最下段**（#5589）。順番待ちは「このホストで待っている」ものなので、カードの内側の下に置く */}
+      {queueSlot}
     </div>
   );
 }
@@ -730,9 +749,11 @@ function CompactHostCard({
   hasSessionCount,
   waitingCount,
   remoteCount,
+  queuedCount,
   onOpenDetail,
 }: {
   host: DispatchHostView;
+  queuedCount: number;
   metrics: DispatchHostMetricRow[] | null;
   checkout: DispatchHostCheckoutRow | null;
   launchHold: string | null;
@@ -755,6 +776,9 @@ function CompactHostCard({
               <span className="text-[11px] text-teal-700 dark:text-teal-400">
                 リモート {remoteCount}
               </span>
+            )}
+            {queuedCount > 0 && (
+              <span className="text-[11px] text-muted-foreground">順番待ち {queuedCount}</span>
             )}
             {waitingCount > 0 && (
               <span className="text-[11px] text-amber-700 dark:text-amber-400">
@@ -788,7 +812,7 @@ function CompactHostCard({
       )}
 
       {/* **縮めた版でも落とさない**（#2095）。ホームで「実行中」が増えないことに気付くのが
-          いちばん早く、そこに理由が無いと結局サブPCを見に行くことになる */}
+          いちばん早く、そこに理由が無いと結局DeskMiniを見に行くことになる */}
       {launchHold && <LaunchHoldRow message={launchHold} />}
     </>
   );
@@ -849,18 +873,29 @@ function LaunchHoldRow({ message }: { message: string }) {
  * - メモリ・SWAPの逼迫で起動を見送っている（#2095）: 使用率の下に1行増える。逼迫している
  *   間だけなので、遅れているときと同じく差ぶんだけ動くのを許す
  */
-export function CompactHostCardSkeleton() {
+export function CompactHostCardSkeleton({ count = 1 }: { count?: number }) {
+  // 実物（`DispatchHostPanel`）は複数枚を`flex flex-col gap-2`で積むので、同じ組み方にする
+  return (
+    <div className="flex flex-col gap-2">
+      {/* 中身のない飾りなので読み上げからは外し、代わりに状況を1行だけ渡す（枚数によらず1つ） */}
+      <span className="sr-only" role="status">
+        ホストの状態を読み込み中
+      </span>
+      {Array.from({ length: count }, (_, index) => (
+        <CompactHostCardSkeletonItem key={index} />
+      ))}
+    </div>
+  );
+}
+
+function CompactHostCardSkeletonItem() {
   return (
     <div className="rounded-md border p-2" data-testid="dispatch-host-skeleton">
-      {/* 中身のない飾りなので読み上げからは外し、代わりに状況を1行だけ渡す */}
-      <span className="sr-only" role="status">
-        サブPCの状態を読み込み中
-      </span>
       <div aria-hidden>
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex items-center gap-1.5 text-xs font-medium">
             <Skeleton className="size-1.5 shrink-0 rounded-full" />
-            <Skeleton className="rounded-sm text-transparent">サブPC</Skeleton>
+            <Skeleton className="rounded-sm text-transparent">DeskMini</Skeleton>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             <Skeleton className="rounded-sm text-[11px] text-transparent">セッション 0/0</Skeleton>

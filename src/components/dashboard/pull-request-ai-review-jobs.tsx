@@ -58,8 +58,8 @@ export function PullRequestAiReviewJobsView({
 }) {
   if (jobs.length === 0) return null;
   return (
-    <section aria-label="サブPCのAIレビュー" className="flex flex-col gap-1.5 border-b px-4 py-3">
-      <h2 className="text-xs font-semibold text-muted-foreground">サブPCのAIレビュー</h2>
+    <section aria-label="DeskMiniのAIレビュー" className="flex flex-col gap-1.5 border-b px-4 py-3">
+      <h2 className="text-xs font-semibold text-muted-foreground">DeskMiniのAIレビュー</h2>
       <ul className="flex flex-col gap-1.5">
         {jobs.map((job) => {
           const stale = isPrReviewJobStale(job, headSha);

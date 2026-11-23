@@ -941,6 +941,36 @@ export function useDispatchState(enabled: boolean) {
   }, [markChanged]);
 
   /**
+   * 順番待ちの起動ジョブを別のホストへ移す（#5589）。**押すのは人**で、自動では呼ばない。
+   *
+   * 失敗の理由は共有の`error`へ入れず戻り値で返す（押した行のそばへ出すため。
+   * `sendSessionControl`と同じ形）。成功したら取り直して、移った先の並びに反映する。
+   */
+  const reassign = useCallback(
+    async (
+      jobId: string,
+      toHostName: string,
+    ): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch(`/api/dispatch/${encodeURIComponent(jobId)}/reassign`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ toHostName }),
+        });
+        if (!res.ok) throw new Error(await readErrorMessage(res));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: clientErrorMessage(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * 計画への返事を送る（#2061）。**押すのは人**で、ここは押された内容をサーバーへ渡すだけ。
    * 端末へキーを送る経路は持たない（受け取るのは計画を出したフック）。
    *
@@ -1163,6 +1193,7 @@ export function useDispatchState(enabled: boolean) {
     cancel,
     dismiss,
     prioritize,
+    reassign,
     decidePlan,
     answerQuestion,
   };

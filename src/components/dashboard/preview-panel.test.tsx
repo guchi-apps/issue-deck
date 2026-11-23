@@ -62,7 +62,7 @@ describe("PreviewPanel の押せない理由（#2455）", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0].textContent).toContain("実行キュー");
     expect(notices[0].textContent).toContain("実行状況");
-    expect(notices[0].textContent).toContain("サブPCのカード");
+    expect(notices[0].textContent).toContain("DeskMiniのカード");
     expect(notices[0].textContent).toContain("「更新して再起動」");
     // 行そのものは消さない（どのリポジトリを起こせるはずなのかは見えたままにする）
     expect(screen.getByText("issue-deck")).not.toBeNull();
@@ -78,7 +78,7 @@ describe("PreviewPanel の押せない理由（#2455）", () => {
 
   it("応答していないホストも、理由をまとめて1回だけ出す", () => {
     render(<PreviewPanel hosts={[host({ online: false })]} jobs={[]} isLoaded />);
-    expect(screen.getAllByText(/サブPCが応答していません/)).toHaveLength(1);
+    expect(screen.getAllByText(/DeskMiniが応答していません/)).toHaveLength(1);
   });
 
   // 行ごとに違う理由（開発サーバーの有無）は従来どおり行に出す

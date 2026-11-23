@@ -2446,7 +2446,7 @@ describe("未着手のIssueの件数（readyIssueCount。#3163）", () => {
   });
 
   /** 押した直後はStatusがReadyのまま。数えると押したのに未着手が減らない（#1347） */
-  it("サブPCへ積んだ直後（dispatchPendingAt）のIssueは数えない", () => {
+  it("DeskMiniへ積んだ直後（dispatchPendingAt）のIssueは数えない", () => {
     expect(
       readyCount([
         issue({ number: 1, projectStatus: "Ready", dispatchPendingAt: "2026-09-20T00:00:00Z" }),

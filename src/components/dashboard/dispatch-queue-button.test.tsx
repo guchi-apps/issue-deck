@@ -446,7 +446,7 @@ describe("DispatchQueueButton のホスト表示", () => {
       tmuxSessionName: "issue-deck-issue-1567",
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1567,
-      issueTitle: "サブPC上のセッション表示",
+      issueTitle: "DeskMini上のセッション表示",
       issueId: null,
       state: "ALIVE",
       exitStatus: null,
@@ -495,10 +495,10 @@ describe("DispatchQueueButton のホスト表示", () => {
       [makeSession()],
     );
 
-    expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("DeskMini")).toBeTruthy();
     expect(screen.getByText("セッション 1/12")).toBeTruthy();
     expect(screen.getByText("34%")).toBeTruthy();
-    expect(screen.getByText("#1567 サブPC上のセッション表示")).toBeTruthy();
+    expect(screen.getByText("#1567 DeskMini上のセッション表示")).toBeTruthy();
   });
 
   // 同じ「実行」でも経路が別で、出ていないことを止まっていると読まれないようにする
@@ -603,5 +603,49 @@ describe("DispatchQueueButton の更新インジケーター（#1773）", () => 
     const button = screen.getByLabelText("実行キューを今すぐ更新");
     expect(button.textContent).toContain("2分前に更新");
     expect(button.className).toContain("text-amber-700");
+  });
+});
+
+describe("DispatchQueueButton の順番待ちのホスト別表示と移動（#5589）", () => {
+  it("順番待ちは待っているホストのカードの中に出て、もう一方のホストへ移せる", async () => {
+    const reassign = vi.fn().mockResolvedValue({ ok: true });
+    const dispatch = {
+      ...makeDispatch([
+        makeJob({ id: "job-1", issueNumber: 1701, status: "QUEUED", finishedAt: null }),
+      ]),
+      hosts: [makeHost({ name: "subpc" }), makeHost({ name: "macmini" })],
+      reassign,
+    } as unknown as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    // 外側ではなく、待っている`subpc`のカード（rounded-md border）の内側にある
+    const heading = screen.getByText("順番待ち");
+    expect(heading.closest(".rounded-md.border")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("#1701のジョブをMac miniへ移す"));
+    expect(reassign).toHaveBeenCalledWith("job-1", "macmini");
+  });
+
+  it("引き継ぎ起動の行には移すボタンを出さない", async () => {
+    const dispatch = {
+      ...makeDispatch([
+        makeJob({
+          id: "job-1",
+          issueNumber: 1702,
+          status: "QUEUED",
+          finishedAt: null,
+          handoffFrom: "codex",
+        }),
+      ]),
+      hosts: [makeHost({ name: "subpc" }), makeHost({ name: "macmini" })],
+      reassign: vi.fn(),
+    } as unknown as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    fireEvent.click(screen.getByLabelText("実行キュー"));
+    await waitFor(() => expect(screen.getByText("順番待ち")).toBeDefined());
+
+    expect(screen.queryByLabelText(/へ移す/)).toBeNull();
   });
 });

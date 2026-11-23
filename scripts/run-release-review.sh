@@ -37,12 +37,16 @@ HEARTBEAT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_HEARTBEAT_SECONDS:-60}"
 # 1回の起動で実行するバッチ数の上限（実行予算）。残りは保存して、再実行が続きから確認する（#4615）
 DIFF_BUDGET_BYTES="${ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES:-300000}"
 MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
+# 1バッチへ載せるファイル数の上限（#5597）。小さい変更が多いとバイト数だけでは1バッチのファイル数が膨らみ、AIが
+# ファイル別の確認実績（`fileReviews`）を省略しやすいため、バイト数に加えてファイル数でも区切る
+MAX_FILES_PER_BATCH="${ISSUE_DECK_RELEASE_REVIEW_MAX_FILES_PER_BATCH:-50}"
+[[ "$MAX_FILES_PER_BATCH" =~ ^[0-9]+$ ]] && ((MAX_FILES_PER_BATCH >= 1)) || MAX_FILES_PER_BATCH=50
 # 保存（`*.batches`）の掃除。3日より古いものに加え、新しい順にこの件数を超えた分を消す（ディスクを使い切らない。#4767）
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
 EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足|資料にありません|固定SHA|適用手順|デプロイ設定'
 # 実行ホスト（サブPCのpoller）の稼働状態を指す文言（#4799）。`src/lib/release-review-reevaluation.ts`の`HOST_TEXT`と揃える
-HOST_TEXT_PATTERN='poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
+HOST_TEXT_PATTERN='poller|ポーラー|DeskMini|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
 # 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
 PARALLEL="${ISSUE_DECK_RELEASE_REVIEW_PARALLEL:-3}"
 # AI 1回の呼び出しのターン数の上限（claudeの`--max-turns`。#4769）。0で上限なし。上限に達すると診断は`turn_limit`になる。
@@ -54,6 +58,9 @@ RETRY_MAX_TURNS="${ISSUE_DECK_RELEASE_REVIEW_RETRY_MAX_TURNS:-500}"
 RETRY_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_RETRY_TIMEOUT_SECONDS:-3000}"
 # ファイル別の実績の取りこぼし（報告なし・根拠が空）を補う質問（#4768）。1回の起動で1回まで、対象のファイル数と時間に上限を置く
 SUPPLEMENT_MAX_FILES="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES:-40}"
+# 補完は、取りこぼしが解消するかこの回数に達するまで繰り返す（#5597）。残ったファイルは未確認として報告する
+SUPPLEMENT_MAX_ROUNDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_ROUNDS:-3}"
+[[ "$SUPPLEMENT_MAX_ROUNDS" =~ ^[0-9]+$ ]] || SUPPLEMENT_MAX_ROUNDS=3
 SUPPLEMENT_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS:-600}"
 # AIが報告したパスを差分のパスへ揃える（#4768）。区切りを`/`へ、作業ディレクトリの絶対パス・先頭の`./`・`/`を除く。
 # `src/lib/release-review-result.ts`の`normalizeReviewPath`と同じ規則（作業ディレクトリの除去はランナーだけ）
@@ -372,11 +379,11 @@ review_decisions_text() {
 RULES
 }
 
-# plan_batches: `files`の差分を、`DIFF_BUDGET_BYTES`ごとのバッチ（`$batch_dir/b<N>.diff|.files`）へ詰める。
+# plan_batches: `files`の差分を、`DIFF_BUDGET_BYTES`・`MAX_FILES_PER_BATCH`ごとのバッチ（`$batch_dir/b<N>.diff|.files`）へ詰める。
 # 1ファイルが上限を超えるときは断片に分け、断片ごとに別バッチへ置く（黙って除外しない）。
 # 差分を取得できなかったファイルは`runner.json`へ取得不能として残す。`batch_count`・`input_files`を設定する
 plan_batches() {
-  local file file_diff size off parts k bi=1 used=0
+  local file file_diff size off parts k bi=1 used=0 count=0
   : >"$batch_dir/runner.entries"
   rm -f "$batch_dir"/b*.diff "$batch_dir"/b*.files
   : >"$batch_dir/b1.diff"
@@ -410,17 +417,20 @@ plan_batches() {
         : >"$batch_dir/b${bi}.files"
       done
       used=0
+      count=0
       continue
     fi
-    if ((used + size > DIFF_BUDGET_BYTES)) && [[ -s "$batch_dir/b${bi}.files" ]]; then
+    if (((used + size > DIFF_BUDGET_BYTES) || count >= MAX_FILES_PER_BATCH)) && [[ -s "$batch_dir/b${bi}.files" ]]; then
       bi=$((bi + 1))
       : >"$batch_dir/b${bi}.diff"
       : >"$batch_dir/b${bi}.files"
       used=0
+      count=0
     fi
     printf '%s\n' "$file_diff" >>"$batch_dir/b${bi}.diff"
     printf '%s\t\n' "$file" >>"$batch_dir/b${bi}.files"
     used=$((used + size))
+    count=$((count + 1))
   done
   # 末尾の空のバッチは捨てる
   [[ -s "$batch_dir/b${bi}.files" ]] || { rm -f "$batch_dir/b${bi}.diff" "$batch_dir/b${bi}.files"; bi=$((bi - 1)); }
@@ -496,6 +506,18 @@ missing_file_pairs() {
       | select(all($rv[]; .p != $f or (.s != "unreadable" and ((.s == "reviewed" and (.e | test("\\S"))) | not))))
       | "\($f)\t\($idx)"' "$batch_dir/r${idx}.json" >>"$batch_dir/sup.pairs" 2>/dev/null || true
   done
+}
+
+# drop_resolved_pairs <補完の結果>: `sup.pairs`から、補完で根拠つきの`reviewed`か`unreadable`が報告されたファイルを除く（#5597）。
+# 残ったものが次の回の補完の対象になる
+drop_resolved_pairs() {
+  local resolved="$batch_dir/sup.resolved"
+  jq -r --arg wt "$WORKTREE" "$JQ_NPATH"'
+    (.fileReviews // [])[] | select(type == "object")
+    | select(.status == "unreadable" or (.status == "reviewed" and ((.evidence // "") | tostring | test("\\S"))))
+    | (.file // "") | npath($wt)' "$1" >"$resolved" 2>/dev/null || : >"$resolved"
+  awk -F'\t' 'NR == FNR {r[$0] = 1; next} !($1 in r)' "$resolved" "$batch_dir/sup.pairs" >"$batch_dir/sup.pairs.next"
+  mv "$batch_dir/sup.pairs.next" "$batch_dir/sup.pairs"
 }
 
 # plan_supplement: 補完の対象（`sup.files`）と差分（`sup.diff`）を作る。ファイル数は`SUPPLEMENT_MAX_FILES`、差分は
@@ -619,11 +641,11 @@ runner_host_prompt_text() {
   started="${POLLER_STARTED_COMMIT:-}"
   current="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
   includes="$(runner_host_includes "$full_name" "$head")"
-  printf '\n## 実行ホストの稼働情報（このレビューを起動したサブPCのpoller）\n\n'
+  printf '\n## 実行ホストの稼働情報（このレビューを起動したDeskMiniのpoller）\n\n'
   printf -- '- いま走っているpollerの版（起動時のコミット）: %s\n' "${started:-確認できない（申告の無い旧poller）}"
   printf -- '- チェックアウトの現在のHEAD: %s\n' "${current:-確認できない}"
   printf -- '- 起動時のコミットが候補headを含むか: %s\n\n' "$includes"
-  printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（サブPCのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にサブPCへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
+  printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（DeskMiniのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にDeskMiniへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
 }
 
 # result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632・#4767）
@@ -1078,7 +1100,7 @@ main() {
     return 0
   fi
   rm -f "$diff_list" "$diff_err"
-  batch_dir="$WORK_ROOT/${repo}-${pr_number}-${base_sha:0:12}-${head_sha:0:12}-${DIFF_BUDGET_BYTES}.batches"
+  batch_dir="$WORK_ROOT/${repo}-${pr_number}-${base_sha:0:12}-${head_sha:0:12}-${DIFF_BUDGET_BYTES}-f${MAX_FILES_PER_BATCH}.batches"
   mkdir -p "$batch_dir"
   touch "$batch_dir"
   prune_batch_dirs
@@ -1287,9 +1309,12 @@ main() {
   ((executed > 0)) && rm -f "$sup_file" "${sup_file%.json}.fp" "${sup_file%.json}.hfp" "$batch_dir/rsup.asked"
   if ((remaining == 0)) && [[ ! -s "$sup_file" ]]; then
     missing_file_pairs
-    [[ -s "$batch_dir/sup.pairs" ]] && plan_supplement
-    if [[ -s "$batch_dir/sup.pairs" && -s "$batch_dir/sup.files" ]]; then
-      RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・確認実績の補完 $(wc -l <"$batch_dir/sup.files" | tr -d ' ')ファイル・全${total_files}ファイル）${reuse_note}"
+    local sup_round
+    for ((sup_round = 1; sup_round <= SUPPLEMENT_MAX_ROUNDS; sup_round++)); do
+      [[ -s "$batch_dir/sup.pairs" ]] || break
+      plan_supplement
+      [[ -s "$batch_dir/sup.files" ]] || break
+      RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・確認実績の補完 ${sup_round}/${SUPPLEMENT_MAX_ROUNDS}回目 $(wc -l <"$batch_dir/sup.files" | tr -d ' ')ファイル・全${total_files}ファイル）${reuse_note}"
       release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
       review_report running "$RUNNING_MESSAGE"
       supplement_coverage_text >"$part_dir/coverage"
@@ -1303,15 +1328,24 @@ main() {
       fi
       if ((rc == 0)) && extract_result_json "$output_file" >"$sup_file.tmp" && [[ -s "$sup_file.tmp" ]]; then
         stamp_checklist_version "$sup_file.tmp"
-        mv "$sup_file.tmp" "$sup_file"
-        cp "$batch_dir/sup.files" "$batch_dir/rsup.asked"
+        # 各回の結果は1つの`rsup.json`へ積み上げる（実績・指摘を連結し、聞き直したファイルも追記する）
+        if [[ -s "$sup_file" ]]; then
+          jq -sc '.[1] + {fileReviews: ((.[0].fileReviews // []) + (.[1].fileReviews // [])), findings: ((.[0].findings // []) + (.[1].findings // []))}' \
+            "$sup_file" "$sup_file.tmp" >"$sup_file.merged" && mv "$sup_file.merged" "$sup_file"
+          rm -f "$sup_file.tmp"
+        else
+          mv "$sup_file.tmp" "$sup_file"
+        fi
+        cat "$batch_dir/sup.files" >>"$batch_dir/rsup.asked"
         printf '%s' "$evidence_fp" >"${sup_file%.json}.fp"
         printf '%s' "$host_fp" >"${sup_file%.json}.hfp"
+        drop_resolved_pairs "$sup_file"
       else
         rm -f "$sup_file.tmp"
-        echo "確認実績の補完を完了できませんでした（終了コード ${rc}）。取りこぼしたファイルは未確認として報告します" >&2
+        echo "確認実績の補完を完了できませんでした（${sup_round}回目・終了コード ${rc}）。取りこぼしたファイルは未確認として報告します" >&2
+        break
       fi
-    fi
+    done
   fi
 
   # 全バッチが済んだら、バッチをまたぐ相互作用を別に確認する（バッチごとの合格の単純集計で済ませない）

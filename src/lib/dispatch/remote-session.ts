@@ -1,5 +1,6 @@
 import type { DispatchHost, DispatchJob, RemoteSession } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { db } from "@/lib/db";
 import {
   isDispatchHostOnline,
@@ -79,7 +80,7 @@ function toHostInfo(host: DispatchHost, activeCount: number, now: Date): RemoteS
 
 async function loadHostInfos(now: Date): Promise<RemoteSessionHostInfo[]> {
   const [hosts, counts] = await Promise.all([
-    db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
+    db.dispatchHost.findMany({ orderBy: { name: "asc" } }).then(sortDispatchHosts),
     db.remoteSession.groupBy({
       by: ["host"],
       where: { status: { in: ACTIVE_STATUSES } },
@@ -122,7 +123,7 @@ async function settleStartingSessions(now: Date): Promise<void> {
       data: {
         status: "failed",
         failureMessage:
-          job.message ?? (job.status === "TIMEOUT" ? "サブPCが応答しませんでした。" : "起動できませんでした。"),
+          job.message ?? (job.status === "TIMEOUT" ? "DeskMiniが応答しませんでした。" : "起動できませんでした。"),
         endedAt: now,
       },
     });
@@ -316,7 +317,7 @@ export async function enqueueRemoteSessionKill(params: {
   }
   const host = await db.dispatchHost.findUnique({ where: { name: session.host } });
   if (!host || !isDispatchHostOnline(host.lastSeenAt, now) || host.remoteSessionCapable !== true) {
-    return { ok: false, reason: "host_offline", message: "サブPCがオフラインのため終了できません。" };
+    return { ok: false, reason: "host_offline", message: "DeskMiniがオフラインのため終了できません。" };
   }
   try {
     await db.dispatchJob.create({

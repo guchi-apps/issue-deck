@@ -1,5 +1,6 @@
 import type { DispatchJob } from "@prisma/client";
 
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { parseReleaseMacReport, recordReleaseMacResult } from "@/lib/release-mac-verification";
 import { db } from "@/lib/db";
 import {
@@ -46,7 +47,7 @@ async function pickReleaseVerifyHost(repositoryFullName: string, now: Date): Pro
     orderBy: { name: "asc" },
   });
   const requiredHosts = getRequiredVerifyHosts(repositoryFullName);
-  const capable = hosts.filter(
+  const capable = sortDispatchHosts(hosts).filter(
     (host) =>
       (requiredHosts === null || requiredHosts.includes(host.name)) &&
       isDispatchHostOnline(host.lastSeenAt, now) &&
@@ -92,7 +93,7 @@ export async function requestReleaseVerifyJob(
     const required = getRequiredVerifyHosts(target.repoFullName);
     const message = required
       ? `${target.repoFullName}の統合検証は${required.join("・")}でしか実行できません（MySQLなどの前提が要るため）が、そのホストがオフライン・pollerが未対応・リポジトリ未登録のいずれかです。`
-      : `${target.repoFullName}の統合検証を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`;
+      : `${target.repoFullName}の統合検証を実行できるDeskMiniがありません（オフライン・pollerが未対応・リポジトリ未登録のいずれか）。`;
     await recordReleaseVerificationResult(target, { kind: "integration", state: "failed", message });
     return { ok: false, rejection: "no_host", message };
   }

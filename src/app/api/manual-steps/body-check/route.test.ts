@@ -25,7 +25,7 @@ const CLEAN_BODY = [
   "",
   "## 前提条件",
   "",
-  "- 実行するデバイス: サブPC（メインPCからなら `ssh subpc`）",
+  "- 実行するデバイス: DeskMini（メインPCからなら `ssh subpc`）",
   "- カレントディレクトリ: `~/apps/issue-deck`",
   "- Gitブランチ: `develop`",
   "- 先に完了している必要があるIssue・PR: なし",

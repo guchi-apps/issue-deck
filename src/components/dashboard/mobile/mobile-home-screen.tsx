@@ -42,6 +42,7 @@ import {
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import { countQueuedJobsByHost, summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { NavViewId } from "@/types/issue";
@@ -134,6 +135,9 @@ type MobileHomeScreenProps = {
  * **PCの左メニュー（`sidebar-nav.tsx`）にはフッターが無く「ブランチ」の唯一の入口なので、
  * そちらには残す**——このためスマホとPCのメニューはこの1行分だけ並びが一致しない。
  */
+/** 取得前のホスト枚数の場所取り（Mac mini・サブPCの2台。#5573） */
+const HOME_HOST_SKELETON_COUNT = 2;
+
 export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "onRefresh" | "isRefreshing">) {
   /*
     引っ張って更新（#2182）もここから配る。**ベル右上の「更新」ボタンと同じ`refresh`**で、
@@ -185,7 +189,7 @@ export function MobileHomeScreenView({
   */
   const dispatch = useDispatchState(true);
   /*
-    実行状況シートの開閉（#1933）。**ヘッダー右上のボタンとサブPCのカードで同じシートを開く**
+    実行状況シートの開閉（#1933）。**ヘッダー右上のボタンとDeskMiniのカードで同じシートを開く**
     ため、状態はここで持つ。開く口が2つになるだけで、中身は1つのまま
   */
   const [dispatchStatusOpen, setDispatchStatusOpen] = useState(false);
@@ -282,7 +286,7 @@ export function MobileHomeScreenView({
           }}
         >
           {/*
-            先頭のサブPCの様子（#1690）。盤面の件数は下のタイルへ統合した（#3650）。
+            先頭のDeskMiniの様子（#1690）。盤面の件数は下のタイルへ統合した（#3650）。
             ホストの様子はここへ戻したもので、#1638でヘッダーの実行状況シートへ移していた。
             **ホームは使用率だけのサマリ、ヘッダーのシートは動いているセッションとキュー全体
             （順番待ち・失敗・停止操作）**という切り分けにしてある（#1933でセッションの一覧を
@@ -290,7 +294,7 @@ export function MobileHomeScreenView({
           */}
           <div className="p-4">
             {/*
-              サブPCの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
+              DeskMiniの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
               セッション・スクリプトの版・「更新して再起動」はここには出さず、押して開く
               実行状況シートに任せる。従来はこの1枚だけで縦242pxを占め、メニューの1行目が
               画面の外にあった。
@@ -300,8 +304,9 @@ export function MobileHomeScreenView({
               `[]`なので、スケルトンが無いと届くまでカードごと消え、下のメニューがカード1枚ぶん
               繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ押した指が別の行に当たる。
               出すのは`isLoaded`が立つまでの1回だけで、20秒ごとの取り直しでは出さない
-              （出すと20秒おきにカードが灰色に戻る）。枚数が1枚なのは、台数が取得するまで
-              分からないため——いま申告しているのはサブPC1台。
+              （出すと20秒おきにカードが灰色に戻る）。枚数は`HOME_HOST_SKELETON_COUNT`（2枚）。台数が取得するまで
+              分からないため、いま申告しているMac miniとDeskMiniの2台に合わせる（1枚だと取得後に
+              2枚目の高さぶん下のボタンが落ちる。#5573）。
 
               **取得に失敗しても`isLoaded`は立ち、スケルトンは消える**（計画レビュー指摘2）。
               失敗は表面化しない作りなので、残すと「読み込み中」の顔のまま止まって見える。
@@ -310,7 +315,7 @@ export function MobileHomeScreenView({
             */}
             {!dispatch.isLoaded ? (
               <div className="mt-2">
-                <CompactHostCardSkeleton />
+                <CompactHostCardSkeleton count={HOME_HOST_SKELETON_COUNT} />
               </div>
             ) : (
               dispatch.hosts.length > 0 && (
@@ -320,6 +325,10 @@ export function MobileHomeScreenView({
                     sessions={dispatch.sessions}
                     remoteSessions={dispatch.remoteSessions}
                     compact
+                    queuedCounts={countQueuedJobsByHost(
+                      summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts)
+                        .queued,
+                    )}
                     onOpenDetail={() => setDispatchStatusOpen(true)}
                   />
                 </div>
@@ -557,7 +566,7 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       busy: false,
       title: input.previewRunning
         ? "確認環境が動いています"
-        : "developの最新をサブPCで動かして画面で確かめる",
+        : "developの最新をDeskMiniで動かして画面で確かめる",
       onClick: input.onSelectPreview,
     });
   }

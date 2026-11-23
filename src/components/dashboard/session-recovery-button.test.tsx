@@ -269,7 +269,7 @@ describe("SessionRecoveryButton", () => {
   });
 
   // #1332の「停止」と同じ立場。導線ごと消すと、なぜ復旧できないのかが画面から分からない
-  it("サブPCが申告していなければ、ボタンは残して理由を出す", () => {
+  it("DeskMiniが申告していなければ、ボタンは残して理由を出す", () => {
     renderButton({ dispatch: makeDispatch({ hosts: [] }) });
     expect(recoveryButton()).not.toBeNull();
     expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);

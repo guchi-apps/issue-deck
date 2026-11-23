@@ -36,7 +36,7 @@ const REAL_BODY = `## この作業でできるようになること
 
 ## 前提条件
 
-- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）
 - カレントディレクトリ: \`~/apps/issue-deck\`
 - Gitブランチ: \`develop\`（本体チェックアウトがdevelopのため）
 
@@ -154,8 +154,8 @@ describe("findManualStepCommand", () => {
 });
 
 describe("isSubpcManualStepDevice", () => {
-  it("サブPCの手作業だけを代行対象とみなす", () => {
-    expect(isSubpcManualStepDevice("サブPC")).toBe(true);
+  it("DeskMiniの手作業だけを代行対象とみなす", () => {
+    expect(isSubpcManualStepDevice("DeskMini")).toBe(true);
     expect(isSubpcManualStepDevice("サブ PC")).toBe(true);
     expect(isSubpcManualStepDevice("subpc")).toBe(true);
     expect(isSubpcManualStepDevice("sub-pc")).toBe(true);
@@ -177,8 +177,8 @@ describe("isSubpcManualStepDevice", () => {
 
   // 「サブPCを含むから代行してよい」と読むと、ブラウザ作業まで代行対象になっていた（#2052）
   it("端末が1つに絞れない値は代行対象にしない", () => {
-    expect(isSubpcManualStepDevice("ブラウザ（1Password）とサブPC")).toBe(false);
-    expect(isSubpcManualStepDevice("メインPC と サブPC")).toBe(false);
+    expect(isSubpcManualStepDevice("ブラウザ（1Password）とDeskMini")).toBe(false);
+    expect(isSubpcManualStepDevice("メインPC と DeskMini")).toBe(false);
   });
 });
 
@@ -187,8 +187,8 @@ describe("isSubpcManualStepDevice", () => {
  * （`isSubpcManualStepDevice`と同じく、読み取れなければ代行しない側へ倒す）。
  */
 describe("resolveManualStepRunTarget", () => {
-  it("サブPCとVPSを実行先として返す", () => {
-    expect(resolveManualStepRunTarget("サブPC")).toBe("subpc");
+  it("DeskMiniとVPSを実行先として返す", () => {
+    expect(resolveManualStepRunTarget("DeskMini")).toBe("subpc");
     expect(resolveManualStepRunTarget("sub-pc")).toBe("subpc");
     expect(resolveManualStepRunTarget("VPS")).toBe("vps");
     expect(resolveManualStepRunTarget("vps（`ssh vps`）")).toBe("vps");
@@ -203,14 +203,14 @@ describe("resolveManualStepRunTarget", () => {
 
   // #2052と同じ倒し方。1つに絞れない本文は、どちらで実行するか決められない
   it("端末が1つに絞れない値はnullにする", () => {
-    expect(resolveManualStepRunTarget("サブPCとVPS")).toBeNull();
-    expect(resolveManualStepRunTarget("ブラウザ（1Password）とサブPC")).toBeNull();
+    expect(resolveManualStepRunTarget("DeskMiniとVPS")).toBeNull();
+    expect(resolveManualStepRunTarget("ブラウザ（1Password）とDeskMini")).toBeNull();
   });
 });
 
 /** ジョブの列・pollerからの入力。**既知の2語だけを通す**（列を手で書き換えても変わらない） */
 describe("parseManualStepRunTarget", () => {
-  it("vpsだけをVPSとして読み、それ以外はサブPCにする", () => {
+  it("vpsだけをVPSとして読み、それ以外はDeskMiniにする", () => {
     expect(parseManualStepRunTarget("vps")).toBe("vps");
     expect(parseManualStepRunTarget("subpc")).toBe("subpc");
     expect(parseManualStepRunTarget("VPS")).toBe("subpc");
@@ -379,7 +379,7 @@ describe("findInteractiveCommand", () => {
 
   // サブPCではNOPASSWDが効くので、同じコマンドでも代行できる。実行先を渡さない
   // 呼び出し（本文の書式検査）も従来どおりの判定になる
-  it("サブPC・実行先を渡さない呼び出しでは sudo を対象にしない", () => {
+  it("DeskMini・実行先を渡さない呼び出しでは sudo を対象にしない", () => {
     expect(findInteractiveCommand("sudo systemctl restart apache2", "subpc")).toBeNull();
     expect(findInteractiveCommand("sudo systemctl restart apache2")).toBeNull();
   });
@@ -545,7 +545,7 @@ describe("replaceManualStepInstruction", () => {
     const line = body.split("\n").indexOf("- [ ] （ブラウザ）GitHubの設定画面から更新する") + 1;
 
     expect(
-      replaceManualStepInstruction(body, line, "（サブPC）GitHubの設定画面から更新する"),
+      replaceManualStepInstruction(body, line, "（DeskMini）GitHubの設定画面から更新する"),
     ).toBeNull();
   });
 

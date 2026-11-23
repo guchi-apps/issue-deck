@@ -170,7 +170,7 @@ export function describeRebootRejection(rejection: RebootRejection, hostName: st
     case "offline":
       return `${hostName} が応答していません。再起動の途中であれば、戻ってくると押せるようになります。`;
     case "not_capable":
-      return `${hostName} のpollerはパスワード無しで再起動できません（サブPCのsudoの許可が要ります）。`;
+      return `${hostName} のpollerはパスワード無しで再起動できません（DeskMiniのsudoの許可が要ります）。`;
     case "sessions_unknown":
       return `${hostName} がセッション本数を申告していません。本数が分からないまま再起動はできません。`;
     case "sessions_running":

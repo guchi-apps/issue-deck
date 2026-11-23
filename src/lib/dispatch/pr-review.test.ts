@@ -106,7 +106,7 @@ describe("画面の表記", () => {
     );
     expect(labels).toEqual([
       "キュー待ち",
-      "サブPC受付済み",
+      "DeskMini受付済み",
       "レビュー実行中",
       "完了",
       "失敗",

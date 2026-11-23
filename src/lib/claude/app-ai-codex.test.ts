@@ -189,8 +189,8 @@ describe("Claude Messagesの本文をCodexの依頼へ変える（#5067）", () 
   });
 });
 
-describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () => {
-  it("ジョブを積み、サブPCが返した結果を読んで、Codex CLIの実行先として返す", async () => {
+describe("CHAT_TURNジョブでDeskMiniのCodex CLIへ投げる（#5067）", () => {
+  it("ジョブを積み、DeskMiniが返した結果を読んで、Codex CLIの実行先として返す", async () => {
     state.onPoll = (jobId, run) => {
       const job = state.jobs.get(jobId);
       if (job && run && job.status === "QUEUED") {
@@ -213,7 +213,7 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
     ["usage_limit", /利用枠の上限/],
     ["api_key_auth", /APIキー/],
     ["bad_output", /読み取れません/],
-  ])("サブPCが返した失敗 %s を区別して投げ、Claudeへは切り替えない", async (kind, message) => {
+  ])("DeskMiniが返した失敗 %s を区別して投げ、Claudeへは切り替えない", async (kind, message) => {
     state.onPoll = (_jobId, run) => {
       if (run) run.stepError = kind;
     };
@@ -241,7 +241,7 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
     expect(state.deletedRuns).toEqual(["run1"]);
   });
 
-  it("サブPCが受け取らなければ not_claimed で取り消す", async () => {
+  it("DeskMiniが受け取らなければ not_claimed で取り消す", async () => {
     await expectKind(runAppAiOnCodex({ feature: "issue_suggest", model: "gpt-6-luna", body: summaryBody, sleep, clock }), "not_claimed");
     expect(state.jobs.get("job1")?.status).toBe("CANCELED");
   });
@@ -269,7 +269,7 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
     expect(clockNow - startedAt).toBeLessThan(APP_AI_CODEX_CLAIM_WAIT_MS);
   });
 
-  it("サブPCがオフライン・pollerが未対応なら、ジョブを積まずに区別して断る", async () => {
+  it("DeskMiniがオフライン・pollerが未対応なら、ジョブを積まずに区別して断る", async () => {
     state.hosts = [{ name: "subpc", lastSeenAt: new Date(now - 60 * 60 * 1000), chatCodexCapable: true }];
     await expectKind(runAppAiOnCodex({ feature: "comment_summary", model: "gpt-6-luna", body: summaryBody, sleep, clock }), "offline");
     state.hosts = [{ name: "subpc", lastSeenAt: new Date(now), chatCodexCapable: false }];
@@ -309,12 +309,12 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("古いサブPCが画像付きの依頼を断られたら、チェックアウトの更新を促して止まる（#5068）", async () => {
+  it("古いDeskMiniが画像付きの依頼を断られたら、チェックアウトの更新を促して止まる（#5068）", async () => {
     state.onPoll = (_jobId, run) => {
       if (run) run.stepError = "image_host_outdated";
     };
     const promise = runAppAiOnCodex({ feature: "issue_image_extract", model: "gpt-6-luna", body: summaryBody, sleep, clock });
-    await expect(promise).rejects.toThrow(/サブPCのチェックアウトを更新してください.*Claudeへは切り替えていません/);
+    await expect(promise).rejects.toThrow(/DeskMiniのチェックアウトを更新してください.*Claudeへは切り替えていません/);
   });
 
   it("文書入力・モデル自動選択はジョブを積まずに対応外として断る", async () => {

@@ -247,7 +247,7 @@ function checkDevice(guide: ReturnType<typeof parseManualStepGuide>): ManualStep
     {
       rule: "multiple-devices",
       severity: "error",
-      message: `「実行するデバイス」に端末が複数書かれている（${found.join("・")}）のに、どこで実行するか書かれていない手順が${missing.length}件あります。どの端末で実行するかが決まらないため、その手順は代行実行の対象から外れます。\`- [ ] （サブPC）…\`のように各手順の文頭へ端末を書いてください。`,
+      message: `「実行するデバイス」に端末が複数書かれている（${found.join("・")}）のに、どこで実行するか書かれていない手順が${missing.length}件あります。どの端末で実行するかが決まらないため、その手順は代行実行の対象から外れます。\`- [ ] （ローカル）…\`のように各手順の文頭へ端末を書いてください。`,
     },
   ];
 }
@@ -358,7 +358,7 @@ function checkSecretCommands(
     findings.push({
       rule: "op-signin-in-command",
       severity: "warning",
-      message: `\`op signin\`を含むコマンドが${signin.length}件あります。対話が要るコマンドはその項目まるごとが代行実行から外れるうえ、サブPCでは環境変数のサービスアカウントが優先されるためサインインしても書き込みは通りません。値の登録は1Passwordアプリで行い、GitHubのsecretへの同期は\`cd ~/apps/issue-deck && scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`、読み取りは\`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read '<op://…>'\`で書いてください。`,
+      message: `\`op signin\`を含むコマンドが${signin.length}件あります。対話が要るコマンドはその項目まるごとが代行実行から外れるうえ、DeskMiniでは環境変数のサービスアカウントが優先されるためサインインしても書き込みは通りません。値の登録は1Passwordアプリで行い、GitHubのsecretへの同期は\`cd ~/apps/issue-deck && scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`、読み取りは\`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read '<op://…>'\`で書いてください。`,
     });
   }
 
@@ -376,7 +376,7 @@ function checkSecretCommands(
     findings.push({
       rule: "op-write-command",
       severity: "warning",
-      message: `\`op\`で1Passwordを書き換えるコマンドが${opWrite.length}件あります。サブPCの全シェルには\`apps\`ボールトへ**read権限しか無い**サービスアカウントが常時exportされており（\`~/.profile.local\`）、\`op\`は\`op signin\`よりそちらを優先します。**同じコードブロックで書き込み用トークン（\`~/.config/issue-deck/op-writer.env\`）を読み込まない限り**、このコマンドは代行実行でも人の実行でも\`Couldn't update the item.\`で落ちます。値の登録は1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書き、CLIには同期（\`scripts/provision-secret.sh … --sync-only\`）と確認（\`op read\`）だけを残してください。`,
+      message: `\`op\`で1Passwordを書き換えるコマンドが${opWrite.length}件あります。DeskMiniの全シェルには\`apps\`ボールトへ**read権限しか無い**サービスアカウントが常時exportされており（\`~/.profile.local\`）、\`op\`は\`op signin\`よりそちらを優先します。**同じコードブロックで書き込み用トークン（\`~/.config/issue-deck/op-writer.env\`）を読み込まない限り**、このコマンドは代行実行でも人の実行でも\`Couldn't update the item.\`で落ちます。値の登録は1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書き、CLIには同期（\`scripts/provision-secret.sh … --sync-only\`）と確認（\`op read\`）だけを残してください。`,
     });
   }
 
@@ -390,7 +390,7 @@ function checkSecretCommands(
     findings.push({
       rule: "local-secret-sync",
       severity: "warning",
-      message: `\`scripts/sync-github-secrets.sh\`をそのまま実行するコマンドが${localSync.length}件あります。代行実行のシェルには1Passwordのセッションが無いため、サブPCで代行すると「opにサインインしていません」で失敗します。\`scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`（書き込み用トークンを読み込んで同じ同期を行う）へ書き換えるか、画面の「シークレットの同期」から実行してください。`,
+      message: `\`scripts/sync-github-secrets.sh\`をそのまま実行するコマンドが${localSync.length}件あります。代行実行のシェルには1Passwordのセッションが無いため、DeskMiniで代行すると「opにサインインしていません」で失敗します。\`scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`（書き込み用トークンを読み込んで同じ同期を行う）へ書き換えるか、画面の「シークレットの同期」から実行してください。`,
     });
   }
 

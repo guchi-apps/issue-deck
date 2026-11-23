@@ -38,9 +38,9 @@ describe("checkManualStepBody", () => {
     }
   });
 
-  it("見出しの補足（`## やること（サブPC）`）や表記揺れは通す", () => {
+  it("見出しの補足（`## やること（DeskMini）`）や表記揺れは通す", () => {
     const body = templateBody()
-      .replace("## やること", "## やること（サブPC）")
+      .replace("## やること", "## やること（DeskMini）")
       .replace("## 完了の確認方法", "## 確認方法");
     expect(rules(body)).toEqual([]);
   });
@@ -115,7 +115,7 @@ describe("実行するデバイス", () => {
   const multiDevice = (body = templateBody()) =>
     body.replace(
       /- 実行するデバイス: .*/,
-      "- 実行するデバイス: ブラウザ（Zaim 開発者ページ・1Password）と、サブPCの端末",
+      "- 実行するデバイス: ブラウザ（Zaim 開発者ページ・1Password）と、DeskMiniの端末",
     );
 
   // guchi-apps/car-care#99 の「ブラウザ（Zaim 開発者ページ・1Password）と、サブPCの端末」。
@@ -126,7 +126,7 @@ describe("実行するデバイス", () => {
       (entry) => entry.rule === "multiple-devices",
     );
     expect(finding?.severity).toBe("error");
-    expect(finding?.message).toContain("サブPC");
+    expect(finding?.message).toContain("DeskMini");
     expect(finding?.message).toContain("ブラウザ");
   });
 
@@ -138,7 +138,7 @@ describe("実行するデバイス", () => {
   it("1つだけなら指摘しない（括弧書きの補足は端末名として数えない）", () => {
     const body = templateBody().replace(
       /- 実行するデバイス: .*/,
-      "- 実行するデバイス: サブPC（メインPCからなら `ssh subpc`）",
+      "- 実行するデバイス: DeskMini（メインPCからなら `ssh subpc`）",
     );
     expect(rules(body)).toEqual([]);
   });

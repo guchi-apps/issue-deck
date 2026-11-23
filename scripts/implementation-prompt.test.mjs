@@ -173,7 +173,7 @@ describe("実装プロンプトの生成", () => {
       "utf8",
     );
     expect(supplement).toContain("「計画を`gh issue comment`で手動投稿する」という指示は実行しないでください");
-    expect(supplement).toContain("サブPCのセッションへ届きません");
+    expect(supplement).toContain("DeskMiniのセッションへ届きません");
     expect(supplement).toContain(
       "**必ず**`{{ISSUE_DECK_SCRIPTS_DIR}}/submit-plan.sh <計画ファイル>`を実行してください",
     );

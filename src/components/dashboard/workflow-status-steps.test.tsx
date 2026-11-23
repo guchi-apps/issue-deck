@@ -58,7 +58,7 @@ describe("WorkflowStatusSteps", () => {
     expect(screen.getByText("レビュー（3/5）").className).toContain("amber");
   });
 
-  it("showExecutionTarget=falseなら「サブPCで実行中」を出さない（#2057）", () => {
+  it("showExecutionTarget=falseなら「DeskMiniで実行中」を出さない（#2057）", () => {
     render(
       <WorkflowStatusSteps
         labels={labels()}
@@ -136,7 +136,7 @@ describe("WorkflowStatusSteps", () => {
         planningSkipped
       />,
     );
-    expect(screen.getByText("計画スキップ・サブPCで実行中")).not.toBeNull();
+    expect(screen.getByText("計画スキップ・DeskMiniで実行中")).not.toBeNull();
   });
 
   it("上段は5フェーズだけで、developへマージ・本番へマージは独立フェーズにならない（#4128）", () => {

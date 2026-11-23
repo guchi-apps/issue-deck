@@ -129,7 +129,7 @@ export function CodeReviewRepoOverview({
 
         {rows.length === 0 ? (
           <p className="px-4 pb-2 text-xs text-muted-foreground">
-            レビューを実行できるリポジトリがまだありません。サブPCにチェックアウトがあるリポジトリが
+            レビューを実行できるリポジトリがまだありません。DeskMiniにチェックアウトがあるリポジトリが
             ここに並びます。
           </p>
         ) : (
@@ -278,7 +278,7 @@ function RepoPickerList({
   if (runnableRows.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        コードレビューを実行できるリポジトリがありません。サブPCにチェックアウトがあるリポジトリがここに並びます。
+        コードレビューを実行できるリポジトリがありません。DeskMiniにチェックアウトがあるリポジトリがここに並びます。
       </p>
     );
   }

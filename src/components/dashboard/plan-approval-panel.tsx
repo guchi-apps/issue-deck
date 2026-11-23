@@ -198,7 +198,7 @@ export function PlanApprovalPanel({
         </div>
         <p className="px-3 py-2 text-xs text-muted-foreground">
           {planReviewPhase === "queued" &&
-            "サブPCが計画レビューを取りに来るのを待っています（通常1分以内）。10分を超えても起動しないときは、このまま計画を承認・修正できるようにします。"}
+            "DeskMiniが計画レビューを取りに来るのを待っています（通常1分以内）。10分を超えても起動しないときは、このまま計画を承認・修正できるようにします。"}
           届くとJevが重大な指摘を採用するか判断し、採用なら自動で計画へ反映します（反映後の解消確認は1回だけで、自動の見直しはそこで終わります。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
         </p>
       </section>
@@ -255,7 +255,7 @@ export function PlanApprovalPanel({
           // 人に委ねる。ジョブは残っているので、起動すれば指摘のカードへ切り替わる
           <p className="flex items-center gap-1.5 rounded-md border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
             <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
-            計画レビューがサブPCの空きを待っていて、まだ起動していません。届くのを待たずに承認・修正することもできます。
+            計画レビューがDeskMiniの空きを待っていて、まだ起動していません。届くのを待たずに承認・修正することもできます。
           </p>
         )}
         {marked.changedCount > 0 && (
@@ -489,15 +489,15 @@ function describeDelivery(
     case "CODEX_QUEUE_FAILED":
       return `Codexのセッションへ継続指示を積めませんでした（${summary ?? "理由不明"}）。端末から続きを指示してください。`;
     case "PROCESSED":
-      return "サブPCのセッション側から処理完了の報告を受けました。";
+      return "DeskMiniのセッション側から処理完了の報告を受けました。";
     case "PROCESS_FAILED":
-      return `サブPCは判断を取得しましたが、セッション処理が失敗しました（終了コード: ${exitCode ?? "不明"}）。`;
+      return `DeskMiniは判断を取得しましたが、セッション処理が失敗しました（終了コード: ${exitCode ?? "不明"}）。`;
     case "COMMUNICATION_FAILED":
-      return "サブPCとの通信に失敗したため、判断の処理結果を確認できません。";
+      return "DeskMiniとの通信に失敗したため、判断の処理結果を確認できません。";
     case "DECISION_OBSERVED":
-      return "サブPCが判断を取得しました。セッション側の処理完了報告を待っています。";
+      return "DeskMiniが判断を取得しました。セッション側の処理完了報告を待っています。";
     default:
-      return "サブPCからの取得・処理完了報告を待っています。";
+      return "DeskMiniからの取得・処理完了報告を待っています。";
   }
 }
 

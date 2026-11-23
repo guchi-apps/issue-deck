@@ -157,6 +157,11 @@ export type Issue = {
    */
   manualStepVerifiedAt: string | null;
   /**
+   * ローカルの全ホストで揃える手作業（`（ローカル・全ホスト）`。#5568）の、ホストごとの適用状況。
+   * 対象外のIssueは未定義。値を入れるのは`@/lib/issues-for-user`（成功した確認コマンドのジョブから導く）
+   */
+  manualStepHostApplications?: { host: string; applied: boolean }[] | null;
+  /**
    * GitHub Projects v2のStatus（例: "Implementation"）。Projectに未登録のIssueはnull。
    * 進捗状態を判定するときはこの値を直接見ず、@/lib/issue-progressのresolveProgressStatusを
    * 通すこと（Statusがnullなら進捗ラベルへフォールバックする）

@@ -324,7 +324,7 @@ describe("manual-step-body-check（手作業Issueの本文検査・#2048）", ()
   const STEP = "本文の書式を検査して指摘コメントを貼り直す";
   const base = {
     ISSUE_NUMBER: "2105",
-    ISSUE_TITLE: "[手作業] サブPC: pollerを再起動する",
+    ISSUE_TITLE: "[手作業] DeskMini: pollerを再起動する",
     ISSUE_BODY: "## この作業でできるようになること\n",
   };
   /** 指摘が1件も無いときのAPI応答。`comment`はnullで返る */

@@ -25,7 +25,7 @@ export function isPollerDeliveredFile(path: string): boolean {
 
 /** 平易な説明。用語としての「poller」を知らない人にも、何を更新するのかが分かるようにする */
 export const POLLER_EXPLANATION =
-  "poller（ポーラー）は、サブPCで常に動いていて、issue-deckからの依頼を受け取ってAIの処理や検証を起動するプログラムです。";
+  "poller（ポーラー）は、DeskMiniで常に動いていて、issue-deckからの依頼を受け取ってAIの処理や検証を起動するプログラムです。";
 
 export type ReleaseOpsHostFact = {
   name: string;
@@ -60,7 +60,7 @@ export type ReleaseOpsRequest = {
   relatedIssues: number[];
 };
 
-const OPS_SUBJECT = /poller|ポーラー|サブPC|常駐|再起動|self[-_ ]?update|更新して再起動/i;
+const OPS_SUBJECT = /poller|ポーラー|DeskMini|常駐|再起動|self[-_ ]?update|更新して再起動/i;
 const OPS_REQUEST =
   /(更新|再起動|反映|入れ替|pull|デプロイ|配布)[^。]{0,16}(必要|要る|要す|必須|待ち|後に有効|後から有効|されていない|していない|されておらず|しておらず|未確認|未実施|できていない|確認できない|確認できず|証跡が?(無|な))|未更新|未反映|未再起動|旧版|古いまま|古いpoller|旧poller/i;
 const OPS_NEGATION =
@@ -167,10 +167,10 @@ export function assessReleaseOps(
       ...base,
       status: "unknown",
       timing: null,
-      headline: "サブPCの稼働状態を取得できず、更新が必要かを確認できません",
+      headline: "DeskMiniの稼働状態を取得できず、更新が必要かを確認できません",
       hosts: [],
       facts: ["稼働情報を読み込めませんでした"],
-      nextAction: "実行状況パネルでサブPCの稼働状態を確認してください。確認できるまで、この項目は未確認のまま残ります。",
+      nextAction: "実行状況パネルでDeskMiniの稼働状態を確認してください。確認できるまで、この項目は未確認のまま残ります。",
     };
   }
   const isPollerRepo = context.repositoryFullName === POLLER_REPOSITORY;
@@ -184,30 +184,30 @@ export function assessReleaseOps(
     hosts: hostNames,
     facts: [...extra, ...facts],
     nextAction:
-      "実行状況パネルでサブPCがオンラインか、稼働コミットを確認してください。確認できるまで、この項目は未確認のまま残ります（更新が必要とも済みとも判定しません）。",
+      "実行状況パネルでDeskMiniがオンラインか、稼働コミットを確認してください。確認できるまで、この項目は未確認のまま残ります（更新が必要とも済みとも判定しません）。",
   });
 
   if (isPollerRepo) {
-    if (context.changedFiles === null) return unknown("候補の変更ファイルを取得できず、サブPCの更新が要るかを確認できません");
+    if (context.changedFiles === null) return unknown("候補の変更ファイルを取得できず、DeskMiniの更新が要るかを確認できません");
     const delivered = context.changedFiles.filter(isPollerDeliveredFile);
     if (delivered.length === 0) {
       return {
         ...base,
         status: "not_needed",
         timing: null,
-        headline: "この候補はサーバー（本番）へのデプロイだけで有効になります。サブPCの更新は不要です",
+        headline: "この候補はサーバー（本番）へのデプロイだけで有効になります。DeskMiniの更新は不要です",
         hosts: hostNames,
-        facts: [`候補の変更${context.changedFiles.length}ファイルに、サブPCへ届くファイル（scripts/）はありません`],
+        facts: [`候補の変更${context.changedFiles.length}ファイルに、DeskMiniへ届くファイル（scripts/）はありません`],
         nextAction: "対応は不要です。",
       };
     }
-    const deliveredFact = `候補にサブPCへ届くファイルの変更が${delivered.length}件あります（例: ${delivered.slice(0, 3).join("、")}）`;
+    const deliveredFact = `候補にDeskMiniへ届くファイルの変更が${delivered.length}件あります（例: ${delivered.slice(0, 3).join("、")}）`;
     const online = context.hosts.filter((h) => h.online);
     if (online.length === 0) {
       return unknown(
         context.hosts.length === 0
-          ? "このリポジトリを申告しているサブPCが無く、稼働状態を確認できません"
-          : "サブPCがオフラインで、いま走っているコードを確認できません",
+          ? "このリポジトリを申告しているDeskMiniが無く、稼働状態を確認できません"
+          : "DeskMiniがオフラインで、いま走っているコードを確認できません",
         [deliveredFact],
       );
     }
@@ -218,7 +218,7 @@ export function assessReleaseOps(
         ...base,
         status: "updated",
         timing: null,
-        headline: "サブPCのpollerは、この候補を含むコードで動いています（更新済み）",
+        headline: "DeskMiniのpollerは、この候補を含むコードで動いています（更新済み）",
         hosts: hostNames,
         facts: [deliveredFact, ...facts],
         nextAction: "更新は済んでいます。この事実を踏まえて未確認の項目を自動で再評価します（自動で開始できないときは理由を表示します。「全体レビューを再実行」でもやり直せます）。",
@@ -231,8 +231,8 @@ export function assessReleaseOps(
         status: "needed",
         timing: before ? "before_release" : "after_release",
         headline: before
-          ? "サブPCのpollerが旧版です。レビューは旧版だと動かなくなる変更を指摘しているため、公開前に更新してください"
-          : "サブPCのpollerが旧版です。新しいpollerの機能はサブPCの更新後に有効になります（公開の条件ではありません）",
+          ? "DeskMiniのpollerが旧版です。レビューは旧版だと動かなくなる変更を指摘しているため、公開前に更新してください"
+          : "DeskMiniのpollerが旧版です。新しいpollerの機能はDeskMiniの更新後に有効になります（公開の条件ではありません）",
         hosts: stale.map((h) => h.name),
         facts: [deliveredFact, ...facts],
         nextAction: before
@@ -244,24 +244,24 @@ export function assessReleaseOps(
   }
 
   // 他リポジトリ: 候補はpollerのコードを変えない。必要な能力の申告だけを見る
-  if (context.hosts.length === 0) return unknown("このリポジトリを申告しているサブPCが無く、稼働状態を確認できません");
+  if (context.hosts.length === 0) return unknown("このリポジトリを申告しているDeskMiniが無く、稼働状態を確認できません");
   const capable = context.hosts.filter((h) => h.releaseVerifyCapable && h.releaseReviewCapable);
   if (capable.length > 0) {
     return {
       ...base,
       status: "updated",
       timing: null,
-      headline: "サブPCのpollerは、統合検証・全体レビューに必要な機能を申告しています（更新済み）",
+      headline: "DeskMiniのpollerは、統合検証・全体レビューに必要な機能を申告しています（更新済み）",
       hosts: capable.map((h) => h.name),
       facts: ["この候補はpollerのコードを変えません（pollerはissue-deckのリポジトリにあります）", ...facts],
-      nextAction: "サブPCの更新は不要です。この事実を踏まえて未確認の項目を自動で再評価します（自動で開始できないときは理由を表示します。「全体レビューを再実行」でもやり直せます）。",
+      nextAction: "DeskMiniの更新は不要です。この事実を踏まえて未確認の項目を自動で再評価します（自動で開始できないときは理由を表示します。「全体レビューを再実行」でもやり直せます）。",
     };
   }
   return {
     ...base,
     status: "needed",
     timing: "before_release",
-    headline: "サブPCのpollerが旧版で、このリポジトリの統合検証・全体レビューに対応していません。公開前に更新が必要です",
+    headline: "DeskMiniのpollerが旧版で、このリポジトリの統合検証・全体レビューに対応していません。公開前に更新が必要です",
     hosts: hostNames,
     facts,
     nextAction: UPDATE_ACTION,

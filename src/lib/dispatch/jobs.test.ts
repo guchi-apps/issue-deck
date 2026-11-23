@@ -143,6 +143,7 @@ const {
   expireStaleDispatchJobs,
   listDispatchState,
   prioritizeDispatchJob,
+  reassignDispatchJob,
   reportDispatchJob,
   setAgentDispatchPause,
   sweepAgentUsageLimitPause,
@@ -1666,6 +1667,110 @@ describe("dismissDispatchJob", () => {
  * 先頭へ上げる（#1541）。夜にまとめて積んだあと「これを次に流したい」が出てくるが、
  * キューは`createdAt`の昇順で固定されていて、取り消して積み直すと最後尾へ回るだけだった。
  */
+describe("reassignDispatchJob", () => {
+  function queuedLaunch(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 5589,
+      targetHost: "macmini",
+      agent: "claude",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      handoffFrom: null,
+      queuePriority: 2,
+      createdAt: NOW,
+      ...overrides,
+    };
+  }
+
+  it("順番待ちの起動ジョブの割り当て先を移し先ホストへ書き換える", async () => {
+    dispatchJobFindUnique
+      .mockResolvedValueOnce(queuedLaunch())
+      .mockResolvedValueOnce(queuedLaunch({ targetHost: "deskmini", queuePriority: 0 }));
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: "QUEUED", targetHost: "macmini" },
+      data: { targetHost: "deskmini", queuePriority: 0 },
+    });
+  });
+
+  it("利用者のinstallationに属さないリポジトリのジョブは移せず、更新もしない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    repositoryFindFirst.mockResolvedValue(null);
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "other", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_found" });
+    expect(repositoryFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          fullName: REPOSITORY,
+          installation: { userInstallations: { some: { userId: "other" } } },
+        },
+      }),
+    );
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("起動以外の種別は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ kind: "CODE_REVIEW" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("引き継ぎ起動（handoffFromあり）は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ handoffFrom: "codex" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("順番待ち以外は移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ status: "RUNNING" }));
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+
+  it("同じホストへは移せない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "macmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+
+  it("移し先がオフライン・未知ならtarget_rejectedで書き換えない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    dispatchHostFindUnique.mockResolvedValue(null);
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "target_rejected" });
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("払い出しや取り消しと競合して更新できなければ失敗を返す", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    dispatchJobUpdateMany.mockResolvedValue({ count: 0 });
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
+  });
+});
+
 describe("prioritizeDispatchJob", () => {
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -2067,7 +2172,7 @@ describe("enqueueManualStepSessionJob", () => {
 describe("enqueueManualStepJob", () => {
   const MANUAL_STEP_BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**
+- 実行するデバイス: **DeskMini**
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること
@@ -2273,8 +2378,8 @@ describe("enqueueManualStepJob", () => {
   });
 
   // 1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
-  it("実行するデバイスがサブPC・VPSでなければ積まない", async () => {
-    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**ブラウザ**") });
+  it("実行するデバイスがDeskMini・VPSでなければ積まない", async () => {
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**DeskMini**", "**ブラウザ**") });
     const result = await run();
 
     expect(result.ok).toBe(false);
@@ -2285,7 +2390,7 @@ describe("enqueueManualStepJob", () => {
   // #2901。VPSの手順はサブPCからSSHで実行する。**ジョブに実行先を載せる**ので、
   // pollerは接続先を自分の設定から引ける（issue-deckは接続先を知らない）
   it("VPSの手順は実行先をジョブに載せて積む", async () => {
-    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**VPS**") });
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**DeskMini**", "**VPS**") });
     dispatchHostFindUnique.mockResolvedValue(
       host({ manualStepCapable: true, manualStepVpsCapable: true }),
     );

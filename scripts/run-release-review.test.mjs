@@ -51,6 +51,8 @@ if grep -q "ファイル別の確認実績の補完です" <<<"$p"; then
   [[ -n "\${SUP_LOG:-}" ]] && echo call >>"$SUP_LOG"
   [[ -n "\${SUP_FAIL:-}" ]] && exit 3
   files="$(sed -n '/取りこぼした断片だけ）:/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //')"
+  # SUP_LIMIT: 1回の補完で先頭のN件しか報告しない（補完の繰り返しを確かめる。#5597）
+  [[ -n "\${SUP_LIMIT:-}" ]] && files="$(head -n "$SUP_LIMIT" <<<"$files")"
   # SUP_EXTRA: 聞き直されていないファイルも確認済みと報告する／SUP_EMPTY_EV: 根拠を空で報告する
   echo '\`\`\`json'
   jq -nc --argjson f "$(printf '%s\\n' $files \${SUP_EXTRA:-} | jq -Rsc 'split("\\n") | map(select(. != ""))')" --arg ev "\${SUP_EMPTY_EV:+ }" \\
@@ -80,10 +82,10 @@ files="$(sed -n '/次のファイルの差分をこのバッチへ載せまし�
 # OMIT_FILE: そのファイルの実績を報告しない／EMPTY_EV_FILE: 根拠を空で報告する／DOT_PATHS: パスを「./」付きで報告する
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
-  --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" --argjson fd "$findings" \\
+  --arg omit "\${OMIT_FILE:-}" --arg omitre "\${OMIT_RE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" --argjson fd "$findings" \\
   --arg scope "\${BATCH_SCOPE:-}" --argjson cr "\${BATCH_CROSS:-[]}" \\
   '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd, crossRepoUnverified: $cr,
-    fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}
+    fileReviews: ($f | map(select(. != $omit and ($omitre == "" or (test($omitre) | not))) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}
     + (if $scope == "" then {} else {unverifiedScope: $scope} end)'
 echo '\`\`\`'
 `;
@@ -462,6 +464,41 @@ exec "${realGit}" "$@"
       expect(reviewed(capped.result)).not.toContain("file3.txt");
     });
 
+    it("1バッチのファイル数が上限を超えないよう、バイト数に加えてファイル数でも区切る（#5597）", () => {
+      const { status, result } = runReview({ ISSUE_DECK_RELEASE_REVIEW_MAX_FILES_PER_BATCH: "3", ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES: "1000000" });
+      expect(status).toBe("succeeded");
+      // 巨大ファイル以外の12ファイル＋巨大ファイル（予算内なので1ファイル）= 13ファイルを3件ずつ
+      expect(result.batches).toBe(5);
+      const counts = readdirSync(path.join(dir, "work", batchDirs()[0]))
+        .filter((n) => /^b\d+\.files$/.test(n))
+        .map((n) => lines(path.join(dir, "work", batchDirs()[0], n)));
+      expect(Math.max(...counts)).toBeLessThanOrEqual(3);
+      expect(counts.reduce((a, b) => a + b, 0)).toBe(13);
+      expect(reviewed(result)).toHaveLength(13);
+    });
+
+    it("補完は、取りこぼしが解消するまで繰り返す（#5597）", () => {
+      const sup = path.join(dir, "sup");
+      const { status, result } = runReview({ OMIT_RE: "^file[3-6]\\.txt$", SUP_LIMIT: "2", SUP_LOG: sup });
+      expect(status).toBe("succeeded");
+      expect(lines(sup)).toBe(2);
+      expect(reviewed(result)).toHaveLength(13);
+      expect(result.supplementedFiles).toBe(4);
+    });
+
+    it("補完の繰り返しは上限回数で止め、残ったファイルは未確認として報告する（#5597）", () => {
+      const sup = path.join(dir, "sup");
+      const { result } = runReview({
+        OMIT_RE: "^file[3-6]\\.txt$",
+        SUP_LIMIT: "1",
+        SUP_LOG: sup,
+        ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_ROUNDS: "3",
+      });
+      expect(lines(sup)).toBe(3);
+      expect(reviewed(result)).toHaveLength(12);
+      expect(reviewed(result)).not.toContain("file6.txt");
+    });
+
     it("相互作用の確認が根拠つきで報告した項目は、バッチの未確認より優先する", () => {
       const { result } = runReview({ UNCONF_FILE: "file5.txt", INT_CONFIRM: "1" });
       expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
@@ -661,7 +698,7 @@ batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
     it("証跡を指さない未確認（運用作業など）は、証跡が更新されても再利用する", () => {
       const { calls, env } = setup();
       writeEvidence("running");
-      runReview({ ...env, UNCONF_FILE: "file5.txt", UNCONF_TEXT: "サブPCのpollerを更新・再起動する必要があります" });
+      runReview({ ...env, UNCONF_FILE: "file5.txt", UNCONF_TEXT: "DeskMiniのpollerを更新・再起動する必要があります" });
       const batches = lines(calls);
       writeEvidence("passed", "2026-10-18T10:00:00Z");
       const rerun = runReview(env);

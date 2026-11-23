@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildManualStepQueue,
+  hasAllHostsMarker,
+  isManualStepLocalDeviceLabel,
   matchManualStepDeviceNames,
   parseManualStepGuide,
   resolveManualStepDevice,
@@ -19,12 +21,12 @@ import type { Issue } from "@/types/issue";
 /** #1823 サブPC: issue-deckのチェックアウトを更新してpollerを再起動する */
 const ISSUE_1823 = `## この作業でできるようになること
 
-- **できるようになること**: サブPCの回収スクリプトが、猶予待ちのセッションに理由を残すようになる。
+- **できるようになること**: DeskMiniの回収スクリプトが、猶予待ちのセッションに理由を残すようになる。
 - **実行するまでできないこと**: 画面には残り時間が一切出ない。
 
 ## 前提条件
 
-- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）
 - カレントディレクトリ: \`~/apps/issue-deck\`
 - Gitブランチ: \`develop\`（本体チェックアウトがdevelopのため）
 - 先に完了している必要があるIssue／PR: **#1822 がdevelopへマージされていること**
@@ -70,7 +72,7 @@ const ISSUE_1795 = `## この作業でできるようになること
 
 ## 前提条件
 
-- 実行するデバイス: ブラウザ（issue-deckの画面）とサブPCのどちらでもよい
+- 実行するデバイス: ブラウザ（issue-deckの画面）とDeskMiniのどちらでもよい
 - カレントディレクトリ: \`~/apps/issue-deck\`（画面から配る場合は不要）
 - Gitブランチ: \`develop\`
 - 先に完了している必要があるIssue・PR: #1794 が\`develop\`へマージされていること
@@ -109,7 +111,7 @@ const OPS_90 = `## この作業でできるようになること
 
 ## 前提条件
 
-- **実行するデバイス**: サブPC
+- **実行するデバイス**: DeskMini
 - **カレントディレクトリ**: \`~/apps/ops-dashboard\`
 - **Gitブランチ**: \`develop\`
 
@@ -138,7 +140,7 @@ const AIDE_59 = `## この作業でできるようになること
 
 ## 前提条件
 
-- **実行するデバイス**: サブPC（1Passwordの操作は \`op\` CLI、同期は \`~/apps/aide\`）。確認にVPSへのSSHを使う
+- **実行するデバイス**: DeskMini（1Passwordの操作は \`op\` CLI、同期は \`~/apps/aide\`）。確認にVPSへのSSHを使う
 - **カレントディレクトリ**: \`/home/guchi/apps/aide\`
 - **Gitブランチ**: \`develop\`（\`scripts/sync-github-secrets.sh\` は #55 のPRがマージされたものを使う）
 - **先に完了している必要があるIssue・PR**: #55 の対応PRが \`develop\` へマージ済みであること
@@ -169,8 +171,9 @@ describe("parseManualStepGuide", () => {
     expect(guide.outcome).toContain("猶予待ちのセッションに理由を残す");
     expect(guide.where).toEqual({
       connect: "ssh subpc",
-      device: "サブPC",
-      defaultDevice: "サブPC",
+      allHosts: false,
+      device: "DeskMini",
+      defaultDevice: "DeskMini",
       directory: "~/apps/issue-deck",
       branch: "develop",
     });
@@ -258,7 +261,7 @@ describe("parseManualStepGuide", () => {
     const guide = parseManualStepGuide(ISSUE_1795);
 
     expect(guide.where.directory).toBe("~/apps/issue-deck");
-    expect(guide.where.device).toBe("ブラウザ（issue-deckの画面）とサブPCのどちらでもよい");
+    expect(guide.where.device).toBe("ブラウザ（issue-deckの画面）とDeskMiniのどちらでもよい");
   });
 
   it("ラベルが太字でも実行する場所を拾う（aide#59）", () => {
@@ -266,7 +269,7 @@ describe("parseManualStepGuide", () => {
 
     expect(guide.where.directory).toBe("/home/guchi/apps/aide");
     expect(guide.where.branch).toBe("develop");
-    expect(guide.where.device).toContain("サブPC");
+    expect(guide.where.device).toContain("DeskMini");
   });
 
   it("チェック項目の前に置かれた前置きを落とさない（aide#59）", () => {
@@ -299,6 +302,7 @@ describe("parseManualStepGuide", () => {
       directory: null,
       branch: null,
       connect: null,
+      allHosts: false,
     });
   });
 
@@ -318,6 +322,7 @@ describe("parseManualStepGuide", () => {
       directory: null,
       branch: null,
       connect: null,
+      allHosts: false,
     });
   });
 
@@ -342,23 +347,23 @@ describe("parseManualStepGuide", () => {
 describe("手順のデバイス", () => {
   const MULTI_DEVICE = `## 前提条件
 
-- 実行するデバイス: **メインPC（ブラウザが要る）** と **サブPC**。サブPCへは \`ssh subpc\`
+- 実行するデバイス: **メインPC（ブラウザが要る）** と **DeskMini**。DeskMiniへは \`ssh subpc\`
 - カレントディレクトリ: \`~/apps/aide\`
 
 ## やること
 
 - [ ] （ブラウザ）dev.zaim.netでアプリを登録する
-- [ ] （サブPC）トークン取得スクリプトを実行する
+- [ ] （DeskMini）トークン取得スクリプトを実行する
 - [ ] 1Passwordへ5つのフィールドを足す
 `;
 
   it("手順の文頭の`（デバイス）`を拾い、一覧の見出しからは落とす", () => {
     const guide = parseManualStepGuide(MULTI_DEVICE);
 
-    expect(guide.steps.map((step) => step.device)).toEqual(["ブラウザ", "サブPC", null]);
+    expect(guide.steps.map((step) => step.device)).toEqual(["ブラウザ", "DeskMini", null]);
     expect(guide.steps[1].text).toBe("トークン取得スクリプトを実行する");
     // 本文として描くMarkdownは書かれたまま（GitHubと同じ見え方を崩さない）
-    expect(guide.steps[1].markdown).toBe("（サブPC）トークン取得スクリプトを実行する");
+    expect(guide.steps[1].markdown).toBe("（DeskMini）トークン取得スクリプトを実行する");
   });
 
   // **既定値を決められない本文**。「サブPCを含むから代行してよい」と読むと、ブラウザで
@@ -366,24 +371,24 @@ describe("手順のデバイス", () => {
   it("「実行するデバイス」に端末が複数書かれていたら既定値にしない", () => {
     const guide = parseManualStepGuide(MULTI_DEVICE);
 
-    expect(guide.where.device).toContain("サブPC");
+    expect(guide.where.device).toContain("DeskMini");
     expect(guide.where.defaultDevice).toBeNull();
     expect(resolveManualStepDevice(guide.where, guide.steps[2])).toBeNull();
   });
 
   it("デバイスの書かれていない手順は`## 前提条件`の既定値へ落ちる", () => {
     const guide = parseManualStepGuide(
-      "## 前提条件\n\n- 実行するデバイス: **サブPC**\n\n## やること\n\n- [ ] 更新する\n- [ ] （ブラウザ）画面で確かめる\n",
+      "## 前提条件\n\n- 実行するデバイス: **DeskMini**\n\n## やること\n\n- [ ] 更新する\n- [ ] （ブラウザ）画面で確かめる\n",
     );
 
-    expect(resolveManualStepDevice(guide.where, guide.steps[0])).toBe("サブPC");
+    expect(resolveManualStepDevice(guide.where, guide.steps[0])).toBe("DeskMini");
     expect(resolveManualStepDevice(guide.where, guide.steps[1])).toBe("ブラウザ");
   });
 
   // 端末の名前として読めない括弧書きは、印そのものが無かったことにする
   it("端末の名前でない括弧書きはデバイスとして読まない", () => {
     const guide = parseManualStepGuide(
-      "## やること\n\n- [ ] （初回のみ）鍵を作る\n- [ ] （サブPCとVPS）両方で流す\n",
+      "## やること\n\n- [ ] （初回のみ）鍵を作る\n- [ ] （DeskMiniとVPS）両方で流す\n",
     );
 
     expect(guide.steps.map((step) => step.device)).toEqual([null, null]);
@@ -393,16 +398,16 @@ describe("手順のデバイス", () => {
   // **散文からは推測しない。** 「メインPCのブラウザで」のような書き方は端末が1つに決まらない
   it("散文に出てくる端末名からはデバイスを推測しない", () => {
     const guide = parseManualStepGuide(
-      "## やること\n\n- [ ] サブPCで`git pull`する\n",
+      "## やること\n\n- [ ] DeskMiniで`git pull`する\n",
     );
 
     expect(guide.steps[0].device).toBeNull();
   });
 
   it("matchManualStepDeviceNamesは書かれている端末を列挙する", () => {
-    expect(matchManualStepDeviceNames("**サブPC**（`ssh subpc`）")).toEqual(["サブPC"]);
-    expect(matchManualStepDeviceNames("ブラウザ（1Password）とサブPC")).toEqual([
-      "サブPC",
+    expect(matchManualStepDeviceNames("**DeskMini**（`ssh subpc`）")).toEqual(["DeskMini"]);
+    expect(matchManualStepDeviceNames("ブラウザ（1Password）とDeskMini")).toEqual([
+      "DeskMini",
       "ブラウザ",
     ]);
     expect(matchManualStepDeviceNames("Zaimの開発者ページ")).toEqual([]);
@@ -495,5 +500,44 @@ describe("stripCodeBlocks（#2403）", () => {
 
   it("コードブロックが無ければそのまま", () => {
     expect(stripCodeBlocks("pollerを再起動する")).toBe("pollerを再起動する");
+  });
+});
+
+describe("ローカル・全ホストの端末表記（#5568）", () => {
+  it("（ローカル）と（DeskMini）と（Mac mini）はローカルとして読み、全ホストの印を拾う", () => {
+    expect(matchManualStepDeviceNames("ローカル（全ホスト）")).toEqual(["ローカル"]);
+    expect(matchManualStepDeviceNames("**Mac mini**")).toEqual(["Mac mini"]);
+    expect(isManualStepLocalDeviceLabel("DeskMini")).toBe(true);
+    expect(isManualStepLocalDeviceLabel("ローカル")).toBe(true);
+    expect(isManualStepLocalDeviceLabel("VPS")).toBe(false);
+    expect(hasAllHostsMarker("ローカル・全ホスト")).toBe(true);
+    expect(hasAllHostsMarker("ローカル")).toBe(false);
+  });
+
+  it("手順の文頭の（ローカル・全ホスト）から端末と全ホストの印を読む", () => {
+    const guide = parseManualStepGuide(
+      "## やること\n\n- [ ] （ローカル・全ホスト）`.env`へ値を足す\n- [ ] （ローカル）GitHubを設定する\n- [ ] （VPS）再起動する\n",
+    );
+    expect(guide.steps.map((step) => [step.device, step.allHosts])).toEqual([
+      ["ローカル", true],
+      ["ローカル", false],
+      ["VPS", false],
+    ]);
+    expect(guide.steps[0].text).toBe(".envへ値を足す");
+  });
+});
+
+describe("旧表記「サブPC」の互換（#5576）", () => {
+  it("既存Issueの`（サブPC）`も新表記の`（DeskMini）`も、同じ端末名として読む", () => {
+    const body = `## やること
+
+- [ ] （サブPC）旧表記の手順
+- [ ] （DeskMini）新表記の手順
+`;
+    const guide = parseManualStepGuide(body);
+
+    expect(guide.steps.map((step) => step.device)).toEqual(["DeskMini", "DeskMini"]);
+    expect(isManualStepLocalDeviceLabel("DeskMini")).toBe(true);
+    expect(matchManualStepDeviceNames("サブPCで実行する")).toContain("DeskMini");
   });
 });

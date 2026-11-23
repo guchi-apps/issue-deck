@@ -296,7 +296,7 @@ export function decideNextWindowRunLaunch(input: {
 
 /** 期限切れで見送るときの理由（人が読む文） */
 export function describeNextWindowRunExpired(): string {
-  return `${NEXT_WINDOW_RUN_EXPIRY_HOURS}時間のあいだに起動できませんでした（サブPCが応答していなかった可能性があります）`;
+  return `${NEXT_WINDOW_RUN_EXPIRY_HOURS}時間のあいだに起動できませんでした（DeskMiniが応答していなかった可能性があります）`;
 }
 
 /**
@@ -403,7 +403,7 @@ export function describeNextWindowRunSchedule(
     return `${describeNextWindowRunQuotaBlock(window.quotaBlock)}。残りが下限を上回るまで起動を見送ります。`;
   }
   if (window.phase === "idle") {
-    return "いま5時間枠は動いていません。予定はサブPCの次の巡回で起動します（そこから新しい枠が始まります）。";
+    return "いま5時間枠は動いていません。予定はDeskMiniの次の巡回で起動します（そこから新しい枠が始まります）。";
   }
   if (window.phase === "open") {
     const at = window.resetsAt ? formatTimeOfDay(window.resetsAt) : "";

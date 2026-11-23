@@ -121,7 +121,7 @@ const REPOSITORY = "guchi-apps/issue-deck";
 
 const BODY = `## 前提条件
 
-- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- 実行するデバイス: **DeskMini**（メインPCからなら \`ssh subpc\`）
 - カレントディレクトリ: \`~/apps/issue-deck\`
 
 ## やること
@@ -188,7 +188,7 @@ beforeEach(() => {
   repositoryFindFirst.mockResolvedValue({ id: "repo-1" });
   issueFindFirst.mockResolvedValue({
     body: BODY,
-    title: "[手作業] サブPC: pollerを更新する",
+    title: "[手作業] DeskMini: pollerを更新する",
     githubIssueId: BigInt(42),
     labels: [{ name: "71.manual-step" }],
   });
@@ -340,7 +340,7 @@ describe("advanceManualStepRun", () => {
   it("代行できない手順に来たら、人の実行を待って止まる", async () => {
     // サブPC・VPS以外の手作業＝どの項目も代行できない
     issueFindFirst.mockResolvedValue({
-      body: BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "**ブラウザ**"),
+      body: BODY.replace("**DeskMini**（メインPCからなら `ssh subpc`）", "**ブラウザ**"),
       title: "[手作業] ブラウザ: 設定を変える",
       githubIssueId: BigInt(42),
       labels: [{ name: "71.manual-step" }],
@@ -364,7 +364,7 @@ describe("advanceManualStepRun", () => {
     const checkedBody = BODY.replace(/- \[ \]/g, "- [x]");
     issueFindFirst.mockResolvedValue({
       body: checkedBody,
-      title: "[手作業] サブPC: pollerを更新する",
+      title: "[手作業] DeskMini: pollerを更新する",
       githubIssueId: BigInt(42),
       labels: [{ name: "71.manual-step" }],
     });
@@ -574,7 +574,7 @@ describe("対話が要るコマンドを含む項目", () => {
     applyUpdate(created);
     issueFindFirst.mockResolvedValue({
       body: INTERACTIVE_BODY,
-      title: "[手作業] サブPC: シークレットを同期する",
+      title: "[手作業] DeskMini: シークレットを同期する",
       githubIssueId: BigInt(42),
       labels: [{ name: "71.manual-step" }],
     });
@@ -618,7 +618,7 @@ describe("対話が要るコマンドを含む項目", () => {
     applyUpdate(created);
     issueFindFirst.mockResolvedValue({
       body,
-      title: "[手作業] サブPC: シークレットを同期する",
+      title: "[手作業] DeskMini: シークレットを同期する",
       githubIssueId: BigInt(42),
       labels: [{ name: "71.manual-step" }],
     });

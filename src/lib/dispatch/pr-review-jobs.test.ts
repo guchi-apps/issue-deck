@@ -90,7 +90,7 @@ beforeEach(() => {
 });
 
 describe("requestPrReviewJob", () => {
-  it("実行できるサブPCが無ければ、積まずに理由つきで断る（起動前の失敗を即座に確定する）", async () => {
+  it("実行できるDeskMiniが無ければ、積まずに理由つきで断る（起動前の失敗を即座に確定する）", async () => {
     dispatchHostFindMany.mockResolvedValue([host({ prReviewCapable: null })]);
     const result = await requestPrReviewJob({ target, baseSha: BASE, workflowRunId: "999", now: NOW });
     expect(result).toMatchObject({ ok: false, rejection: "no_host" });

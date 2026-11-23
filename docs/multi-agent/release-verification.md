@@ -76,7 +76,7 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
   OpenAI系ならCodex、それ以外はClaude Code。AIモデル設定画面は同じ関数で実効担当を表示する。モデルは`DispatchJob.claudeModel`／`codexModel`に載り、結果の`agent`（`claude:opus`など）として記録される
 - サブPCのpoller（`DISPATCH_POLLER_VERSION=36`以降・`releaseReview`を申告→`DispatchHost.releaseReviewCapable`）が`scripts/run-release-review.sh`をtmuxで起動する。
   `base...head`の差分を読み取り専用のAI（Claudeは`Read`・`Grep`・`Glob`のみ許可）へ渡す。
-  **差分は1バッチ既定300,000文字（`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`）でバッチに分けて順に確認し、容量を超えた分も黙って除外せず次のバッチで確認する**（#4615）。
+  **差分は1バッチ既定300,000文字（`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`）かつ既定50ファイル（`ISSUE_DECK_RELEASE_REVIEW_MAX_FILES_PER_BATCH`。小さい変更が多いとAIが確認実績を省略しやすいため。#5597）でバッチに分けて順に確認し、容量を超えた分も黙って除外せず次のバッチで確認する**（#4615）。
   1ファイルが上限を超えるときは断片に分け、全断片の確認が揃って初めて確認済みになる。全バッチの後に、バッチをまたぐ相互作用（`pr_interaction`ほか）を別に確認し、
   バッチごとの合格の単純集計で済ませない
 - **複数バッチの項目の集計（#4768）**: 以前は「全バッチ＋相互作用の確認」の`batch_count+1`件がそろって全部が確認済み・非該当でないと未確認にしており、
@@ -91,8 +91,8 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
   差分を取得できないものは取得不能として別に数える。ファイル別の実績を持たない旧結果は件数不明（`reviewedFiles=null`・画面は「実績不明」）
 - **パスの正規化と取りこぼしの補完（#4768）**: AIが`./src/a.ts`・`/src/a.ts`・`src\a.ts`・作業ディレクトリの絶対パスで報告しても、照合の前に差分のパスへ揃える
   （ランナーの`JQ_NPATH`とサーバーの`normalizeReviewPath`。作業ディレクトリの除去はランナーだけ）。それでも報告の無い・根拠が空のファイル
-  （取得不能と報告されたものは除く）が残ったら、全バッチの後に**そのファイルの差分だけを載せた補完の質問を1回だけ**行う（分割したファイルは取りこぼした断片だけを載せる）。
-  上限は対象`ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES`（既定40ファイル）・差分`DIFF_BUDGET_BYTES`・時間`ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS`（既定600秒）で、
+  （取得不能と報告されたものは除く）が残ったら、全バッチの後に**そのファイルの差分だけを載せた補完の質問**を行う。**取りこぼしが解消するか`ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_ROUNDS`（既定3回）に達するまで繰り返す**（#5597。1回に入らなかった分を次の回が聞き直す。各回の結果は`rsup.json`へ積み上げる）（分割したファイルは取りこぼした断片だけを載せる）。
+  上限は1回あたりの対象`ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES`（既定40ファイル）・差分`DIFF_BUDGET_BYTES`・時間`ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS`（既定600秒）で、
   入らなかったファイルは聞き直さない。補完が失敗しても全体レビューは失敗にせず、**補完しても残ったファイルだけが`unverifiedScope`の未確認に入る**。
   補完の結果は`rsup.json`（聞き直した一覧は`rsup.asked`）へ保存し、同じ対象の再実行では再利用する（バッチを1つでもやり直したら補完もやり直す）。補完で確認済みになった数は`supplementedFiles`。
   補完の応答の確認項目は集計に使わず、指摘だけを合わせる

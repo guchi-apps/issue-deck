@@ -12,7 +12,6 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
-  Play,
   RotateCcw,
   TerminalSquare,
   Trash2,
@@ -56,6 +55,7 @@ import {
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { StartSplitTrigger } from "@/components/dashboard/start-split-trigger";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -308,6 +308,9 @@ export function MobileIssueDetail({
     setError: setDeleteError,
   } = useIssueMutations();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // 「実装を開始」分割ボタン（#5569）。▼で選んだ実行先を選択済みにしてダイアログを開く
+  const [isStartDialogOpen, setIsStartDialogOpen] = useState(false);
+  const [startPresetHost, setStartPresetHost] = useState<string | null>(null);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   // 保留を選んだ時点で操作メニューも閉じる（#2458）。「いまは実施しない」はメニューを
@@ -1075,6 +1078,7 @@ export function MobileIssueDetail({
                 prerequisiteSummary={manualStepPrerequisites.summary}
                 dependents={manualStepPrerequisites.dependents}
                 verifiedAt={issue.manualStepVerifiedAt}
+                hostApplications={issue.manualStepHostApplications}
                 comments={comments}
                 configTargets={infraConfigTargets}
                 onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
@@ -1113,17 +1117,29 @@ export function MobileIssueDetail({
                 defaultDispatchAgent={defaultDispatchAgent}
                 dispatchFailoverEnabled={dispatchFailoverEnabled}
                 dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                renderTrigger={(isSubmitting) => (
-                  <Button className="w-full" disabled={isSubmitting}>
-                    {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
-                    {startLabel}
-                  </Button>
-                )}
+                open={isStartDialogOpen}
+                onOpenChange={setIsStartDialogOpen}
+                presetHost={startPresetHost}
+              />
+            )}
+            {showStartDialog && (
+              <StartSplitTrigger
+                fullWidth
+                label={startLabel}
+                hostNames={dispatch.hosts.map((host) => host.name)}
+                onStartDefault={() => {
+                  setStartPresetHost(null);
+                  setIsStartDialogOpen(true);
+                }}
+                onStartOnHost={(hostName) => {
+                  setStartPresetHost(hostName);
+                  setIsStartDialogOpen(true);
+                }}
               />
             )}
 
-            {/* サブPCへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
-                兼ねる。サブPCの申告が無ければこの導線ごと出ない。
+            {/* DeskMiniへのディスパッチ（#1180）。積んだ結果（順番待ち・起動中・失敗）を出す場所も
+                兼ねる。DeskMiniの申告が無ければこの導線ごと出ない。
                 起動ボタンは、すぐ上の「実装を開始」（既定の実行先を文言にしている・#1262）が
                 出ていないときだけ出す（#1349）。もう走っているIssueではどちらも出さない（#1667）。
                 `11.local`だけが付いている状態（#1815）ではここが唯一の起動導線になる

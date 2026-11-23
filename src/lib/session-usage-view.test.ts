@@ -428,7 +428,7 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byKind[0].byAgent.codex.sessions).toBe(1);
   });
 
-  it("「CI/CD・レビュー」にActionsのClaudeとサブPCのCodexを並べ、種別・日別・エージェント・Issue別・総計が一致する（#3995）", () => {
+  it("「CI/CD・レビュー」にActionsのClaudeとDeskMiniのCodexを並べ、種別・日別・エージェント・Issue別・総計が一致する（#3995）", () => {
     const entries = [
       entry({ sessionId: "impl", costUsd: 5 }),
       entry({

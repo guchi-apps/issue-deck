@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { resolveImplementationProvider } from "@/lib/dispatch/implementation-provider";
 import { DISPATCH_HOST_ONLINE_WINDOW_MS, buildDispatchActiveKey, parseDispatchHostRepositories } from "@/lib/dispatch/dispatch-job";
@@ -76,9 +77,9 @@ export async function requestReviewFixJob(target: ReviewFixTarget) {
   const where = { kind: "REVIEW_FIX" as const, repositoryFullName: target.repository, issueNumber: target.issueNumber, headSha: target.headSha };
   const prior = await db.dispatchJob.findFirst({ where, orderBy: { createdAt: "desc" } });
   if (prior && (!target.manual || ["QUEUED", "CLAIMED", "RUNNING", "SUCCEEDED"].includes(prior.status) || prior.workflowRunId === target.runId)) return prior;
-  const hosts = await db.dispatchHost.findMany({ where: { reviewFixCapable: true, codexCapable: true, lastSeenAt: { gte: new Date(Date.now() - DISPATCH_HOST_ONLINE_WINDOW_MS) } }, orderBy: { name: "asc" } });
+  const hosts = sortDispatchHosts(await db.dispatchHost.findMany({ where: { reviewFixCapable: true, codexCapable: true, lastSeenAt: { gte: new Date(Date.now() - DISPATCH_HOST_ONLINE_WINDOW_MS) } }, orderBy: { name: "asc" } }));
   const host = hosts.find((h) => parseDispatchHostRepositories(h.repositories).includes(target.repository));
-  if (!host) throw new Error("レビュー修正に対応するサブPCがありません。pollerを更新し、オンライン状態を確認してください");
+  if (!host) throw new Error("レビュー修正に対応するDeskMiniがありません。pollerを更新し、オンライン状態を確認してください");
   try {
     const created = await db.dispatchJob.create({ data: { ...where, targetHost: host.name, agent: "codex", status: "QUEUED", prNumber: target.pullRequest, instruction: target.manual ? "manual" : "automatic", workflowRunId: target.runId ?? null, activeKey: buildDispatchActiveKey(target.repository, target.issueNumber), } });
     notifyDispatchHostWake(created.targetHost);

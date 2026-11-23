@@ -8,7 +8,7 @@ import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request
 import { checkUserReason } from "@/lib/github/approval-labels";
 
 /** Issue一覧の行に出す計画レビューの状態（#3607） */
-export type PlanReviewListState = "queued" | "queued_overdue" | "creating" | "presented";
+export type PlanReviewListState = "queued" | "queued_overdue" | "creating";
 
 /**
  * 計画の承認を伏せる（「計画を承認」ボタン・承認待ちの橙・Remoteの強調を出さない）状態か（#4869）。
@@ -27,11 +27,9 @@ export function isPlanReviewListStateHolding(state: PlanReviewListState | null):
  * - `queued_overdue`: 猶予を超えても起動していない。バッジは起動待ちのまま出し続けるが、
  *   承認は伏せない（#4869。`isPlanReviewListStateHolding`）
  * - `creating`: ジョブが実行中、または成功から猶予内（`resolvePlanReviewJobPhase`。詳細画面と同じ）
- * - `presented`: 成功したジョブがあり、計画の承認待ち（`00.check-user`＋`01.check-plan`）のとき。
- *   承認待ちは`WAITING`ではなくラベルで見る（`WAITING`は期限切れで一覧から消えるため）。
- *   計画リクエストが残っている間は、ジョブが今の計画に対するもの（作成が計画より後）に限る。
- *   期限切れ後は比較できないので、ジョブの存在だけで判定する（新しいジョブが積まれないまま
- *   承認待ちが期限切れになった後は、前回のジョブで「提示済」が出うる）
+ * - それ以外（作成を終えた後）は`null`。**「提示済」の状態は持たない**（#5571）。確認を求める
+ *   段階は計画レビューが出ている（タイムアウトで出なかった場合を含む）前提で表示するため、
+ *   一覧に「計画レビュー提示済」を出す意味が無い
  *
  * 一覧はコメント本文を持たないため、指摘コメントの実在までは見ない。
  */
@@ -48,12 +46,7 @@ export function resolvePlanReviewListState(params: {
   const phase = resolvePlanReviewJobPhase(job, params.now);
   if (phase === "queued" || phase === "queued_overdue") return phase;
   if (phase === "creating") return "creating";
-  if (job.status !== "SUCCEEDED") return null;
-  if (checkUserReason(params.labels) !== "plan") return null;
-  // 今の計画待ちより前に積まれたジョブは前の計画へのレビュー。**計画待ちはレビューのジョブより
-  // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）
-  if (params.planRequest !== null && job.createdAt < params.planRequest.createdAt) return null;
-  return "presented";
+  return null;
 }
 
 /**
