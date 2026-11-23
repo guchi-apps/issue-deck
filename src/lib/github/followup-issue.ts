@@ -31,3 +31,23 @@ export function composeIssueBody(bodyPrefix: string | null | undefined, body: st
   const separator = bodyPrefix.endsWith("\n\n") ? "" : bodyPrefix.endsWith("\n") ? "\n" : "\n\n";
   return `${bodyPrefix}${separator}${body}`;
 }
+
+/**
+ * 「引き継いでIssueを作成」で、新規Issueのタイトルの先頭に**固定で付く**接頭辞（#5623）。
+ * 一覧で「何の修正か」が分かるよう、元Issue番号を入れる。本文の接頭辞と同じく入力欄には入れない。
+ */
+export function buildFollowupIssueTitlePrefix(issue: Pick<Issue, "number">): string {
+  return `修正 #${issue.number}:`;
+}
+
+/**
+ * タイトルの固定接頭辞と入力（またはAIが付けた）タイトルを連結する。
+ * 入力が既に接頭辞で始まっている場合は付け足さない（二重付与の防止）。入力が空なら接頭辞だけにはしない。
+ */
+export function composeIssueTitle(titlePrefix: string | null | undefined, title: string): string {
+  if (!titlePrefix) return title;
+  const trimmed = title.trim();
+  if (!trimmed) return title;
+  if (trimmed.startsWith(titlePrefix)) return trimmed;
+  return `${titlePrefix} ${trimmed}`;
+}
