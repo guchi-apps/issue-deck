@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { extractVerificationCommands } from "@/lib/manual-step-command";
+import { extractVerificationCommands, resolveManualStepRunTarget } from "@/lib/manual-step-command";
 import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
@@ -107,13 +107,15 @@ export async function listManualStepHostApplications(
     const guide = parseManualStepGuide(issue.body);
     if (!isManualStepAllHostsGuide(guide)) return [];
     const commands = extractVerificationCommands(issue.body).map((entry) => entry.command);
-    return commands.length === 0 ? [] : [{ ...issue, commands }];
+    // 確認コマンドをVPSで流す手作業は、VPSへ到達できるホストだけが対象（#5587）
+    const onVps = resolveManualStepRunTarget(guide.where.defaultDevice) === "vps";
+    return commands.length === 0 ? [] : [{ ...issue, commands, onVps }];
   });
   const result = new Map<string, ManualStepHostApplication[]>();
   if (targets.length === 0) return result;
 
   const [hosts, jobs] = await Promise.all([
-    db.dispatchHost.findMany({ where: { manualStepCapable: true }, select: { name: true } }),
+    db.dispatchHost.findMany({ where: { manualStepCapable: true }, select: { name: true, manualStepVpsCapable: true } }),
     db.dispatchJob.findMany({
       where: {
         kind: "MANUAL_STEP",
@@ -130,13 +132,16 @@ export async function listManualStepHostApplications(
     }),
   ]);
   const hostNames = hosts.map((host) => host.name);
+  // **VPS手順は、VPS対応と申告したホストだけを数える。** 非対応のホストは何度流しても
+  // `manual_step_vps_unsupported`で弾かれ、永遠に未適用のまま全ホスト完了を止める（#5587）
+  const vpsHostNames = hosts.filter((host) => host.manualStepVpsCapable === true).map((h) => h.name);
 
   for (const target of targets) {
     result.set(
       `${target.repositoryFullName}#${target.number}`,
       computeManualStepHostApplications({
         commands: target.commands,
-        hosts: hostNames,
+        hosts: target.onVps ? vpsHostNames : hostNames,
         succeededJobs: jobs.filter(
           (job) =>
             job.repositoryFullName === target.repositoryFullName &&
