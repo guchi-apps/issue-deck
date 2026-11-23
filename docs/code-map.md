@@ -1086,7 +1086,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     押した送信の直前（または「付け直す」）に呼ぶ`POST /api/issues/suggest`の応答に`kind`
     （`issue` / `question`）が乗っており、`question`のときは提案を出して作成を中断する（#2773）。
     提案の「リモートセッションで聞く」はダイアログを閉じてリモートセッション画面へ移り（書きかけは
-    下書きに残る）、「Issueのままにする」なら次の「作成」でそのまま作る。別ウィンドウ（`/issues/new`）では
+    下書きに残り、タイトル・本文は移った先の「最初の指示」欄へ転記される。#5628・[remote-session.md](remote-session.md)）、「Issueのままにする」なら次の「作成」でそのまま作る。別ウィンドウ（`/issues/new`）では
     移る先の画面が無いため、ボタンを出さず案内の文だけにする。判定の実体は
     [`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)で、タイトル・ラベルの生成と
     同じ1回の呼び出しに相乗りさせる
