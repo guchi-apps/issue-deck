@@ -2136,6 +2136,11 @@ export function IssueDeckShell({
              万一走ったときに開いている詳細を閉じる（＝一覧へ戻る）ようにしておく。
              閉じる側は履歴を積まない（積むと戻る操作のたびに履歴が伸びる。#1396）。 */
           aiSearch={topBarAiSearch}
+          /* iPad横向きなどPC用レイアウトの手動更新（#5618）。Issueの取得完了までを待たせる */
+          onRefresh={async () => {
+            openPullRequests.refreshInBackground();
+            await issuePolling.refresh();
+          }}
           canGoBack={canGoBack}
           onBack={() =>
             goBackOrFallback(() => {

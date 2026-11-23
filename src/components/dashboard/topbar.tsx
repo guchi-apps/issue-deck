@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -95,6 +96,12 @@ type TopBarProps = {
   onBack: () => void;
   /** 検索欄の「AIで探す」（#1788） */
   aiSearch: TopBarAiSearch;
+  /**
+   * Issue・PRを今すぐ取り直す（#5618）。iPad横向きはPC用レイアウトになり、スマホの
+   * 「引っ張って更新」も使えないため、別アプリで作ったIssueを手動で取り込む入口として置く。
+   * 渡さない場合はボタンを出さない。
+   */
+  onRefresh?: () => Promise<unknown> | void;
 };
 
 export function TopBar({
@@ -119,7 +126,18 @@ export function TopBar({
   canGoBack,
   onBack,
   aiSearch,
+  onRefresh,
 }: TopBarProps) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    if (!onRefresh || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // 検索欄はURL（filters.q）に直接バインドすると、1文字入力するたびにrouter.replaceによる
   // ナビゲーションが走り入力が遅く感じられる（#1024）。入力自体はローカルstateで即時反映し、
@@ -370,6 +388,22 @@ export function TopBar({
         <Plus />
         新規
       </Button>
+
+      {/* 今すぐ更新（#5618）。iPadのタップしやすさのため36pxを確保する */}
+      {onRefresh && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-9"
+          aria-label="Issue・PRを今すぐ更新"
+          title="Issue・PRを今すぐ更新"
+          disabled={isRefreshing}
+          onClick={() => void handleRefresh()}
+        >
+          <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
+        </Button>
+      )}
 
       {/* DeskMiniで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
       <DispatchQueueButton onOpenIssue={onOpenIssue} />
