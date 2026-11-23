@@ -208,6 +208,27 @@ describe("runManualStepVerificationPatrol", () => {
     );
   });
 
+  it("別リポジトリに同じIssue番号の候補が混在しても、実行先の種別を取り違えない（#5606）", async () => {
+    issueFindMany.mockResolvedValue([
+      issueRow(),
+      {
+        ...issueRow({ body: BODY.replace("**DeskMini**（`ssh subpc`）", "VPS") }),
+        repository: { fullName: "guchi-apps/other-app" },
+      },
+    ]);
+    dispatchHostFindMany.mockResolvedValue([
+      { name: "aaa-host", manualStepCapable: true, manualStepVpsCapable: null, lastSeenAt: NOW },
+      { name: "macmini", manualStepCapable: true, manualStepVpsCapable: true, lastSeenAt: NOW },
+    ]);
+
+    await patrol.runManualStepVerificationPatrol(NOW);
+
+    // 先頭はDeskMini向けの候補。同番号のVPS候補に引きずられてVPS対応ホストへ積まない
+    expect(enqueueManualStepJob).toHaveBeenCalledWith(
+      expect.objectContaining({ repositoryFullName: REPOSITORY, hostName: "aaa-host" }),
+    );
+  });
+
   it("代行実行を申告して応答しているホストが居なければ何もしない", async () => {
     dispatchHostFindMany.mockResolvedValue([
       { name: "subpc", manualStepCapable: true, lastSeenAt: new Date("2026-08-19T00:00:00.000Z") },
