@@ -17,6 +17,8 @@ export type IssueCreateHandoff = {
   assignee: string | null;
   /** 本文の先頭に固定で付くテキスト（引き継ぎ作成・#1322）。入力欄には入らないため別に運ぶ */
   bodyPrefix: string | null;
+  /** タイトルの先頭に固定で付くテキスト（引き継ぎ作成・#5623）。旧形式（キー無し）はnull */
+  titlePrefix: string | null;
   savedAt: number;
 };
 
@@ -74,6 +76,7 @@ export function parseIssueCreateHandoff(raw: string | null, now: number): IssueC
       : [],
     assignee: typeof parsed.assignee === "string" ? parsed.assignee : null,
     bodyPrefix: typeof parsed.bodyPrefix === "string" ? parsed.bodyPrefix : null,
+    titlePrefix: typeof parsed.titlePrefix === "string" ? parsed.titlePrefix : null,
     savedAt: parsed.savedAt,
   };
 }

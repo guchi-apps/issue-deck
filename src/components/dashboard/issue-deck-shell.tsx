@@ -129,7 +129,7 @@ import {
 } from "@/lib/check-user-notification";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { subscribeIssueCreated } from "@/lib/issue-broadcast";
-import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
+import { buildFollowupIssueBodyPrefix, buildFollowupIssueTitlePrefix } from "@/lib/github/followup-issue";
 import {
   buildCodeReviewFindingIssueDraft,
   isCodeReviewIssue,
@@ -426,6 +426,7 @@ export function IssueDeckShell({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
+  const [createDialogTitlePrefix, setCreateDialogTitlePrefix] = useState<string | null>(null);
   const [createDialogTitle, setCreateDialogTitle] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
   /**
@@ -506,6 +507,7 @@ export function IssueDeckShell({
   function openCreateDialog(defaultRepositoryFullName?: string | null) {
     setCreateDialogRepo(defaultRepositoryFullName ?? null);
     setCreateDialogBodyPrefix(null);
+    setCreateDialogTitlePrefix(null);
     clearConfigIssuePrefill();
     setCreateDialogOpen(true);
   }
@@ -535,6 +537,7 @@ export function IssueDeckShell({
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
+    setCreateDialogTitlePrefix(null);
     setConfigIssueOrigin(issue);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);
@@ -562,6 +565,7 @@ export function IssueDeckShell({
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
+    setCreateDialogTitlePrefix(null);
     setConfigIssueOrigin(null);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);
@@ -600,6 +604,7 @@ export function IssueDeckShell({
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
+    setCreateDialogTitlePrefix(null);
     setConfigIssueOrigin(null);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);
@@ -617,6 +622,7 @@ export function IssueDeckShell({
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(draft.bodyPrefix ?? null);
+    setCreateDialogTitlePrefix(null);
     setConfigIssueOrigin(null);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);
@@ -646,6 +652,7 @@ export function IssueDeckShell({
   function openFollowupIssueDialog(issue: Issue) {
     setCreateDialogRepo(issue.repositoryFullName);
     setCreateDialogBodyPrefix(buildFollowupIssueBodyPrefix(issue));
+    setCreateDialogTitlePrefix(buildFollowupIssueTitlePrefix(issue));
     clearConfigIssuePrefill();
     setCreateDialogOpen(true);
   }
@@ -2966,6 +2973,7 @@ export function IssueDeckShell({
           defaultTitle={createDialogTitle}
           defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
+          titlePrefix={createDialogTitlePrefix}
           issues={allIssues}
           // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
           onCreated={registerCreatedIssue}
