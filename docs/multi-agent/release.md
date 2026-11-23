@@ -1202,6 +1202,17 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - **競合（GitHubの`mergeable`）が「確認中」でも公開承認は止めない**（#5178・#5361。#5305で一度「判定が出るまで押せない」にしたが、GitHubの遅延計算で承認が押せない時間だけが生じ、安全性は増えていなかったため戻した）。止めるのは`false`（競合ありと確定）のときだけ（`decideConflictBlock`）。判定中を止めなくてよい根拠は3つ——統合検証が`scripts/run-release-verify.sh`でmain先端（base SHA）へheadを実際に`git merge`して合格していること、承認時にmain・headが検証時と一致することを確かめていること、そして承認後の本番mainへのマージは`decideCompletionMerge`がマージ直前に取り直した候補で判定し、`null`（GitHubが計算中）なら`mergeable_unknown`で待ち、`false`なら止めること（マージAPIにもHEADのSHAを渡す）。本番PR詳細「現在候補の検証」の競合セルは、確認中のとき理由欄でこの関係を案内する。競合の確認自体は残す（base SHA一致の検査は候補作成後のmainの前進しか捕まえず、本番復旧PRのようにdevelopを経由せずmainへ入った変更との競合はGitHubの判定でしか分からないため）
 - PR詳細API（`/api/pull-requests/detail`）は、openなPRの`mergeable`が未判定なら1秒おきに最大2回取り直してから返す（`settlePullRequestMergeable`）。GitHubは単体取得を契機に非同期で計算するため初回はnullになりやすく、詳細はポーリングしないので「確認中」が再読み込みまで残っていた
 
+### 公開承認の自動化（#5629）
+
+公開承認が「ほぼ確認せず押される」形だけの操作になっていたため、**作った側（Claude）とは別系統のエージェントが全体レビューを指摘なしで合格させた**ことを根拠に、巡回が代わりに承認する。判断は純関数`src/lib/release-auto-approval.ts`の`decideAutoApproval`、巡回は`release-auto-approval-run.ts`（`deploy-recovery-series/sweep`へ相乗り）。
+
+- **設定は`AppSetting.releaseAutoApprovalEnabled`（既定OFF）。** `GET/PATCH /api/settings/release-auto-approval`で切り替える。OFFなら候補も読まない
+- **承認する条件（全て）**: `review`段階で公開準備の契約が出ている（CI・統合検証・Mac検証が合格）／全体レビューが合格している（`requiresAiReviewWaiver: false`。承知で進む明示が要る候補は自動承認しない）／現在のbase/headに対する`ai_review`の担当（`ReleaseVerification.agent`）が**Claude以外**／候補PRに`22.merge-confirm-required`・`00.check-user`が無い
+- **独立性の置き方**: 全体レビューの担当は設定の「アプリ内AI：原因診断・新規アプリ相談」（`appAiModelReasoning`）で決まる。Codex（OpenAI系）にしておくと、Claudeが実装したコードをCodexが検証する形になる。担当がClaudeのままなら承認は出ず、人が押す従来の流れのまま
+- **承認の作成経路は増やさない。** 既存の`requestRcFinalize`を、候補の作成者を承認者・上げ幅自動判定・要求キー`auto-<候補>-<head>`（人の承認と区別できる）で呼ぶ。押した時点のhead・mainの先端・契約が一致するときだけ受け付ける検査も同じ。再送しても公開準備を二重に作らない
+- **自動マージ不可カテゴリは再判定しない**（認証・DBスキーマ・Secrets等は各PRの作成・マージ時に確認済みの前提）。人の確認ラベルだけは、正式バンプへ進む前に止める
+- **マージ操作は従来のまま**。承認後の自動公開の系列（`decideCompletionMerge`）・失効・取消・期限（24時間）も変えない。マージ操作を持つ場所は増やさない（[gates.md](gates.md)）
+
 ### 全体レビューは公開の必須条件ではない（#4807）
 
 **公開に必須なのはCI・統合検証（とMac検証・pre-releaseの前提・人の確認ラベル）で、全体レビュー（`ai_review`）は人が結果を承知で明示すれば外せる。** AIの全体レビューは指摘の取りこぼしを補う安全網で、指摘・実行失敗・未完了（バッチの途中・未確認範囲）が残るたびに公開を止め続けると、レビュー自体を100%完了させない限り本番へ出せなくなっていた。逆に、承知の明示なしに自動で外すと重大な指摘も素通りするため、**外すのは人の操作だけ**にする。

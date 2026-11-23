@@ -614,6 +614,10 @@ model AppSetting {
   // 最悪の状態が成立する。nullの間は自動削除を一切行わない
   imageScanCompletedAt DateTime?
 
+  // RCの公開承認の自動化（#5629）。ONのとき、Claude以外の別系統が全体レビューを指摘なしで合格させた候補を、
+  // 人が押さなくても巡回が公開承認する。**既定はOFF**——本番公開に進む承認の代行なので、人が納得してから有効にする
+  releaseAutoApprovalEnabled           Boolean @default(false)
+
   // 次枠実行（#2995）。「次の5時間枠」に積んだIssueを、**いまの5時間枠の残りが
   // `nextWindowRunLeadMinutes`分を切ってから**サブPCへ1件ずつ起動する。
   // **既定はOFF**——無人で実装が進む処理なので、画像の自動削除と同じく人が納得してから有効にする
