@@ -2380,12 +2380,24 @@ export type ReassignDispatchJobResult =
  */
 export async function reassignDispatchJob(params: {
   jobId: string;
+  /** 操作している利用者。ジョブのリポジトリが利用者のinstallationに属さなければ`not_found`で返す（認可の境界） */
+  userId: string;
   toHostName: string;
   now?: Date;
 }): Promise<ReassignDispatchJobResult> {
   const now = params.now ?? new Date();
   const job = await db.dispatchJob.findUnique({ where: { id: params.jobId } });
   if (!job) return { ok: false, reason: "not_found", message: "ジョブが見つかりません。" };
+
+  // 他の利用者のリポジトリのジョブは、存在も明かさず`not_found`で返す
+  const authorized = await db.repository.findFirst({
+    where: {
+      fullName: job.repositoryFullName,
+      installation: { userInstallations: { some: { userId: params.userId } } },
+    },
+    select: { id: true },
+  });
+  if (!authorized) return { ok: false, reason: "not_found", message: "ジョブが見つかりません。" };
 
   if (job.status !== "QUEUED") {
     return {
