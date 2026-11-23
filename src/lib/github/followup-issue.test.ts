@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFollowupIssueBodyPrefix, composeIssueBody } from "@/lib/github/followup-issue";
+import {
+  buildFollowupIssueBodyPrefix,
+  buildFollowupIssueTitlePrefix,
+  composeIssueBody,
+  composeIssueTitle,
+} from "@/lib/github/followup-issue";
 
 const issue = {
   repositoryFullName: "owner/repo",
@@ -46,5 +51,23 @@ describe("composeIssueBody", () => {
   it("入力が空の場合は接頭辞の末尾の空行を残さない", () => {
     expect(composeIssueBody("引き継ぎ元\n\n", "")).toBe("引き継ぎ元");
     expect(composeIssueBody("引き継ぎ元\n\n", "   \n")).toBe("引き継ぎ元");
+  });
+});
+
+describe("タイトルの固定接頭辞（#5623）", () => {
+  it("元Issue番号を含む接頭辞を作る", () => {
+    expect(buildFollowupIssueTitlePrefix(issue)).toBe("修正 #815:");
+  });
+
+  it("接頭辞の後ろへタイトルを連結する", () => {
+    expect(composeIssueTitle("修正 #815:", "一覧を直す")).toBe("修正 #815: 一覧を直す");
+  });
+
+  it("接頭辞が無ければそのまま返す", () => {
+    expect(composeIssueTitle(null, "一覧を直す")).toBe("一覧を直す");
+  });
+
+  it("すでに接頭辞で始まる場合は二重に付けない", () => {
+    expect(composeIssueTitle("修正 #815:", "修正 #815: 一覧を直す")).toBe("修正 #815: 一覧を直す");
   });
 });

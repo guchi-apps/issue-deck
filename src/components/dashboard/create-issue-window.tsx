@@ -87,6 +87,7 @@ export function CreateIssueWindow({
       initialHandoff={state.handoff}
       defaultRepositoryFullName={state.handoff?.repositoryFullName ?? null}
       bodyPrefix={state.handoff?.bodyPrefix ?? null}
+      titlePrefix={state.handoff?.titlePrefix ?? null}
       cancelLabel={state.hasOpener ? "閉じる" : "デッキへ戻る"}
       // 作ったIssueは元のデッキの一覧へその場で加える。伝わらなくても一覧のポーリングで
       // 10秒以内に現れるため、ここでは失敗しても止めない

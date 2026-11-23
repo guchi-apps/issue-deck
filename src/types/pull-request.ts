@@ -77,6 +77,12 @@ export type PullRequestReleaseChecks = {
   aiReviewStage?: ReviewEvidenceStage;
   /** 修正系列の進み具合（#4972）。修正対応中・停止の表示に使う。系列が無い・検証結果に任せるときは省略 */
   fix?: ReleaseCandidateFix | null;
+  /**
+   * この候補（現在のhead）を追っている、進行中の「修正の自動継続」（`ReleaseCompletionRun`。#5614）。
+   * 公開承認から始めた系列は修正を起案しないので載せない。修正系列ができる前の「原因を調査中」でも
+   * 人の判断の番に見せないために使う。系列が無ければ省略
+   */
+  completion?: { status: string; label: string } | null;
   /** 公開承認済みで、mainへは自動でマージされる（#5064）。「人が押す番」にしない */
   publishApproved?: boolean;
   /**

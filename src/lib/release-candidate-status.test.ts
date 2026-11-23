@@ -66,6 +66,27 @@ describe("修正系列の合流（#4972）", () => {
   });
 });
 
+describe("修正の自動継続（#5614）", () => {
+  const completion = (status: string, label: string) => ({ completion: { status, label } });
+
+  it("原因を調査中（修正系列がまだ無い）でも、要確認を問題でなく修正中として出す", () => {
+    const v = resolve({ aiReview: "needs_check", ...completion("investigating", "原因を調査中") });
+    expect(v.problem).toBeNull();
+    expect(v.progress?.label).toBe("修正対応中");
+    expect(v.progress?.checks[0]).toMatchObject({ name: "全体レビュー", stageLabel: "修正の自動継続: 原因を調査中" });
+  });
+
+  it("判断待ちの系列は、従来どおり問題として出す", () => {
+    const v = resolve({ aiReview: "needs_check", ...completion("awaiting_decision", "判断待ち") });
+    expect(v.problem?.kind).toBe("needs_check");
+  });
+
+  it("系列を読めなかったときは、修正中に倒さない", () => {
+    const v = resolve({ aiReview: "needs_check", unavailableParts: ["fix"], ...completion("investigating", "原因を調査中") });
+    expect(v.problem?.kind).toBe("needs_check");
+  });
+});
+
 describe("resolveReleaseCandidateVerification", () => {
   it("コード確認済み・統合検証待ち／検証結果を確認中は、要確認でなく待てば進むものとして出す（#4664）", () => {
     const waiting = resolve({ aiReview: "needs_check", integration: "running", aiReviewStage: { kind: "integration_waiting" } });

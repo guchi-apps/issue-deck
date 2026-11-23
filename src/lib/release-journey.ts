@@ -1,6 +1,6 @@
 import { releaseMergeTargetLabel, type ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import { isRcReleaseCandidateHeadRef, legacyReleaseVersionOf, rcSequenceOf } from "@/lib/release-branch";
-import { resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
+import { releaseCompletionFixingLabel, resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
 import { canCancelRc, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
@@ -234,6 +234,9 @@ function resolveChecks(candidate: JourneyPullRequest): JourneyCheck[] {
       const fixDraft = (integrationKind: boolean, state: PullRequestReleaseCheckState, cleared: boolean): Draft | null => {
         if ((state !== "needs_check" && state !== "failed") || cleared) return null;
         if (parts.has("fix")) return draft("unknown", "修正の状況を取得できません");
+        // 修正系列ができる前（原因を調査中）でも、修正の自動継続が進めている間は人の判断の番にしない（#5614）
+        const completionLabel = fix ? null : releaseCompletionFixingLabel(checks);
+        if (completionLabel) return draft("fixing", completionLabel, "修正の自動継続が原因の調査と修正を進めています。操作は不要です");
         if (!fix || integrationKind !== (fix.sourceKind === "integration_failure")) return null;
         return fix.stalled
           ? draft("failed", "修正が停止中", `修正Issue #${fix.issueNumber}${fix.reason ? `: ${fix.reason}` : ""}`)

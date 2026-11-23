@@ -16,6 +16,7 @@ function makeHandoff(overrides: Partial<IssueCreateHandoff> = {}): IssueCreateHa
     selectedLabels: ["50.feature"],
     assignee: "m-guchi",
     bodyPrefix: null,
+    titlePrefix: null,
     savedAt: NOW,
     ...overrides,
   };
@@ -50,6 +51,7 @@ describe("parseIssueCreateHandoff", () => {
       selectedLabels: ["a"],
       assignee: null,
       bodyPrefix: null,
+      titlePrefix: null,
       savedAt: NOW,
     });
   });

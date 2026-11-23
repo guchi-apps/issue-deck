@@ -133,7 +133,7 @@ export function ReleaseJourneyInline({ journey, showCandidate = true }: { journe
       role="img"
       aria-label={[describe(journey), ...journey.others].join("、")}
       title={headline?.title ?? undefined}
-      className="flex min-w-0 max-w-full items-center gap-2 text-xs"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs"
       data-testid="release-journey"
     >
       {showCandidate && journey.candidateLabel && (
@@ -141,7 +141,7 @@ export function ReleaseJourneyInline({ journey, showCandidate = true }: { journe
       )}
       <Segments journey={journey} className="w-28 sm:w-[168px]" />
       {headline && (
-        <span className={cn("inline-flex min-w-0 items-center gap-1", TONE_CLASS[headline.tone])}>
+        <span className={cn("inline-flex min-w-0 max-w-full items-center gap-1", TONE_CLASS[headline.tone])}>
           <ToneIcon tone={headline.tone} attention={journey.attention} />
           <span className="truncate">{headline.label}</span>
         </span>

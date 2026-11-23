@@ -183,6 +183,7 @@ function Harness({
   repositories = [makeRepository()],
   defaultRepositoryFullName = REPOSITORY_FULL_NAME,
   initialSelectedLabels = [],
+  titlePrefix,
 }: {
   onCreated: (issue: Issue) => void;
   /** 渡したときだけ「次に開く画面」の選択が出る（#2862） */
@@ -191,6 +192,7 @@ function Harness({
   repositories?: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
   initialSelectedLabels?: string[];
+  titlePrefix?: string | null;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -199,6 +201,7 @@ function Harness({
       onOpenChange={setOpen}
       repositories={repositories}
       defaultRepositoryFullName={defaultRepositoryFullName}
+      titlePrefix={titlePrefix}
       initialHandoff={
         initialSelectedLabels.length > 0
           ? {
@@ -208,6 +211,7 @@ function Harness({
               selectedLabels: initialSelectedLabels,
               assignee: null,
               bodyPrefix: null,
+              titlePrefix: null,
               savedAt: 0,
             }
           : null
@@ -555,6 +559,27 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     await waitFor(() =>
       expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ assignee: "m-guchi" })),
     );
+  });
+
+  /** #5623。引き継ぎ作成のタイトル接頭辞は固定表示し、作成するタイトルへ連結する */
+  it("タイトルの固定接頭辞を表示し、作成するタイトルの先頭へ付ける（#5623）", async () => {
+    render(<Harness onCreated={vi.fn()} titlePrefix="修正 #5623:" />);
+
+    expect(screen.getByTestId("create-issue-title-prefix").textContent).toBe("修正 #5623:");
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "一覧を直す" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() =>
+      expect(createIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "修正 #5623: 一覧を直す" }),
+      ),
+    );
+  });
+
+  it("接頭辞が無い通常の作成では何も付けない（#5623）", () => {
+    render(<Harness onCreated={vi.fn()} />);
+    expect(screen.queryByTestId("create-issue-title-prefix")).toBeNull();
   });
 
   /**
@@ -1002,6 +1027,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
           selectedLabels: ["50.feature"],
           assignee: "m-guchi",
           bodyPrefix: null,
+          titlePrefix: null,
           savedAt: Date.now(),
         }}
       />,

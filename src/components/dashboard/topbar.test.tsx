@@ -225,3 +225,24 @@ describe("TopBar 戻るボタン（#1771）", () => {
     expect(onBack).not.toHaveBeenCalled();
   });
 });
+
+describe("TopBar 更新ボタン（#5618）", () => {
+  it("onRefreshを渡さないときは出さない", () => {
+    const { queryByLabelText } = renderTopBar(vi.fn());
+    expect(queryByLabelText("Issue・PRを今すぐ更新")).toBeNull();
+  });
+
+  it("押すとonRefreshが呼ばれ、取得中は押せない", async () => {
+    let resolve!: () => void;
+    const onRefresh = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+    const { getByLabelText } = render(
+      <TopBar {...topBarProps(vi.fn())} onRefresh={onRefresh} />,
+    );
+    const button = getByLabelText("Issue・PRを今すぐ更新") as HTMLButtonElement;
+    fireEvent.click(button);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(button.disabled).toBe(true));
+    resolve();
+    await waitFor(() => expect(button.disabled).toBe(false));
+  });
+});

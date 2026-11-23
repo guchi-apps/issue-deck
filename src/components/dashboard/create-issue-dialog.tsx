@@ -48,7 +48,7 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
-import { composeIssueBody } from "@/lib/github/followup-issue";
+import { composeIssueBody, composeIssueTitle } from "@/lib/github/followup-issue";
 import {
   isSelectableLabelName,
 } from "@/lib/github/start-implementation";
@@ -233,6 +233,8 @@ type CreateIssueDialogProps = {
    * 入力欄には入れず読み取り専用で表示し、作成時に入力内容の前へ連結する。
    */
   bodyPrefix?: string | null;
+  /** タイトルの先頭に固定で付くテキスト（引き継ぎ作成・#5623）。入力欄には入れず、作成時に連結する */
+  titlePrefix?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
   /**
@@ -316,6 +318,7 @@ export function CreateIssueDialog({
   defaultTitle,
   defaultBody,
   bodyPrefix,
+  titlePrefix,
   issues,
   onCreated,
   onNightlyRunQueued,
@@ -405,6 +408,7 @@ export function CreateIssueDialog({
    */
   const [continueRepositoryFullName, setContinueRepositoryFullName] = useState<string | null>(null);
   const effectiveBodyPrefix = continueRepositoryFullName ? null : bodyPrefix;
+  const effectiveTitlePrefix = continueRepositoryFullName ? null : (titlePrefix ?? null);
 
   const { labels, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -535,6 +539,7 @@ export function CreateIssueDialog({
       selectedLabels,
       assignee: null,
       bodyPrefix: effectiveBodyPrefix ?? null,
+      titlePrefix: effectiveTitlePrefix,
     });
     if (!opened) {
       setPopOutBlocked(true);
@@ -732,7 +737,7 @@ export function CreateIssueDialog({
     if (!resolved) return;
     const issue = await createIssue({
       repositoryFullName,
-      title: resolved.title,
+      title: composeIssueTitle(effectiveTitlePrefix, resolved.title),
       body: composeIssueBody(effectiveBodyPrefix, body),
       labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
@@ -765,7 +770,7 @@ export function CreateIssueDialog({
     if (!resolved) return;
     const issue = await createIssue({
       repositoryFullName,
-      title: resolved.title,
+      title: composeIssueTitle(effectiveTitlePrefix, resolved.title),
       body: composeIssueBody(effectiveBodyPrefix, body),
       labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
@@ -896,13 +901,24 @@ export function CreateIssueDialog({
             {/* 空のままでも行き止まりにしない（#1884）。**下の主ボタンが何をするかは、
                 補足の行ではなくプレースホルダで示す**（#1929）——空欄のときにだけ出る点は
                 同じで、行が増えない */}
-            <Input
-              id="create-issue-title"
-              value={title}
-              onChange={(e) => handleTitleChange(e.target.value)}
-              placeholder="空欄のまま作成すると自動でタイトル・ラベルが決まります"
-              className="md:text-sm"
-            />
+            <div className="flex items-center gap-2">
+              {/* 引き継ぎ元の番号は入力欄に入れず固定表示し、作成時に連結する（#5623） */}
+              {effectiveTitlePrefix && (
+                <span
+                  data-testid="create-issue-title-prefix"
+                  className="shrink-0 rounded bg-muted px-2 py-1 text-xs font-medium text-foreground"
+                >
+                  {effectiveTitlePrefix}
+                </span>
+              )}
+              <Input
+                id="create-issue-title"
+                value={title}
+                onChange={(e) => handleTitleChange(e.target.value)}
+                placeholder="空欄のまま作成すると自動でタイトル・ラベルが決まります"
+                className="min-w-0 md:text-sm"
+              />
+            </div>
           </div>
 
         <div className="flex flex-col gap-1.5">
@@ -968,7 +984,7 @@ export function CreateIssueDialog({
               onToggle={toggleLabel}
               isLoading={isMetaLoading}
               trigger={
-                <Button variant="outline" className="h-9 w-fit px-3" disabled={isMetaLoading}>
+                <Button variant="outline" className="h-9 w-fit px-3 md:pointer-coarse:h-11" disabled={isMetaLoading}>
                   {selectedLabels.length > 0 ? `ラベル (${selectedLabels.length})` : "ラベルを選択"}
                   <ChevronDown className="size-3.5" />
                 </Button>
@@ -1104,7 +1120,7 @@ export function CreateIssueDialog({
               段数を数える`grid-rows-*`は使わない・#2402）。本文の`-mx-1 px-1`は、入力欄の
               フォーカスリング（`ring-3`）がスクロール領域で切れないための余白 */}
           <DialogContent
-            className="flex flex-col gap-0 overflow-hidden sm:max-w-lg"
+            className="flex flex-col gap-0 overflow-hidden sm:max-w-lg md:pointer-coarse:max-w-2xl"
             onKeyDown={handleKeyDown}
           >
             <div className="pb-3 sm:pb-4">{header}</div>

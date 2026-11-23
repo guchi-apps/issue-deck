@@ -198,6 +198,24 @@ describe("resolveReleaseJourney（新方式の候補・#5076）", () => {
     expect(journey?.next).toContain("再検証");
   });
 
+  it("修正の自動継続が原因を調査中なら、修正系列がまだ無くてもRC検証は修正中で担当は自動（#5614）", () => {
+    const journey = run({
+      candidatePullRequest: rcCandidate(facts(), { aiReview: "needs_check", completion: { status: "investigating", label: "原因を調査中" } }),
+    });
+    expect(journey?.steps.find((s) => s.key === "verify")).toMatchObject({ state: "fixing", status: "修正の自動継続: 原因を調査中" });
+    expect(journey?.owner).toBe("auto");
+    expect(journey?.attention).toBeNull();
+    expect(isReleaseJourneyNeedingUser(journey)).toBe(false);
+  });
+
+  it("修正の自動継続が判断待ちなら、従来どおり人の判断の番（#5614）", () => {
+    const journey = run({
+      candidatePullRequest: rcCandidate(facts(), { aiReview: "needs_check", completion: { status: "awaiting_decision", label: "判断待ち" } }),
+    });
+    expect(journey?.steps.find((s) => s.key === "verify")?.state).toBe("user");
+    expect(journey?.attention).toBe("decision");
+  });
+
   it("修正系列を読めなかったら、要確認を修正中とも人の番とも決めない", () => {
     const journey = run({ candidatePullRequest: rcCandidate(facts(), { aiReview: "needs_check", unavailableParts: ["fix"] }) });
     expect(journey?.checks?.find((c) => c.key === "review")?.state).toBe("unknown");
