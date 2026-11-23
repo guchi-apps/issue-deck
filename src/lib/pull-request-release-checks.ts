@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
-import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
+import { loadReleaseCandidateCompletions, loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { loadReleaseRcFacts } from "@/lib/release-journey-facts";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseInheritanceEvidence } from "@/lib/release-finalize";
@@ -135,7 +135,7 @@ export async function fetchReleaseChecks(
     const where = { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) };
     let fixFailed = false;
     let rcFailed = false;
-    const [rows, runningJobs, activeJobs, finalizations, fixes, rcFacts] = await Promise.all([
+    const [rows, runningJobs, activeJobs, finalizations, fixes, rcFacts, completions] = await Promise.all([
       db.releaseVerification.findMany({ where, orderBy: { updatedAt: "desc" } }),
       db.dispatchJob.findMany({
         where: {
@@ -174,6 +174,13 @@ export async function fetchReleaseChecks(
         console.error("[fetchReleaseChecks] リリース候補の記録を読めませんでした:", error);
         rcFailed = true;
         return new Map<string, ReleaseRcFacts>();
+      }),
+      // 進行中の「修正の自動継続」（#5614）。修正系列ができる前の調査中も、要確認を人の判断の番に見せない。
+      // 補助の情報なので、読めなければ修正系列と同じく「修正の状況を取得できません」にする
+      loadReleaseCandidateCompletions(releases).catch((error) => {
+        console.error("[fetchReleaseChecks] 修正の自動継続を読めませんでした:", error);
+        fixFailed = true;
+        return new Map<string, { status: string; label: string }>();
       }),
     ]);
     const approvedByRepo = new Map<string, Set<number>>();
@@ -245,6 +252,7 @@ export async function fetchReleaseChecks(
         aiReviewStage,
         publishApproved: approvedByRepo.get(target.repositoryFullName)?.has(target.number) === true,
         fix: fixes.get(key) ?? null,
+        completion: completions.get(key) ?? null,
         enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
         started: {
           aiReview: jobs.some((job) => job.kind === "RELEASE_REVIEW") || recordedRunning("ai_review"),
