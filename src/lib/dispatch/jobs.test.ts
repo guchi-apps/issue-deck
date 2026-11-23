@@ -1690,7 +1690,7 @@ describe("reassignDispatchJob", () => {
       .mockResolvedValueOnce(queuedLaunch({ targetHost: "deskmini", queuePriority: 0 }));
     dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result.ok).toBe(true);
     expect(dispatchJobUpdateMany).toHaveBeenCalledWith({
@@ -1699,10 +1699,28 @@ describe("reassignDispatchJob", () => {
     });
   });
 
+  it("利用者のinstallationに属さないリポジトリのジョブは移せず、更新もしない", async () => {
+    dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
+    repositoryFindFirst.mockResolvedValue(null);
+
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "other", toHostName: "deskmini", now: NOW });
+
+    expect(result).toMatchObject({ ok: false, reason: "not_found" });
+    expect(repositoryFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          fullName: REPOSITORY,
+          installation: { userInstallations: { some: { userId: "other" } } },
+        },
+      }),
+    );
+    expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("起動以外の種別は移せない", async () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ kind: "CODE_REVIEW" }));
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
     expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
@@ -1711,7 +1729,7 @@ describe("reassignDispatchJob", () => {
   it("引き継ぎ起動（handoffFromあり）は移せない", async () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ handoffFrom: "codex" }));
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
     expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
@@ -1720,7 +1738,7 @@ describe("reassignDispatchJob", () => {
   it("順番待ち以外は移せない", async () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch({ status: "RUNNING" }));
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
   });
@@ -1728,7 +1746,7 @@ describe("reassignDispatchJob", () => {
   it("同じホストへは移せない", async () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "macmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "macmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
   });
@@ -1737,7 +1755,7 @@ describe("reassignDispatchJob", () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
     dispatchHostFindUnique.mockResolvedValue(null);
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "target_rejected" });
     expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
@@ -1747,7 +1765,7 @@ describe("reassignDispatchJob", () => {
     dispatchJobFindUnique.mockResolvedValue(queuedLaunch());
     dispatchJobUpdateMany.mockResolvedValue({ count: 0 });
 
-    const result = await reassignDispatchJob({ jobId: "job-1", toHostName: "deskmini", now: NOW });
+    const result = await reassignDispatchJob({ jobId: "job-1", userId: "user-1", toHostName: "deskmini", now: NOW });
 
     expect(result).toMatchObject({ ok: false, reason: "not_reassignable" });
   });

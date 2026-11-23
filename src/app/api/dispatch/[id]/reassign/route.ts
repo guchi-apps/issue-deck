@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { id } = await params;
-  const result = await reassignDispatchJob({ jobId: id, toHostName });
+  const result = await reassignDispatchJob({ jobId: id, userId, toHostName });
 
   if (!result.ok) {
     const status = result.reason === "not_found" ? 404 : 409;
