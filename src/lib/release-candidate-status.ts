@@ -82,6 +82,19 @@ const PROBLEM_ORDER: ReleaseCandidateProblemKind[] = [
 
 const CLEAR: ReleaseCandidateVerification = { progress: null, problem: null, detail: null };
 
+/** 自動で修正を進めている「修正の自動継続」の段階（#5614）。判断待ち・停止・確認以降は含めない */
+const COMPLETION_FIXING_STATUSES: ReadonlySet<string> = new Set(["investigating", "fixing"]);
+
+/**
+ * 候補を追う「修正の自動継続」が原因の調査・修正を進めている間の文言（#5614）。該当しなければnull。
+ * 修正系列（`checks.fix`）ができる前の「原因を調査中」でも、要確認・失敗の区分を人の判断の番にせず修正中として出すために使う
+ */
+export function releaseCompletionFixingLabel(checks: Pick<PullRequestReleaseChecks, "completion">): string | null {
+  const completion = checks.completion;
+  if (!completion || !COMPLETION_FIXING_STATUSES.has(completion.status)) return null;
+  return `修正の自動継続: ${completion.label}`;
+}
+
 /**
  * リリース候補の検証状態を畳む。`checks`はPR一覧が載せる`releaseChecks`（`fetchReleaseChecks`）。
  *
@@ -150,6 +163,17 @@ export function resolveReleaseCandidateVerification(
       } else {
         pending.push({ name: section.name, started: true, stageLabel: `${RELEASE_FIX_WORKING_LABEL}（${issue}）`, fix: true });
       }
+      continue;
+    }
+    // 修正の自動継続が調査・修正を進めている（#5614）。修正系列ができる前でも、要確認・失敗を手の要る問題にしない
+    const completionLabel = checks.fix ? null : releaseCompletionFixingLabel(checks);
+    if (
+      completionLabel &&
+      !(checks.unavailableParts ?? []).includes("fix") &&
+      (section.state === "needs_check" || section.state === "failed") &&
+      !(!section.integration && stage?.kind === "needs_check" && stage.cleared)
+    ) {
+      pending.push({ name: section.name, started: true, stageLabel: completionLabel, fix: true });
       continue;
     }
     switch (section.state) {
