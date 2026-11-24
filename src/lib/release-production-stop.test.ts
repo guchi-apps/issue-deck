@@ -138,3 +138,9 @@ describe("canCloseBySuccessor（#5633）", () => {
     expect(canCloseBySuccessor("version_mismatch")).toBe(false);
   });
 });
+
+describe("後続の確認を待つ枠は証拠未設定だけ（#5633）", () => {
+  it("デプロイ失敗で止まった候補は、次の候補を始めさせる経路に乗せない", () => {
+    expect(decideSuccessorStart({ stopReason: "deploy_failed", developKind: "deploy_version_check", slotTaken: false }).allowed).toBe(false);
+  });
+});

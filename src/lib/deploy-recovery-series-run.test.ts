@@ -340,6 +340,13 @@ describe("本番反映後のdeploy失敗（#4451）", () => {
     expect(createComment).toHaveBeenCalledWith("o", "r", 55, "token", expect.objectContaining({ body: expect.stringContaining("再デプロイは不要") }));
   });
 
+  it("系列自身の本番反映・復旧PRのマージコミットは、別経路の復旧の判定から除く（#5633）", async () => {
+    await releasingSeries({ status: "releasing", releaseSha: "rel1", recoveryMergedSha: "merged1", failedSha: "bad1" });
+    githubFetch.mockImplementation(async () => jsonResponse({ workflow_runs: [] }));
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(observeSuccessorProof).toHaveBeenCalledWith(expect.anything(), "bad1", { excludeShas: ["rel1", "merged1"] });
+  });
+
   it("後続の版で確かめられないときは系列を閉じない", async () => {
     await releasingSeries({ status: "fixing", releaseSha: null, releaseStartedAt: null });
     await runDeployRecoverySweep({ hostName: "subpc" });
