@@ -1076,6 +1076,12 @@ export async function enqueuePlanReviewJob(params: {
   hostName: string;
   /** 省略時は既存どおりClaude Codeでレビューする */
   agent?: DispatchAgent;
+  /**
+   * `agent`を立てられないホスト（`agent_not_capable`）のときに1回だけ使い直すエージェント（#5648）。
+   * **既定（開始元の反対側）で導いたときだけ渡す。** 個別に固定した指定は従来どおり拒否し、
+   * 黙って別のCLIにしない。
+   */
+  fallbackAgent?: DispatchAgent;
   /** 自動計画レビュー用のClaude Codeモデル。手動レビューは省略して通常設定に従う。 */
   claudeModel?: ClaudeLocalModel;
   /** 自動計画レビュー用のCodex CLIモデル。手動レビューは省略して通常設定に従う。 */
@@ -1098,21 +1104,32 @@ export async function enqueuePlanReviewJob(params: {
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
 
   // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）
-  const rejection = resolvePlanReviewRejection({
-    host: host
-      ? {
-          online: isDispatchHostOnline(host.lastSeenAt, now),
-          planReviewCapable: host.planReviewCapable,
-          planReviewAgentCapable: host.planReviewAgentCapable,
-          codexCapable: host.codexCapable,
-          repositories: parseDispatchHostRepositories(host.repositories),
-        }
-      : null,
-    repositoryFullName: params.repositoryFullName,
-    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
-    hasActiveJob: false,
-    agent: params.agent,
-  });
+  const judge = (agent: DispatchAgent | undefined) =>
+    resolvePlanReviewRejection({
+      host: host
+        ? {
+            online: isDispatchHostOnline(host.lastSeenAt, now),
+            planReviewCapable: host.planReviewCapable,
+            planReviewAgentCapable: host.planReviewAgentCapable,
+            codexCapable: host.codexCapable,
+            repositories: parseDispatchHostRepositories(host.repositories),
+          }
+        : null,
+      repositoryFullName: params.repositoryFullName,
+      // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
+      hasActiveJob: false,
+      agent,
+    });
+  let agent = params.agent;
+  let rejection = judge(agent);
+  if (
+    rejection === "agent_not_capable" &&
+    params.fallbackAgent &&
+    params.fallbackAgent !== agent
+  ) {
+    agent = params.fallbackAgent;
+    rejection = judge(agent);
+  }
   if (rejection) return reject(rejection);
 
   try {
@@ -1122,7 +1139,7 @@ export async function enqueuePlanReviewJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         kind: "PLAN_REVIEW",
-        agent: params.agent ?? DEFAULT_DISPATCH_AGENT,
+        agent: agent ?? DEFAULT_DISPATCH_AGENT,
         claudeModel: params.claudeModel ?? null,
         codexModel: params.codexModel ?? null,
         status: "QUEUED",

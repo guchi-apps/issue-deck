@@ -47,6 +47,7 @@ import {
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN,
   MODEL_PICK_ENGINE_OPTIONS,
   resolveAppAiModel,
+  resolvePlanReviewAgent,
   type AppAiModel,
   type AiExecutionProvider,
   type ClaudeLocalModel,
@@ -494,9 +495,8 @@ export function ExecutionSettingsSection({
     // 計画レビューの担当AIだけは、送った値が`inherit`なら固定を解く（#4139）
     if ("planReviewAgentForClaude" in sent) nextOverrides.planReviewAgentForClaude = planReviewAgentForClaude !== AI_PROVIDER_INHERIT;
     if ("planReviewAgentForCodex" in sent) nextOverrides.planReviewAgentForCodex = planReviewAgentForCodex !== AI_PROVIDER_INHERIT;
-    const savedProvider = mode === "ai" || mode === "all" ? aiExecutionProvider : initialAiExecutionProvider;
-    const resolvePlanReviewAgent = (selection: PlanReviewAgentSetting): PlanReviewAgent =>
-      selection === AI_PROVIDER_INHERIT ? savedProvider : selection;
+    const resolvePlanReviewSelection = (selection: PlanReviewAgentSetting, source: PlanReviewAgent): PlanReviewAgent =>
+      resolvePlanReviewAgent(selection, source);
     // 親へも「この区分で実際に保存した値」だけを反映する。他区分の未保存stateを
     // 保存済みpropsへ混ぜると、未保存表示が消えたり後の保存で巻き戻るため、initial値を維持する。
     const saved: AppSettingsValues = {
@@ -509,8 +509,8 @@ export function ExecutionSettingsSection({
       claudeLocalModel: mode === "ai" || mode === "all" ? claudeLocalModel : initialClaudeLocalModel,
       codexModel: mode === "ai" || mode === "all" ? codexModel : initialCodexModel,
       defaultDispatchAgent: mode === "execution" || mode === "all" ? defaultDispatchAgent : initialDefaultDispatchAgent,
-      planReviewAgentForClaude: resolvePlanReviewAgent(mode === "ai" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude),
-      planReviewAgentForCodex: resolvePlanReviewAgent(mode === "ai" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex),
+      planReviewAgentForClaude: resolvePlanReviewSelection(mode === "ai" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude, "claude"),
+      planReviewAgentForCodex: resolvePlanReviewSelection(mode === "ai" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex, "codex"),
       planReviewClaudeModel: mode === "ai" || mode === "all" ? planReviewClaudeModel : initialPlanReviewClaudeModel,
       planReviewCodexModel: mode === "ai" || mode === "all" ? planReviewCodexModel : initialPlanReviewCodexModel,
       dispatchFailoverEnabled: mode === "execution" || mode === "all" ? dispatchFailoverEnabled : initialDispatchFailoverEnabled,
@@ -533,8 +533,6 @@ export function ExecutionSettingsSection({
       ...saved,
       githubActionsAgent: nextOverrides.githubActionsAgent ? saved.githubActionsAgent : provider,
       defaultDispatchAgent: nextOverrides.defaultDispatchAgent ? saved.defaultDispatchAgent : provider,
-      planReviewAgentForClaude: nextOverrides.planReviewAgentForClaude ? saved.planReviewAgentForClaude : provider,
-      planReviewAgentForCodex: nextOverrides.planReviewAgentForCodex ? saved.planReviewAgentForCodex : provider,
       appAiModel: nextOverrides.appAiModel ? saved.appAiModel : resolveAppAiModel(undefined, provider),
       appAiModelReasoning: nextOverrides.appAiModelReasoning
         ? saved.appAiModelReasoning
@@ -836,8 +834,8 @@ export function ExecutionSettingsSection({
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
           defaultDispatchAgent={defaultDispatchAgent}
-          planReviewAgentForClaude={planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude}
-          planReviewAgentForCodex={planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex}
+          planReviewAgentForClaude={resolvePlanReviewAgent(planReviewAgentForClaude, "claude")}
+          planReviewAgentForCodex={resolvePlanReviewAgent(planReviewAgentForCodex, "codex")}
           planReviewClaudeModel={planReviewClaudeModel}
           planReviewCodexModel={planReviewCodexModel}
           appAiModel={appAiModel}

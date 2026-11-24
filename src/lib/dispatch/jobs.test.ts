@@ -831,6 +831,59 @@ describe("enqueuePlanReviewJob", () => {
     );
   });
 
+  // #5648。既定（開始元の反対側）で導いたときだけ`fallbackAgent`が渡る
+  it("反対側（Codex）を立てられないホストでは、fallbackAgentで積み直す", async () => {
+    // 既定のホストは`codexCapable: null`（未申告）
+    await enqueuePlanReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1855,
+      hostName: "subpc",
+      agent: "codex",
+      fallbackAgent: "claude",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ agent: "claude" }) }),
+    );
+  });
+
+  it("対応済みホストでは反対側のまま積む（fallbackAgentは使わない）", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ codexCapable: true, planReviewAgentCapable: true }),
+    );
+    await enqueuePlanReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1855,
+      hostName: "subpc",
+      agent: "codex",
+      fallbackAgent: "claude",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ agent: "codex" }) }),
+    );
+  });
+
+  it("個別に固定したCodex（fallbackAgentなし）は、立てられなければ拒否する", async () => {
+    const result = await enqueuePlanReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1855,
+      hostName: "subpc",
+      agent: "codex",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("agent_not_capable");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
   it("計画レビューに対応していないpollerへは積まない", async () => {
     dispatchHostFindUnique.mockResolvedValue(host({ planReviewCapable: null }));
 
