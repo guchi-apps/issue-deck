@@ -162,6 +162,42 @@ describe("SettingsDialog", () => {
     expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
+  it("AI・モデルは共通→実行場所ごと→個別設定→いまの実行内容の順に並び、どこに効くかを見出しに出す（#5643）", () => {
+    renderDialog();
+
+    const order = [
+      "ai-provider-settings", "subpc-model-settings", "github-actions-settings", "app-ai-settings",
+      "process-override-settings", "execution-flow-summary",
+    ].map((id) => document.getElementById(id));
+    for (const element of order) expect(element).not.toBeNull();
+    for (let index = 1; index < order.length; index += 1) {
+      expect(order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(within(document.getElementById("subpc-model-settings")!).getByText("DeskMini・Mac mini 共通")).toBeTruthy();
+    expect(within(document.getElementById("ai-provider-settings")!).getByText("すべての場所に効く")).toBeTruthy();
+    // ローカル・GitHub Actionsは、いま使われる側（プロバイダーのClaude）を強調する
+    const localActive = document.querySelector("#subpc-model-settings [data-active=true]");
+    expect(localActive?.textContent).toContain("Claude Code のとき");
+    // GitHub ActionsのCodexモデルは、エージェントがClaudeでも常に表示する
+    expect(screen.getByLabelText("計画・実装・レビュー", { selector: "#github-actions-codex-model" })).toBeTruthy();
+    // 即時保存の欄だけに印を付ける
+    expect(within(screen.getByTestId("release-auto-approval-field")).getByText("すぐ保存")).toBeTruthy();
+  });
+
+  it("保存バーに未保存の項目名を出し、元に戻すで編集前へ戻す（#5643）", () => {
+    renderDialog();
+
+    const group = screen.getByRole("group", { name: "AI実行プロバイダー" });
+    fireEvent.click(within(group).getByRole("button", { name: "Codex" }));
+    expect(screen.getByText("未保存の変更があります（1件：AI実行プロバイダー）")).toBeTruthy();
+    // プロバイダーを切り替えると、ローカルで強調する列もCodexへ移る
+    expect(document.querySelector("#subpc-model-settings [data-active=true]")?.textContent).toContain("Codex CLI のとき");
+
+    fireEvent.click(screen.getByRole("button", { name: "元に戻す" }));
+    expect(screen.queryByText(/未保存の変更があります/)).toBeNull();
+    expect(within(group).getByRole("button", { name: "Claude" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("アカウント名の行を押すとアカウント設定が開き、削除ボタンは無い（#3744）", () => {
     renderDialog();
 
@@ -344,7 +380,7 @@ describe("SettingsDialog", () => {
     renderDialog();
 
     // AI・モデル側に未保存変更を作る。
-    const appAi = screen.getByLabelText("アプリ内AI：要約・検索・文章整理");
+    const appAi = screen.getByLabelText("要約・検索・文章整理");
     fireEvent.change(appAi, { target: { value: "claude-sonnet-5-5" } });
 
     // 実行区分だけを保存する。

@@ -46,8 +46,8 @@ export function ReleaseAutoApprovalField() {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 border-t pt-4" data-testid="release-auto-approval-field">
-      <div className="flex items-center gap-1.5">
+    <div className="flex flex-col gap-1.5" data-testid="release-auto-approval-field">
+      <div className="flex flex-wrap items-center gap-1.5">
         <Label htmlFor="release-auto-approval-enabled">リリース候補の公開承認を自動で出す</Label>
         <InfoHint label="公開承認の自動化">
           ONにすると、リリース候補（RC）の全体レビューをCodex（Claudeとは別系統）で実行し、指摘なしで合格して
@@ -55,7 +55,12 @@ export function ReleaseAutoApprovalField() {
           合格していない候補・人の確認ラベル（22.merge-confirm-required・00.check-user）が付いた候補は
           自動では承認せず、人が判断します。切り替えた時点で保存され、次の巡回から効きます（#5629）。
         </InfoHint>
+        {/* AI・モデル区分の他の欄は下の保存ボタンで保存されるため、この欄だけ即時保存であることを見出しに出す（#5643） */}
+        <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-emerald-600/40 px-2 py-px text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+          すぐ保存
+        </span>
       </div>
+      <p className="-mt-1 text-[11px] text-muted-foreground">切り替えた時点で保存され、次の巡回から効きます。</p>
       <label className="flex items-center gap-2 text-sm" htmlFor="release-auto-approval-enabled">
         <input
           id="release-auto-approval-enabled"

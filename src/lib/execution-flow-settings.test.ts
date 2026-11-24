@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  countProcessOverrides,
   NO_AI_PROVIDER_OVERRIDES,
   readAiProviderOverrides,
   resolveExecutionFlows,
@@ -188,5 +189,29 @@ describe("readAiProviderOverrides", () => {
       appAiModel: false,
       appAiModelReasoning: true,
     });
+  });
+});
+
+describe("countProcessOverrides", () => {
+  const defaults = {
+    planReviewAgentForClaude: "inherit",
+    planReviewAgentForCodex: "inherit",
+    workflowClaudeModel: "auto",
+    workflowCodexModel: "auto",
+    workflowCodexReasoningEffort: "default",
+  };
+
+  it("全体設定に従っているときは0件", () => {
+    expect(countProcessOverrides(defaults)).toBe(0);
+  });
+
+  it("計画レビューの担当の固定と、PRレビュー・修復の既定以外を数える（#5643）", () => {
+    expect(countProcessOverrides({ ...defaults, planReviewAgentForCodex: "claude" })).toBe(1);
+    expect(countProcessOverrides({
+      ...defaults,
+      planReviewAgentForClaude: "codex",
+      workflowClaudeModel: "opus",
+      workflowCodexReasoningEffort: "high",
+    })).toBe(3);
   });
 });

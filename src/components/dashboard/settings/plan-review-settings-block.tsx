@@ -1,30 +1,38 @@
 "use client";
 
-import { InfoHint } from "@/components/dashboard/settings/info-hint";
-import { Label } from "@/components/ui/label";
+import { useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
+
+import { ScopeChip, SettingField } from "@/components/dashboard/settings/ai-model-layout";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   AI_PROVIDER_INHERIT,
   CLAUDE_LOCAL_MODEL_OPTIONS,
+  CLAUDE_MODEL_OPTIONS,
   CODEX_LOCAL_MODEL_OPTIONS,
+  CODEX_MODEL_OPTIONS,
+  CODEX_REASONING_EFFORT_OPTIONS,
   DISPATCH_AGENT_OPTIONS,
   type AiExecutionProvider,
   type ClaudeLocalModel,
+  type ClaudeModel,
   type CodexLocalModel,
+  type CodexModel,
+  type CodexReasoningEffort,
   type PlanReviewAgentSetting,
 } from "@/lib/app-settings";
-import {
-  resolveProviderFlowRows,
-  type AiProviderOverrides,
-  type ProviderFlowSettings,
-} from "@/lib/execution-flow-settings";
 
-type PlanReviewSettingsBlockProps = {
+export type WorkflowModelValues = {
+  workflowClaudeModel: ClaudeModel;
+  workflowCodexModel: CodexModel;
+  workflowCodexReasoningEffort: CodexReasoningEffort;
+};
+
+type ProcessOverrideSettingsBlockProps = {
   aiExecutionProvider: AiExecutionProvider;
-  savedAiExecutionProvider: AiExecutionProvider;
-  /** 表示の解決に使う設定。上の工程表と同じ関数で解くので、結果が食い違わない */
-  flowSettings: ProviderFlowSettings;
-  overrides: AiProviderOverrides;
+  /** 全体設定から外して固定している項目の数（`countProcessOverrides`） */
+  fixedCount: number;
   agentForClaude: PlanReviewAgentSetting;
   agentForCodex: PlanReviewAgentSetting;
   onAgentForClaudeChange: (value: PlanReviewAgentSetting) => void;
@@ -33,6 +41,12 @@ type PlanReviewSettingsBlockProps = {
   codexModel: CodexLocalModel;
   onClaudeModelChange: (value: ClaudeLocalModel) => void;
   onCodexModelChange: (value: CodexLocalModel) => void;
+  workflow: WorkflowModelValues;
+  /** workflow専用モデルを読み込めたか。読めていない間は、既定値で上書きしないよう選べなくする */
+  workflowLoaded: boolean;
+  onWorkflowChange: (next: Partial<WorkflowModelValues>) => void;
+  /** 保存済みの値から変えた欄のid */
+  changedIds: ReadonlySet<string>;
 };
 
 function providerName(provider: AiExecutionProvider) {
@@ -40,98 +54,143 @@ function providerName(provider: AiExecutionProvider) {
 }
 
 function AgentSelect({
-  id, label, value, onChange,
-}: { id: string; label: string; value: PlanReviewAgentSetting; onChange: (value: PlanReviewAgentSetting) => void }) {
+  id, label, value, provider, changed, onChange,
+}: {
+  id: string;
+  label: string;
+  value: PlanReviewAgentSetting;
+  provider: AiExecutionProvider;
+  changed: boolean;
+  onChange: (value: PlanReviewAgentSetting) => void;
+}) {
+  const fixed = value !== AI_PROVIDER_INHERIT;
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <SettingField
+      id={id}
+      label={label}
+      changed={changed}
+      badge={fixed ? <ScopeChip tone="amber">個別設定</ScopeChip> : <ScopeChip tone="muted">全体設定に従う</ScopeChip>}
+    >
       <Select value={value} onValueChange={(next) => onChange(next as PlanReviewAgentSetting)}>
         <SelectTrigger id={id} className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
-          <SelectItem value={AI_PROVIDER_INHERIT}>全体設定に従う</SelectItem>
+          <SelectItem value={AI_PROVIDER_INHERIT}>全体設定に従う（いまは{providerName(provider)}）</SelectItem>
           {DISPATCH_AGENT_OPTIONS.map((option) => (
             <SelectItem key={option.value} value={option.value}>{option.label}に固定</SelectItem>
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </SettingField>
   );
 }
 
 /**
- * サブPCの自動計画レビューの担当AIとモデル（#4139）。
+ * ③ 工程ごとの個別設定（#4139・#5643）。
  *
- * 通常は「全体設定に従う」で、AI実行プロバイダーを切り替えるだけで担当CLIとモデルが切り替わる。
- * Claude用・Codex用のモデルは別々に保持するので、切り替えて戻しても値は失われない。
- * 担当AIの個別固定は詳細設定へ寄せ、「全体設定に従う」へ戻せるようにする。
+ * 計画レビューの担当AI・モデルと、PRレビュー・修復のworkflow専用モデルをまとめて畳む。通常は全体設定
+ * （AI実行プロバイダー）に従うので開く必要は無く、固定している項目があるときだけ見出しに件数を出して開いておく。
+ * 以前はPRレビュー・修復だけが即時保存だったが、区分の保存ボタンへ揃えた。
  */
 export function PlanReviewSettingsBlock({
-  aiExecutionProvider, savedAiExecutionProvider, flowSettings, overrides,
+  aiExecutionProvider, fixedCount,
   agentForClaude, agentForCodex, onAgentForClaudeChange, onAgentForCodexChange,
   claudeModel, codexModel, onClaudeModelChange, onCodexModelChange,
-}: PlanReviewSettingsBlockProps) {
-  const row = resolveProviderFlowRows(flowSettings, aiExecutionProvider, overrides).find((candidate) => candidate.step === "計画レビュー");
-  const anyFixed = agentForClaude !== AI_PROVIDER_INHERIT || agentForCodex !== AI_PROVIDER_INHERIT;
-
+  workflow, workflowLoaded, onWorkflowChange, changedIds,
+}: ProcessOverrideSettingsBlockProps) {
+  // 開閉は利用者の操作に任せる。保存で固定が外れた瞬間に閉じたりしないよう、初期値だけを件数から決める
+  const [open, setOpen] = useState(fixedCount > 0);
   return (
-    <section id="plan-review-settings" aria-labelledby="plan-review-settings-title" className="flex flex-col gap-3 rounded-lg border bg-card p-4">
-      <div className="flex items-center gap-1.5">
-        <h3 id="plan-review-settings-title" className="font-medium">計画レビュー</h3>
-        <InfoHint label="計画レビュー">
-          ローカルセッションが計画を投稿した後の自動計画レビューに使うAIです。通常は全体のClaude／Codex切替に従い、
-          ClaudeならDeskMiniのClaude Codeと「Claude用モデル」、CodexならDeskMiniのCodex CLIと「Codex用モデル」で動きます。
-          Issue詳細から手動で始める単独レビューには影響せず、実行中のレビューは途中で変わりません（次の新規レビューから適用）。
-        </InfoHint>
-      </div>
-
-      <div className="rounded-md bg-muted/40 px-3 py-2 text-sm" aria-live="polite">
-        <p className="text-[11px] text-muted-foreground">
-          {providerName(aiExecutionProvider)}を選んだときの実行内容
-          {aiExecutionProvider !== savedAiExecutionProvider && "（未保存）"}
-        </p>
-        {row?.entries.map((entry) => (
-          <p key={entry.label} className="break-words">
-            <span className="text-muted-foreground">{entry.label}：{entry.agent} / </span>
-            <span className="font-semibold">{entry.model}</span>
-            <span className="ml-2 rounded-full bg-primary/10 px-2 py-px text-[11px] font-semibold text-primary">
-              {entry.binding === "override" ? "個別設定" : "全体設定に従う"}
+    <section id="process-override-settings" tabIndex={-1} aria-labelledby="process-override-settings-title" className="scroll-mt-2 rounded-lg border bg-card outline-none">
+      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)} className="group p-4">
+        <summary className="flex cursor-pointer list-none items-start gap-2.5 [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+            <SlidersHorizontal className="size-4" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="flex flex-wrap items-center gap-2">
+              <span aria-hidden className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-bold text-muted-foreground">3</span>
+              <span id="process-override-settings-title" className="font-medium">工程ごとの個別設定</span>
+              {fixedCount > 0
+                ? <ScopeChip tone="amber">{fixedCount}件を個別に固定中</ScopeChip>
+                : <ScopeChip tone="muted">すべて全体設定に従う</ScopeChip>}
             </span>
-          </p>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-claude-model">Claudeで動かすときのモデル</Label>
-          <Select value={claudeModel} onValueChange={(value) => onClaudeModelChange(value as ClaudeLocalModel)}>
-            <SelectTrigger id="plan-review-claude-model" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-codex-model">Codexで動かすときのモデル</Label>
-          <Select value={codexModel} onValueChange={(value) => onCodexModelChange(value as CodexLocalModel)}>
-            <SelectTrigger id="plan-review-codex-model" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CODEX_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <details open={anyFixed} className="rounded-md border px-3 py-2">
-        <summary className="cursor-pointer text-sm font-medium">
-          詳細設定：担当AIの個別設定
-          {anyFixed && <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-semibold text-amber-700 dark:text-amber-300">個別設定あり</span>}
+            <span className="text-xs text-muted-foreground">
+              計画レビューの担当と、PRレビュー・修復のモデル。ここで固定した工程は、プロバイダーを切り替えても変わりません。通常は変更不要です。
+            </span>
+          </span>
+          <span className="shrink-0 text-xs text-primary">
+            <span className="group-open:hidden">開く</span>
+            <span className="hidden group-open:inline">閉じる</span>
+          </span>
         </summary>
-        <p className="mt-2 text-xs text-muted-foreground">
-          計画を出したCLIごとに担当AIを固定できます。固定すると全体のClaude／Codex切替に追従しなくなります。通常は「全体設定に従う」のままにします。
-        </p>
-        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <AgentSelect id="plan-review-agent-for-claude" label="Claude Codeで計画を出したとき" value={agentForClaude} onChange={onAgentForClaudeChange} />
-          <AgentSelect id="plan-review-agent-for-codex" label="Codex CLIで計画を出したとき" value={agentForCodex} onChange={onAgentForCodexChange} />
+
+        <div id="plan-review-settings" tabIndex={-1} className="mt-4 flex scroll-mt-2 flex-col gap-3 border-t pt-3 outline-none">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold">計画レビュー</h4>
+            <ScopeChip tone="muted">ローカルで計画を投稿したときに別のAIが確認する</ScopeChip>
+          </div>
+          <p className="-mt-1 text-[11px] text-muted-foreground">
+            Issue詳細から手動で始める単独レビューには影響せず、実行中のレビューは途中で変わりません（次の新規レビューから適用）。
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AgentSelect
+              id="plan-review-agent-for-claude" label="担当（Claude Codeで計画を出したとき）"
+              value={agentForClaude} provider={aiExecutionProvider}
+              changed={changedIds.has("plan-review-agent-for-claude")} onChange={onAgentForClaudeChange}
+            />
+            <AgentSelect
+              id="plan-review-agent-for-codex" label="担当（Codex CLIで計画を出したとき）"
+              value={agentForCodex} provider={aiExecutionProvider}
+              changed={changedIds.has("plan-review-agent-for-codex")} onChange={onAgentForCodexChange}
+            />
+            <SettingField id="plan-review-claude-model" label="Claudeで動かすときのモデル" changed={changedIds.has("plan-review-claude-model")}>
+              <Select value={claudeModel} onValueChange={(value) => onClaudeModelChange(value as ClaudeLocalModel)}>
+                <SelectTrigger id="plan-review-claude-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </SettingField>
+            <SettingField id="plan-review-codex-model" label="Codexで動かすときのモデル" changed={changedIds.has("plan-review-codex-model")}>
+              <Select value={codexModel} onValueChange={(value) => onCodexModelChange(value as CodexLocalModel)}>
+                <SelectTrigger id="plan-review-codex-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CODEX_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </SettingField>
+          </div>
+        </div>
+
+        <div id="workflow-model-settings" tabIndex={-1} className="mt-4 flex scroll-mt-2 flex-col gap-3 border-t pt-3 outline-none">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold">PRレビュー・レビュー修復</h4>
+            <ScopeChip tone="muted">実装したエージェントの側で動く</ScopeChip>
+          </div>
+          <p className="-mt-1 text-[11px] text-muted-foreground">
+            PRレビューと、レビュー指摘修正・CI自動修正・コンフリクト解消・PR repairに使います。Codexの設定は、Codexで実装したIssueの
+            レビュー指摘をDeskMiniのChatGPT購読認証で修正するときに使います（APIキーは不要）。「任せる」「既定」で個別指定を解除します。
+          </p>
+          <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-3", !workflowLoaded && "opacity-60")}>
+            <SettingField id="workflow-claude-model" label="Claude" changed={changedIds.has("workflow-claude-model")}>
+              <Select disabled={!workflowLoaded} value={workflow.workflowClaudeModel} onValueChange={(value) => onWorkflowChange({ workflowClaudeModel: value as ClaudeModel })}>
+                <SelectTrigger id="workflow-claude-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{CLAUDE_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </SettingField>
+            <SettingField id="workflow-codex-model" label="Codex" changed={changedIds.has("workflow-codex-model")}>
+              <Select disabled={!workflowLoaded} value={workflow.workflowCodexModel} onValueChange={(value) => onWorkflowChange({ workflowCodexModel: value as CodexModel })}>
+                <SelectTrigger id="workflow-codex-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{CODEX_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </SettingField>
+            <SettingField id="workflow-codex-reasoning" label="Codexの推論強度" changed={changedIds.has("workflow-codex-reasoning")}>
+              <Select disabled={!workflowLoaded} value={workflow.workflowCodexReasoningEffort} onValueChange={(value) => onWorkflowChange({ workflowCodexReasoningEffort: value as CodexReasoningEffort })}>
+                <SelectTrigger id="workflow-codex-reasoning" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{CODEX_REASONING_EFFORT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </SettingField>
+          </div>
         </div>
       </details>
     </section>

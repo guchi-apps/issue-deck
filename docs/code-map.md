@@ -483,8 +483,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **設定項目の長い補足は、ラベル横の情報アイコン（[`settings/info-hint.tsx`](../src/components/dashboard/settings/info-hint.tsx)）へ入れる**（#4108）。
   常時表示の段落にしない。現在値・警告（例: 判定AIでJevを選んだときの送信先）・「選んだ時点で保存」のような
   操作結果に直結する短い補足だけは畳まずに出す。
-- **AIモデル区分の上部（[`settings/execution-flow-overview.tsx`](../src/components/dashboard/settings/execution-flow-overview.tsx)）は、
-  プロバイダー切替と工程ごとの実効エージェント・モデルを1枚で見せる**（#4108）。行の組み立ては
+- **AI・モデル区分は「①共通（AI実行プロバイダー）→②実行場所ごと（ローカル・GitHub Actions・アプリ内AI）→
+  ③工程ごとの個別設定（計画レビュー・PRレビュー修復）→いまの実行内容」の順に並べる**（#5643）。見た目の部品は
+  [`settings/ai-model-layout.tsx`](../src/components/dashboard/settings/ai-model-layout.tsx)、値と保存は
+  `execution-settings-section.tsx`が持つ。**AIの設定は`AppSetting`の1行で、ホスト（DeskMini・Mac mini）ごとの値は無い。**
+  画面では機体名を出さず「ローカル実行（DeskMini・Mac mini 共通）」と書く。新しい欄はどの実行場所のカードに入るかを先に決め、
+  場所を問わない欄だけを①に置く。保存は区分下部の固定バー1つに揃え、即時保存の欄（公開承認の自動化）には「すぐ保存」の印を付ける。
+- **AIモデル区分の末尾の「いまの実行内容」（[`settings/execution-flow-overview.tsx`](../src/components/dashboard/settings/execution-flow-overview.tsx)）は、
+  工程ごとの実効エージェント・モデルを確認用に1枚で見せる**（#4108・#5643）。行の組み立ては
   [`lib/execution-flow-settings.ts`](../src/lib/execution-flow-settings.ts)の`resolveProviderFlowRows`で、モデル名の解決は
   `resolveExecutionFlows`に任せる。**画面へ渡る機能別のAI設定（`githubActionsAgent`・`defaultDispatchAgent`・
   計画レビューのエージェント・アプリ内AIのモデル）は`inherit`を解決済みの値で、追従か個別設定かは値から読めない。**

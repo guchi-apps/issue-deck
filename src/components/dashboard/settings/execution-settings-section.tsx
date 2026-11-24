@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { GitBranch, Laptop, Sparkles } from "lucide-react";
 
 import { ReleaseAutoApprovalField } from "@/components/dashboard/settings/release-auto-approval-field";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlanReviewSettingsBlock } from "@/components/dashboard/settings/plan-review-settings-block";
+import { PlanReviewSettingsBlock, type WorkflowModelValues } from "@/components/dashboard/settings/plan-review-settings-block";
+import {
+  AiSectionNav,
+  ProviderCard,
+  ProviderColumns,
+  ScopeChip,
+  SettingField,
+  SettingsCard,
+  StickySaveBar,
+} from "@/components/dashboard/settings/ai-model-layout";
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
 import { ExecutionFlowOverview } from "@/components/dashboard/settings/execution-flow-overview";
@@ -29,6 +39,7 @@ import {
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_SETTING_OPTIONS,
   CODEX_LOCAL_MODEL_OPTIONS,
+  CODEX_REASONING_EFFORT_DEFAULT,
   DISPATCH_AGENT_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
@@ -50,7 +61,7 @@ import {
   type PlanReviewAgentSetting,
 } from "@/lib/app-settings";
 import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
-import { NO_AI_PROVIDER_OVERRIDES, type AiProviderOverrides } from "@/lib/execution-flow-settings";
+import { countProcessOverrides, NO_AI_PROVIDER_OVERRIDES, type AiProviderOverrides } from "@/lib/execution-flow-settings";
 
 export type AppSettingsValues = {
   aiExecutionProvider: AiExecutionProvider;
@@ -114,8 +125,26 @@ export type ExecutionSettingsSectionProps = {
  * シークレット同期）が同居し、フッターの「保存」がどこまで効くのか分からなかった。
  * 保存ボタンを持つのはこの区分だけ、という切り分けを保つこと。
  */
-// 「設定へ」で移動できる欄。計画レビューの担当AI・モデルはAI・モデル区分にある（#4139）
-const FLOW_SOURCE_IDS_AI = ["subpc-model-settings", "github-actions-settings", "app-ai-settings", "model-pick-settings", "plan-review-settings"] as const;
+// 「設定へ」で移動できる欄。計画レビュー・PRレビュー修復は「工程ごとの個別設定」にある（#4139・#5643）
+const FLOW_SOURCE_IDS_AI = [
+  "subpc-model-settings", "github-actions-settings", "app-ai-settings", "model-pick-settings",
+  "plan-review-settings", "workflow-model-settings",
+] as const;
+
+const AI_SECTION_NAV = [
+  { id: "ai-provider-settings", label: "① 共通" },
+  { id: "subpc-model-settings", label: "② ローカル" },
+  { id: "github-actions-settings", label: "② GitHub Actions" },
+  { id: "app-ai-settings", label: "② アプリ内AI" },
+  { id: "process-override-settings", label: "③ 個別設定" },
+  { id: "execution-flow-summary", label: "いまの実行内容" },
+] as const;
+
+const WORKFLOW_MODEL_DEFAULTS: WorkflowModelValues = {
+  workflowClaudeModel: "auto",
+  workflowCodexModel: "auto",
+  workflowCodexReasoningEffort: CODEX_REASONING_EFFORT_DEFAULT,
+};
 const FLOW_SOURCE_IDS_ALL = FLOW_SOURCE_IDS_AI;
 
 export function ExecutionSettingsSection({
@@ -187,6 +216,36 @@ export function ExecutionSettingsSection({
     useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
+  // PRレビュー・修復のworkflow専用モデル（#5643で区分の保存ボタンへ統一）。画面のpropsでは渡らないため、
+  // 区分を開いたときにAPIから読む。読めるまでは選べなくし、既定値で保存済みの値を上書きしない
+  const [workflow, setWorkflow] = useState<WorkflowModelValues>(WORKFLOW_MODEL_DEFAULTS);
+  const [savedWorkflow, setSavedWorkflow] = useState<WorkflowModelValues>(WORKFLOW_MODEL_DEFAULTS);
+  const [workflowLoaded, setWorkflowLoaded] = useState(false);
+  const showsAiSettings = mode === "ai" || mode === "all";
+  useEffect(() => {
+    if (!showsAiSettings || typeof fetch !== "function") return;
+    let cancelled = false;
+    fetch("/api/settings/claude-model")
+      .then(async (response) => {
+        if (!response.ok || cancelled) return;
+        const loaded = await response.json();
+        const next: WorkflowModelValues = {
+          workflowClaudeModel: typeof loaded.workflowClaudeModel === "string" ? loaded.workflowClaudeModel : "auto",
+          workflowCodexModel: typeof loaded.workflowCodexModel === "string" ? loaded.workflowCodexModel : "auto",
+          workflowCodexReasoningEffort: typeof loaded.workflowCodexReasoningEffort === "string"
+            ? loaded.workflowCodexReasoningEffort
+            : CODEX_REASONING_EFFORT_DEFAULT,
+        };
+        if (cancelled) return;
+        setWorkflow(next);
+        setSavedWorkflow(next);
+        setWorkflowLoaded(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [showsAiSettings]);
   const previousInitials = useRef({
     autoRetryLimit: initialAutoRetryLimit,
     aiExecutionProvider: initialAiExecutionProvider,
@@ -267,6 +326,12 @@ export function ExecutionSettingsSection({
   // 区分は独立保存なので、非表示の兄弟フォームに不正な編集中値があっても現在区分を阻害しない。
   const isValid = mode === "execution" || mode === "all" ? executionValid : true;
 
+  const workflowDirty =
+    workflowLoaded && (
+      workflow.workflowClaudeModel !== savedWorkflow.workflowClaudeModel ||
+      workflow.workflowCodexModel !== savedWorkflow.workflowCodexModel ||
+      workflow.workflowCodexReasoningEffort !== savedWorkflow.workflowCodexReasoningEffort
+    );
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
     aiExecutionProvider !== initialAiExecutionProvider ||
@@ -287,7 +352,8 @@ export function ExecutionSettingsSection({
     appAiModel !== initialAppAiModel ||
     appAiModelReasoning !== initialAppAiModelReasoning ||
     modelPickEngine !== initialModelPickEngine ||
-    dispatchConcurrency !== initialDispatchConcurrency;
+    dispatchConcurrency !== initialDispatchConcurrency ||
+    workflowDirty;
 
   // 計画レビューの担当AI・モデルはAI・モデル区分へ移した（#4139）。自動化区分に未保存の値は無い
   const planReviewDirty =
@@ -296,6 +362,7 @@ export function ExecutionSettingsSection({
     planReviewClaudeModel !== initialPlanReviewClaudeModel ||
     planReviewCodexModel !== initialPlanReviewCodexModel;
   const aiDirty =
+    workflowDirty ||
     aiExecutionProvider !== initialAiExecutionProvider ||
     claudeModel !== initialClaudeModel ||
     githubActionsAgent !== initialGithubActionsAgent ||
@@ -349,7 +416,8 @@ export function ExecutionSettingsSection({
       appAiModel === initialAppAiModel &&
       appAiModelReasoning === initialAppAiModelReasoning &&
       modelPickEngine === initialModelPickEngine &&
-      !planReviewDirty;
+      !planReviewDirty &&
+      !workflowDirty;
     // 担当AIは変えた項目だけ送る。解決済みの値をそのまま送ると、追従していた項目が固定に変わってしまう
     const planReviewValues = {
       ...(planReviewAgentForClaude !== initialPlanReviewAgentForClaude ? { planReviewAgentForClaude } : {}),
@@ -357,6 +425,12 @@ export function ExecutionSettingsSection({
       ...(planReviewClaudeModel !== initialPlanReviewClaudeModel ? { planReviewClaudeModel } : {}),
       ...(planReviewCodexModel !== initialPlanReviewCodexModel ? { planReviewCodexModel } : {}),
     };
+    // workflow専用モデルも変えた項目だけ送る（他の画面で保存された値を、読み込み時点の値で巻き戻さない）
+    const workflowValues = workflowLoaded
+      ? (Object.keys(workflow) as (keyof WorkflowModelValues)[])
+          .filter((key) => workflow[key] !== savedWorkflow[key])
+          .reduce<Partial<WorkflowModelValues>>((values, key) => ({ ...values, [key]: workflow[key] }), {})
+      : {};
     const modelValues =
       onlyAiExecutionProviderChanged
         ? { aiExecutionProvider }
@@ -374,6 +448,7 @@ export function ExecutionSettingsSection({
             appAiModelReasoning,
             modelPickEngine,
             ...planReviewValues,
+            ...workflowValues,
           }
         : mode === "execution"
           ? {
@@ -396,11 +471,13 @@ export function ExecutionSettingsSection({
                 modelPickEngine,
                 defaultDispatchAgent,
                 ...planReviewValues,
+                ...workflowValues,
                 dispatchFailoverEnabled,
                 dispatchFailoverThresholdPercent,
               };
     const claudeModelOk = await updateClaudeModel(modelValues);
     if (!claudeModelOk) return;
+    if (showsAiSettings) setSavedWorkflow(workflow);
     if (mode === "execution" || mode === "all") {
       const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
       if (!dispatchOk) return;
@@ -466,49 +543,309 @@ export function ExecutionSettingsSection({
     setIsSaved(true);
   }
 
+  // AI・モデル区分で保存済みの値から変えた欄。欄の橙枠と、保存バーの「未保存の項目名」に使う（#5643）
+  const aiFieldChanges = [
+    { id: "ai-provider", label: "AI実行プロバイダー", changed: aiExecutionProvider !== initialAiExecutionProvider },
+    { id: "claude-local-model", label: "ローカル：Claude Code", changed: claudeLocalModel !== initialClaudeLocalModel },
+    { id: "codex-model", label: "ローカル：Codex CLI", changed: codexModel !== initialCodexModel },
+    { id: "github-actions-agent", label: "GitHub Actions：エージェント", changed: githubActionsAgent !== initialGithubActionsAgent },
+    { id: "claude-model", label: "GitHub Actions：計画・実装・レビュー", changed: claudeModel !== initialClaudeModel },
+    { id: "claude-model-assist", label: "GitHub Actions：質問回答・Issue分割", changed: claudeModelAssist !== initialClaudeModelAssist },
+    { id: "github-actions-codex-model", label: "GitHub Actions：Codex CLI", changed: githubActionsCodexModel !== initialGithubActionsCodexModel },
+    { id: "app-ai-model", label: "アプリ内AI：要約・検索・文章整理", changed: appAiModel !== initialAppAiModel },
+    { id: "app-ai-model-reasoning", label: "アプリ内AI：原因診断・新規アプリ相談", changed: appAiModelReasoning !== initialAppAiModelReasoning },
+    { id: "model-pick-engine", label: "判定に使うAI", changed: modelPickEngine !== initialModelPickEngine },
+    { id: "plan-review-agent-for-claude", label: "計画レビュー：担当（Claude Code）", changed: planReviewAgentForClaude !== initialPlanReviewAgentForClaude },
+    { id: "plan-review-agent-for-codex", label: "計画レビュー：担当（Codex CLI）", changed: planReviewAgentForCodex !== initialPlanReviewAgentForCodex },
+    { id: "plan-review-claude-model", label: "計画レビュー：Claudeのモデル", changed: planReviewClaudeModel !== initialPlanReviewClaudeModel },
+    { id: "plan-review-codex-model", label: "計画レビュー：Codexのモデル", changed: planReviewCodexModel !== initialPlanReviewCodexModel },
+    { id: "workflow-claude-model", label: "PRレビュー・修復：Claude", changed: workflowLoaded && workflow.workflowClaudeModel !== savedWorkflow.workflowClaudeModel },
+    { id: "workflow-codex-model", label: "PRレビュー・修復：Codex", changed: workflowLoaded && workflow.workflowCodexModel !== savedWorkflow.workflowCodexModel },
+    { id: "workflow-codex-reasoning", label: "PRレビュー・修復：推論強度", changed: workflowLoaded && workflow.workflowCodexReasoningEffort !== savedWorkflow.workflowCodexReasoningEffort },
+  ];
+  const changedAiFieldIds = new Set(aiFieldChanges.filter((field) => field.changed).map((field) => field.id));
+  const dirtyAiLabels = aiFieldChanges.filter((field) => field.changed).map((field) => field.label);
+
+  function resetAiChanges() {
+    setAiExecutionProvider(initialAiExecutionProvider);
+    setClaudeLocalModel(initialClaudeLocalModel);
+    setCodexModel(initialCodexModel);
+    setGithubActionsAgent(initialGithubActionsAgent);
+    setClaudeModel(initialClaudeModel);
+    setClaudeModelAssist(initialClaudeModelAssist);
+    setGithubActionsCodexModel(initialGithubActionsCodexModel);
+    setAppAiModel(initialAppAiModel);
+    setAppAiModelReasoning(initialAppAiModelReasoning);
+    setModelPickEngine(initialModelPickEngine);
+    setPlanReviewAgentForClaude(initialPlanReviewAgentForClaude);
+    setPlanReviewAgentForCodex(initialPlanReviewAgentForCodex);
+    setPlanReviewClaudeModel(initialPlanReviewClaudeModel);
+    setPlanReviewCodexModel(initialPlanReviewCodexModel);
+    setWorkflow(savedWorkflow);
+  }
+
+  // 各実行場所で「いま実際に使われる」エージェント。個別に固定していなければプロバイダー（保存前の選択を含む）に従う
+  const localAgent: AiExecutionProvider = displayOverrides.defaultDispatchAgent ? defaultDispatchAgent : aiExecutionProvider;
+  const actionsAgent: AiExecutionProvider = displayOverrides.githubActionsAgent ? githubActionsAgent : aiExecutionProvider;
+  const processOverrideCount = countProcessOverrides({ planReviewAgentForClaude, planReviewAgentForCodex, ...workflow });
+
   return (
     <div className="flex flex-col gap-4">
-      {(mode === "ai" || mode === "all") && <ExecutionFlowOverview
-        aiExecutionProvider={aiExecutionProvider}
-        savedAiExecutionProvider={initialAiExecutionProvider}
-        onAiExecutionProviderChange={setAiExecutionProvider}
-        overrides={displayOverrides}
-        linkableSourceIds={mode === "all" ? FLOW_SOURCE_IDS_ALL : FLOW_SOURCE_IDS_AI}
-        claudeModel={claudeModel}
-        githubActionsAgent={githubActionsAgent}
-        githubActionsCodexModel={githubActionsCodexModel}
-        claudeModelAssist={claudeModelAssist}
-        claudeLocalModel={claudeLocalModel}
-        codexModel={codexModel}
-        defaultDispatchAgent={defaultDispatchAgent}
-        planReviewAgentForClaude={planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude}
-        planReviewAgentForCodex={planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex}
-        planReviewClaudeModel={planReviewClaudeModel}
-        planReviewCodexModel={planReviewCodexModel}
-        appAiModel={appAiModel}
-        appAiModelReasoning={appAiModelReasoning}
-        modelPickEngine={modelPickEngine}
-      />}
+      {showsAiSettings && <>
+        <AiSectionNav items={AI_SECTION_NAV} />
 
-      {(mode === "ai" || mode === "all") && <PlanReviewSettingsBlock
-        aiExecutionProvider={aiExecutionProvider}
-        savedAiExecutionProvider={initialAiExecutionProvider}
-        flowSettings={{
-          claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist, claudeLocalModel, codexModel,
-          planReviewAgentForClaude: planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude,
-          planReviewAgentForCodex: planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex,
-          planReviewClaudeModel, planReviewCodexModel, appAiModel, appAiModelReasoning, modelPickEngine, defaultDispatchAgent,
-        }}
-        overrides={displayOverrides}
-        agentForClaude={planReviewAgentForClaude}
-        agentForCodex={planReviewAgentForCodex}
-        onAgentForClaudeChange={setPlanReviewAgentForClaude}
-        onAgentForCodexChange={setPlanReviewAgentForCodex}
-        claudeModel={planReviewClaudeModel}
-        codexModel={planReviewCodexModel}
-        onClaudeModelChange={setPlanReviewClaudeModel}
-        onCodexModelChange={setPlanReviewCodexModel}
-      />}
+        <ProviderCard
+          provider={aiExecutionProvider}
+          savedProvider={initialAiExecutionProvider}
+          onChange={setAiExecutionProvider}
+        />
+
+        <SettingsCard
+          id="subpc-model-settings"
+          step="2"
+          icon={Laptop}
+          iconClassName="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+          title="ローカル実行"
+          scope={<ScopeChip tone="green">DeskMini・Mac mini 共通</ScopeChip>}
+          description="「実装を開始」でホストに起動するセッションのモデルです。どのホストで起動しても同じ値を使います（ホストごとには分けられません）。全リポジトリ共通です。"
+        >
+          <ProviderColumns
+            active={localAgent}
+            claude={
+              <SettingField
+                id="claude-local-model"
+                label="計画・実装"
+                changed={changedAiFieldIds.has("claude-local-model")}
+                help="「実装を開始」の最初の選択。おまかせはIssueの内容から選び、モデルを選ばずに起動する経路ではSonnetで起動します。"
+                hint={<>
+                  「おまかせ」が効くのは「実装を開始」だけで、「ローカルで開始」・PR修正依頼の呼び戻し・一括停止からの再開など、
+                  モデルを選ばずに起動する経路ではSonnetで起動します。Haikuはauto modeが動作しないため選べません（
+                  <a href="https://github.com/anthropics/claude-code/issues/43235" target="_blank" rel="noreferrer" className="underline">
+                    anthropics/claude-code#43235
+                  </a>
+                  ）。「Claude Codeに任せる」（`--model`を付けない起動）も、実際に動くモデルが分からなくなるため選べません（#2776）。
+                </>}
+              >
+                <Select value={claudeLocalModel} onValueChange={(value) => setClaudeLocalModel(value as ClaudeLocalModelSetting)}>
+                  <SelectTrigger id="claude-local-model" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CLAUDE_LOCAL_MODEL_SETTING_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </SettingField>
+            }
+            codex={
+              <SettingField
+                id="codex-model"
+                label="計画・実装"
+                changed={changedAiFieldIds.has("codex-model")}
+                help="おまかせはSol・Terra・Lunaから選び、モデルを選ばずに起動する経路ではTerraで起動します。"
+                hint={<>
+                  通常はTerra、難しいIssueはSol、単純な修正を優先する場合はLunaが適しています。旧世代（GPT-5.5・5.4）と
+                  「Codexに任せる」は、この設定でだけ選べます（「実装を開始」の初期選択はTerraになります）。
+                </>}
+              >
+                <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModelSetting)}>
+                  <SelectTrigger id="codex-model" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CODEX_MODEL_SETTING_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </SettingField>
+            }
+          />
+          <p className="mt-3 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            既定のエージェント（Claude／Codex）・使用量に応じた自動フェイルオーバー・同時実行数は「実行」区分にあります。
+          </p>
+        </SettingsCard>
+
+        <SettingsCard
+          id="github-actions-settings"
+          step="2"
+          icon={GitBranch}
+          iconClassName="bg-primary/10 text-primary"
+          title="GitHub Actions"
+          scope={<ScopeChip tone="primary">無人実行・ローカルとは別に保存</ScopeChip>}
+          description="GitHub Actionsでの計画・実装・レビューに使います。全リポジトリ共通です。"
+          aside={
+            <SettingField
+              id="github-actions-agent"
+              label="エージェント"
+              changed={changedAiFieldIds.has("github-actions-agent")}
+              badge={displayOverrides.githubActionsAgent ? <ScopeChip tone="amber">個別設定</ScopeChip> : <ScopeChip tone="primary">追従</ScopeChip>}
+            >
+              <Select
+                value={actionsAgent}
+                onValueChange={(value) => setGithubActionsAgent(value as GithubActionsAgent)}
+              >
+                <SelectTrigger id="github-actions-agent" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{DISPATCH_AGENT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </SettingField>
+          }
+        >
+          <ProviderColumns
+            active={actionsAgent}
+            claude={<>
+              <SettingField
+                id="claude-model"
+                label="計画・実装・レビュー"
+                changed={changedAiFieldIds.has("claude-model")}
+                help="計画作成・計画レビュー・実装とPR作成。通常はSonnet、難しい設計を優先する場合はOpus。"
+              >
+                <Select value={claudeModel} onValueChange={(value) => setClaudeModel(value as ClaudeModel)}>
+                  <SelectTrigger id="claude-model" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{CLAUDE_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </SettingField>
+              <SettingField
+                id="claude-model-assist"
+                label="質問回答・Issue分割"
+                changed={changedAiFieldIds.has("claude-model-assist")}
+                help="質問への回答と大きなIssueの分割。通常はHaikuで十分です。"
+              >
+                <Select value={claudeModelAssist} onValueChange={(value) => setClaudeModelAssist(value as ClaudeModel)}>
+                  <SelectTrigger id="claude-model-assist" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{CLAUDE_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </SettingField>
+            </>}
+            codex={
+              <SettingField
+                id="github-actions-codex-model"
+                label="計画・実装・レビュー"
+                changed={changedAiFieldIds.has("github-actions-codex-model")}
+                help="エージェントをCodex CLIにしたときのモデルです。"
+              >
+                <Select value={githubActionsCodexModel} onValueChange={(value) => setGithubActionsCodexModel(value as CodexLocalModel)}>
+                  <SelectTrigger id="github-actions-codex-model" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{CODEX_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </SettingField>
+            }
+          />
+        </SettingsCard>
+
+        <SettingsCard
+          id="app-ai-settings"
+          step="2"
+          icon={Sparkles}
+          iconClassName="bg-violet-500/15 text-violet-700 dark:text-violet-300"
+          title="アプリ内AI"
+          scope={<ScopeChip tone="violet">IssueDeckの画面の中</ScopeChip>}
+          description="要約・検索・原因診断など、画面の中で動くAIです。選んだモデルで実行先（IssueDeckサーバーのAnthropic API／DeskMiniのCodex CLI）が決まります。"
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <SettingField
+              id="app-ai-model"
+              label="要約・検索・文章整理"
+              changed={changedAiFieldIds.has("app-ai-model")}
+              help="要約・類似Issue検索・本文整理・Issue作成補助・デプロイ失敗の原因分析。通常はHaikuが適しています。"
+              hint={<>
+                GPT系を選ぶとDeskMiniのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、Claudeが使えないときの代わりになります。
+                OpenAI API（従量課金）は使わず、Codexが使えないときはエラーを表示してClaudeへは切り替えません。
+                画像からの変更内容の抽出も、画像をDeskMiniへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。モデルの自動選択はルールで判定します。
+              </>}
+            >
+              <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
+                <SelectTrigger id="app-ai-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{APP_AI_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+              <AppAiRuntimeNote model={appAiModel} />
+            </SettingField>
+
+            <SettingField
+              id="app-ai-model-reasoning"
+              label="原因診断・新規アプリ相談"
+              changed={changedAiFieldIds.has("app-ai-model-reasoning")}
+              help="手作業の原因診断・新規アプリの構成相談・修正提案・全体レビューの判断の推奨。通常はSonnetが適しています。"
+              hint={<>
+                GPT系を選ぶと、原因診断（チャット調査）・新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨を
+                DeskMiniのCodex CLI（ChatGPTサブスク枠）で実行します。OpenAI API（従量課金）は使わず、Codexが使えないときはClaudeへ切り替えません。
+              </>}
+            >
+              <Select value={appAiModelReasoning} onValueChange={(value) => setAppAiModelReasoning(value as AppAiModel)}>
+                <SelectTrigger id="app-ai-model-reasoning" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{APP_AI_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+              <AppAiRuntimeNote model={appAiModelReasoning} />
+              {/* リリースPRの全体AIレビュー（#4238）の担当は、この設定で決まる。画面の表示と実際に積むジョブは同じ関数を使う */}
+              <p className="text-xs text-muted-foreground" data-testid="release-review-assignee">
+                リリース全体レビューの担当（実効）:{" "}
+                {describeReleaseReviewAssignee(resolveReleaseReviewAssignee({ appAiModelReasoning, aiExecutionProvider }))}
+                （公開承認の自動化がONの間は、この設定にかかわらずCodexで実行します）
+              </p>
+            </SettingField>
+
+            {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
+                「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く */}
+            <div id="model-pick-settings" tabIndex={-1} className="scroll-mt-2 outline-none">
+              <SettingField
+                id="model-pick-engine"
+                label="判定に使うAI（おまかせ・ラベル付与）"
+                changed={changedAiFieldIds.has("model-pick-engine")}
+                help="「おまかせ」のモデル選択と、Issue作成「タイトル自動」のラベル判定に使います。"
+                hint={<>
+                  タイトルはどちらでもアプリ内AIが付けます。Jevは文章を書かない判定専用のモデルで、渡した候補以外を返しません。
+                  選ぶとIssueのタイトル・本文・ラベル・承認済みの計画（ラベル付与では作成中の本文）がTypeSafeへ送られます
+                  （privateリポジトリのIssueも対象です）。TYPESAFE_API_KEYが未設定のとき・呼び出しに失敗したときは、アプリ内AIで判定します。
+                </>}
+              >
+                <Select value={modelPickEngine} onValueChange={(value) => setModelPickEngine(value as ModelPickEngine)}>
+                  <SelectTrigger id="model-pick-engine" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{MODEL_PICK_ENGINE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                </Select>
+                {/* **送信先が1社増えることを、切り替えるこの場で伝える**（#3189の計画レビュー） */}
+                {modelPickEngine === "jev" && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    選択中：Issueのタイトル・本文・ラベル・承認済みの計画がTypeSafeへ送られます（privateリポジトリのIssueも対象です）。
+                  </p>
+                )}
+              </SettingField>
+            </div>
+
+            <ReleaseAutoApprovalField />
+          </div>
+        </SettingsCard>
+
+        <PlanReviewSettingsBlock
+          aiExecutionProvider={aiExecutionProvider}
+          fixedCount={processOverrideCount}
+          agentForClaude={planReviewAgentForClaude}
+          agentForCodex={planReviewAgentForCodex}
+          onAgentForClaudeChange={setPlanReviewAgentForClaude}
+          onAgentForCodexChange={setPlanReviewAgentForCodex}
+          claudeModel={planReviewClaudeModel}
+          codexModel={planReviewCodexModel}
+          onClaudeModelChange={setPlanReviewClaudeModel}
+          onCodexModelChange={setPlanReviewCodexModel}
+          workflow={workflow}
+          workflowLoaded={workflowLoaded}
+          onWorkflowChange={(next) => setWorkflow((current) => ({ ...current, ...next }))}
+          changedIds={changedAiFieldIds}
+        />
+
+        <ExecutionFlowOverview
+          aiExecutionProvider={aiExecutionProvider}
+          overrides={displayOverrides}
+          linkableSourceIds={mode === "all" ? FLOW_SOURCE_IDS_ALL : FLOW_SOURCE_IDS_AI}
+          claudeModel={claudeModel}
+          githubActionsAgent={githubActionsAgent}
+          githubActionsCodexModel={githubActionsCodexModel}
+          claudeModelAssist={claudeModelAssist}
+          claudeLocalModel={claudeLocalModel}
+          codexModel={codexModel}
+          defaultDispatchAgent={defaultDispatchAgent}
+          planReviewAgentForClaude={planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude}
+          planReviewAgentForCodex={planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex}
+          planReviewClaudeModel={planReviewClaudeModel}
+          planReviewCodexModel={planReviewCodexModel}
+          appAiModel={appAiModel}
+          appAiModelReasoning={appAiModelReasoning}
+          modelPickEngine={modelPickEngine}
+          {...workflow}
+        />
+      </>}
 
       {mode === "automation" && <div id="plan-review-agent-link" className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-3 text-sm">
         <p className="text-muted-foreground">
@@ -631,247 +968,20 @@ export function ExecutionSettingsSection({
         />
       </div>}
 
-      {(mode === "ai" || mode === "all") && <>
-      <h3 id="github-actions-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions 共通設定</h3>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="github-actions-agent">エージェント</Label>
-          <InfoHint label="エージェント">
-            GitHub Actionsの計画・実装・レビューに使うCLIです。DeskMiniとは別に保存されます。
-          </InfoHint>
-        </div>
-        <Select value={githubActionsAgent} onValueChange={(value) => setGithubActionsAgent(value as GithubActionsAgent)}>
-          <SelectTrigger id="github-actions-agent" className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>{DISPATCH_AGENT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
-        </Select>
-      </div>
-
-      {githubActionsAgent === "codex" && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="github-actions-codex-model">GitHub Actions（Codex）：使用モデル</Label>
-          <Select value={githubActionsCodexModel} onValueChange={(value) => setGithubActionsCodexModel(value as CodexLocalModel)}>
-            <SelectTrigger id="github-actions-codex-model" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>{CODEX_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      )}
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="claude-model">GitHub Actions（Claude）：計画・実装・レビュー</Label>
-          <InfoHint label="GitHub Actions（Claude）：計画・実装・レビュー">
-            Claude Codeを選んだときに、GitHub Actionsで計画を作り、計画をレビューし、実装してPRを作る処理に使います。
-            通常はSonnet、難しい設計を優先する場合はOpusが適しています。全リポジトリ共通です。
-          </InfoHint>
-        </div>
-        <Select value={claudeModel} onValueChange={(value) => setClaudeModel(value as ClaudeModel)}>
-          <SelectTrigger id="claude-model" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CLAUDE_MODEL_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="claude-model-assist">GitHub Actions（Claude）：質問回答・Issue分割</Label>
-          <InfoHint label="GitHub Actions（Claude）：質問回答・Issue分割">
-            GitHub Actionsで質問へ回答し、大きなIssueを分割する処理に使います。通常はHaikuで十分です。
-          </InfoHint>
-        </div>
-        <Select
-          value={claudeModelAssist}
-          onValueChange={(value) => setClaudeModelAssist(value as ClaudeModel)}
-        >
-          <SelectTrigger id="claude-model-assist" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CLAUDE_MODEL_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <h3 id="subpc-model-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">DeskMini 共通設定</h3>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="claude-local-model">DeskMini（Claude）：計画・実装</Label>
-          <InfoHint label="DeskMini（Claude）：計画・実装">
-            「実装を開始」で最初から選ばれるモデルです。「おまかせ」を選ぶと、開くたびにIssueの内容から
-            モデルを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、
-            「ローカルで開始」・PR修正依頼の呼び戻し・一括停止からの再開など、モデルを選ばずに
-            起動する経路ではSonnetで起動します。全リポジトリ共通です。Haikuはauto
-            modeが動作しないため選べません（
-            <a
-              href="https://github.com/anthropics/claude-code/issues/43235"
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
-            >
-              anthropics/claude-code#43235
-            </a>
-            ）。「Claude Codeに任せる」（`--model`を付けない起動）も、実際に動くモデルが分からなく
-            なるため選べません（#2776）。
-          </InfoHint>
-        </div>
-        <Select
-          value={claudeLocalModel}
-          onValueChange={(value) => setClaudeLocalModel(value as ClaudeLocalModelSetting)}
-        >
-          <SelectTrigger id="claude-local-model" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CLAUDE_LOCAL_MODEL_SETTING_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="codex-model">Codex：DeskMiniでの計画・実装</Label>
-          <InfoHint label="Codex：DeskMiniでの計画・実装">
-            「実装を開始」でCodex CLIを選んだとき、最初から選ばれるモデルです。通常はTerra、難しい
-            IssueはSol、単純な修正を優先する場合はLunaが適しています。「おまかせ」を選ぶと、開くたびに
-            Issueの内容からSol・Terra・Lunaを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、
-            モデルを選ばずに起動する経路（ローカルで開始など）ではTerraで起動します。
-            旧世代（GPT-5.5・5.4）と「Codexに任せる」は、この設定でだけ選べます（ダイアログの初期選択は
-            Terraになります）。全リポジトリ共通です。
-          </InfoHint>
-        </div>
-        <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModelSetting)}>
-          <SelectTrigger id="codex-model" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CODEX_MODEL_SETTING_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
-          「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く。
-          DeskMiniのモデル設定（すぐ上）の直後に置く */}
-      <div id="model-pick-settings" className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="model-pick-engine">判定に使うAI（おまかせ・ラベル付与）</Label>
-          <InfoHint label="判定に使うAI（おまかせ・ラベル付与）">
-            「実装を開始」で「おまかせ」を選んだときにモデルを選ぶ判定と、Issue作成で「タイトル自動」を
-            使ったときにラベルを付ける判定に使うAIです（タイトルはどちらでもアプリ内AIが付けます）。
-            Jevは文章を書かない判定専用のモデルで、渡した候補以外を返しません。
-            選ぶとIssueのタイトル・本文・ラベル・承認済みの計画（ラベル付与では作成中の本文）が
-            TypeSafeへ送られます（privateリポジトリのIssueも対象です）。TYPESAFE_API_KEYが未設定の
-            とき・呼び出しに失敗したときは、アプリ内AIで判定します。
-          </InfoHint>
-        </div>
-        <Select
-          value={modelPickEngine}
-          onValueChange={(value) => setModelPickEngine(value as ModelPickEngine)}
-        >
-          <SelectTrigger id="model-pick-engine" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MODEL_PICK_ENGINE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {/* **送信先が1社増えることを、切り替えるこの場で伝える**（#3189の計画レビュー）。
-            判定の材料はIssueのタイトル・本文・ラベル・承認済みの計画で、privateリポジトリの
-            本文も含む。既定（アプリ内AI）のままなら送信先は今までどおり変わらない */}
-        {modelPickEngine === "jev" && (
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            選択中：Issueのタイトル・本文・ラベル・承認済みの計画がTypeSafeへ送られます（privateリポジトリのIssueも対象です）。
-          </p>
-        )}
-      </div>
-
-      <div id="app-ai-settings" className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
-          <InfoHint label="アプリ内AI：要約・検索・文章整理">
-            Issueとコメントの要約、類似Issue検索、本文整理、Issue作成補助、デプロイ失敗の原因分析に使います。
-            定型処理が中心のため、通常はHaikuが適しています。GPT系を選ぶとDeskMiniのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、
-            Claudeが使えないときの代わりになります。OpenAI API（従量課金）は使わず、Codexが使えないときはエラーを表示してClaudeへは切り替えません。
-            画像からの変更内容の抽出も、画像をDeskMiniへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。モデルの自動選択はルールで判定します。
-          </InfoHint>
-        </div>
-        <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
-          <SelectTrigger id="app-ai-model" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {APP_AI_MODEL_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <AppAiRuntimeNote model={appAiModel} />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
-          <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
-            手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
-            通常はSonnetが適しています。GPT系を選ぶと、原因診断（チャット調査）・新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨を
-            DeskMiniのCodex CLI（ChatGPTサブスク枠）で実行します。OpenAI API（従量課金）は使わず、Codexが使えないときはClaudeへ切り替えません。
-          </InfoHint>
-        </div>
-        <Select
-          value={appAiModelReasoning}
-          onValueChange={(value) => setAppAiModelReasoning(value as AppAiModel)}
-        >
-          <SelectTrigger id="app-ai-model-reasoning" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {APP_AI_MODEL_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <AppAiRuntimeNote model={appAiModelReasoning} />
-        {/* リリースPRの全体AIレビュー（#4238）の担当は、この設定で決まる。画面の表示と実際に積むジョブは同じ関数を使う */}
-        <p className="text-xs text-muted-foreground" data-testid="release-review-assignee">
-          リリース全体レビューの担当（実効）:{" "}
-          {describeReleaseReviewAssignee(resolveReleaseReviewAssignee({ appAiModelReasoning, aiExecutionProvider }))}
-          （公開承認の自動化がONの間は、この設定にかかわらずCodexで実行します）
-        </p>
-        <ReleaseAutoApprovalField />
-      </div>
-      </>}
-
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {mode !== "automation" && <div className="flex items-center gap-3 border-t pt-4">
+      {mode === "ai" && (
+        <StickySaveBar
+          dirtyLabels={dirtyAiLabels}
+          isSubmitting={isSubmitting}
+          canSave={isValid}
+          isSaved={isSaved}
+          onSave={handleSubmit}
+          onReset={resetAiChanges}
+        />
+      )}
+
+      {(mode === "execution" || mode === "all") && <div className="flex items-center gap-3 border-t pt-4">
         <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
