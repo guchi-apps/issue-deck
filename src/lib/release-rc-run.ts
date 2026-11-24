@@ -66,8 +66,8 @@ import {
   registerReleaseVerification,
 } from "@/lib/release-verification";
 import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
-import { decideSuccessorStart, parseProductionStopReason, type ProductionStopReason } from "@/lib/release-production-stop";
-import { readProductionTargetKind } from "@/lib/release-production-stop-run";
+import { canCloseBySuccessor, decideSuccessorStart, parseProductionStopReason, type ProductionStopReason, type SuccessorProofWaiting } from "@/lib/release-production-stop";
+import { observeSuccessorProof, readProductionTargetKind } from "@/lib/release-production-stop-run";
 import { PRODUCTION_VERIFICATION_METHODS, type ProductionVerificationMethod } from "@/lib/release-production-verification";
 
 /**
@@ -636,17 +636,35 @@ export async function loadRcBlock(ctx: Context): Promise<RcBlockSummary | null> 
     statusReason: candidate.status.reason,
   });
   if (block.kind !== "production_stopped") return block;
-  return { ...block, successorStart: await successorStartFor(ctx, block.productionStopReason ?? null) };
+  return { ...block, successorStart: await successorStartFor(ctx, block.productionStopReason ?? null, row.id) };
 }
 
 /**
  * 稼働確認が止まった候補を残したまま、次の候補を始められるか（#4712）。証拠未設定の候補だけが対象で、
- * developの`deploy.yml`が稼働版の照合を持つ（次の候補で証拠を取れる）ときに限る
+ * developの`deploy.yml`が稼働版の照合を持つ（次の候補で証拠を取れる）ときに限る。
+ * デプロイ失敗などの停止は始めさせないが、後続の版で閉じられない理由を観測して添える（#5638）
  */
-async function successorStartFor(ctx: Context, stopReason: ProductionStopReason | null) {
-  if (stopReason !== "contract_missing") return decideSuccessorStart({ stopReason, developKind: null, slotTaken: false });
+async function successorStartFor(ctx: Context, stopReason: ProductionStopReason | null, candidateId: string) {
+  if (stopReason !== "contract_missing") {
+    const successorWaiting = canCloseBySuccessor(stopReason) ? await observeSuccessorWaiting(ctx, candidateId) : null;
+    return decideSuccessorStart({ stopReason, developKind: null, slotTaken: false, successorWaiting });
+  }
   const slotTaken = (await db.releaseCandidate.findUnique({ where: { successorProofKey: fullNameOf(ctx) }, select: { id: true } })) !== null;
   return decideSuccessorStart({ stopReason, developKind: slotTaken ? null : await readProductionTargetKind(ctx, "develop"), slotTaken });
+}
+
+/**
+ * 止まった候補を後続の版でまだ閉じられない理由（#5638）。対象は稼働確認の記録のマージコミット。
+ * 閉じられる状態なら照合（`reconcileRcFinalization`）が閉じるので、ここでは理由だけを返す（書き込まない）。
+ * 記録が無い・読めないときは理由を添えない
+ */
+async function observeSuccessorWaiting(ctx: Context, candidateId: string): Promise<SuccessorProofWaiting | null> {
+  const check = await db.releaseProductionCheck.findUnique({ where: { candidateId }, select: { mergeSha: true } }).catch(() => null);
+  if (!check?.mergeSha) return null;
+  const proof = await observeSuccessorProof(ctx, check.mergeSha).catch(() => null);
+  if (proof === null) return "latest_unreadable";
+  // 観測と照合の間に後続の版が揃った。次の照合で閉じるので、理由は「取り直し」に寄せる
+  return proof.ok ? null : proof.waiting;
 }
 
 /** 完了した候補の方式（#4713の確認の記録）。記録が無い・読めない既存の候補はnull */

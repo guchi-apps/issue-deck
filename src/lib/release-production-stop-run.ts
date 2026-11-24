@@ -2,7 +2,7 @@ import type { DeployRunObservation } from "@/lib/deploy-recovery-series";
 import { hasVersionVerification } from "@/lib/deploy-recovery-series-run";
 import { fetchFileTextAtRef, isAncestorCommit } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
-import { decideSuccessorProof } from "@/lib/release-production-stop";
+import { decideSuccessorProof, type SuccessorProofResult } from "@/lib/release-production-stop";
 import { classifyProductionTarget, type ProductionTargetKind } from "@/lib/release-production-verification";
 
 /**
@@ -57,13 +57,17 @@ export async function observeSuccessorProof(
   ctx: Ctx,
   coveredSha: string,
   options: { excludeShas?: readonly (string | null)[] } = {},
-): Promise<ReturnType<typeof decideSuccessorProof>> {
+): Promise<SuccessorProofResult> {
   const latest = await fetchLatestMainDeployRun(ctx);
-  if (!latest || latest.status !== "completed" || latest.conclusion !== "success" || latest.headSha === coveredSha) return { ok: false };
+  // 閉じられない理由（#5638）は開始不可の理由として画面へ出す。判定の順序は従来と同じ
+  if (!latest) return { ok: false, waiting: "latest_unreadable" };
+  if (latest.headSha === coveredSha) return { ok: false, waiting: "latest_is_candidate" };
+  if (latest.status !== "completed") return { ok: false, waiting: "latest_running" };
+  if (latest.conclusion !== "success") return { ok: false, waiting: "latest_not_success" };
   // 呼び出し側が自分で追跡しているコミット（復旧系列の本番反映）は、後続ではなく本来の復旧として扱う
-  if (options.excludeShas?.includes(latest.headSha)) return { ok: false };
+  if (options.excludeShas?.includes(latest.headSha)) return { ok: false, waiting: "latest_excluded" };
   const kind = await readProductionTargetKind(ctx, latest.headSha);
-  if (kind !== "deploy_version_check") return { ok: false };
+  if (kind !== "deploy_version_check") return { ok: false, waiting: kind === null ? "latest_unreadable" : "no_version_check" };
   const versionCheckPassed = await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token);
   const includesCovered = await isAncestorCommit(ctx.owner, ctx.repo, coveredSha, latest.headSha, ctx.token).catch(() => false);
   return decideSuccessorProof({ coveredSha, successor: { sha: latest.headSha, runUrl: latest.htmlUrl, kind, versionCheckPassed, includesCovered } });

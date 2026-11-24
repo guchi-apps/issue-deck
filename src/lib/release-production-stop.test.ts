@@ -7,6 +7,7 @@ import {
   decideSuccessorProof,
   decideSuccessorStart,
   productionKindNotice,
+  successorWaitingText,
   type ProductionStopInput,
 } from "@/lib/release-production-stop";
 
@@ -88,11 +89,12 @@ describe("decideSuccessorProof（#4712）", () => {
   });
 
   it("対象を含まない・照合が無い・照合ジョブが成功していない・後続が対象そのもの・後続なしでは認めない", () => {
-    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, includesCovered: false } })).toEqual({ ok: false });
-    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, kind: "deploy_without_version_check" } })).toEqual({ ok: false });
-    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, versionCheckPassed: false } })).toEqual({ ok: false });
-    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, sha: SHA } })).toEqual({ ok: false });
-    expect(decideSuccessorProof({ coveredSha: SHA, successor: null })).toEqual({ ok: false });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, includesCovered: false } })).toEqual({ ok: false, waiting: "not_including" });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, kind: "deploy_without_version_check" } })).toEqual({ ok: false, waiting: "no_version_check" });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, kind: null } })).toEqual({ ok: false, waiting: "latest_unreadable" });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, versionCheckPassed: false } })).toEqual({ ok: false, waiting: "version_check_not_passed" });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: { ...successor, sha: SHA } })).toEqual({ ok: false, waiting: "latest_is_candidate" });
+    expect(decideSuccessorProof({ coveredSha: SHA, successor: null })).toEqual({ ok: false, waiting: "latest_unreadable" });
   });
 });
 
@@ -142,5 +144,27 @@ describe("canCloseBySuccessor（#5633）", () => {
 describe("後続の確認を待つ枠は証拠未設定だけ（#5633）", () => {
   it("デプロイ失敗で止まった候補は、次の候補を始めさせる経路に乗せない", () => {
     expect(decideSuccessorStart({ stopReason: "deploy_failed", developKind: "deploy_version_check", slotTaken: false }).allowed).toBe(false);
+  });
+});
+
+describe("止まった候補を後続の版で閉じられない理由（#5638）", () => {
+  it("デプロイ失敗で止まった候補は始めさせないが、何が揃えば閉じるかを理由へ添える", () => {
+    const result = decideSuccessorStart({ stopReason: "deploy_failed", developKind: null, slotTaken: false, successorWaiting: "latest_running" });
+    expect(result.allowed).toBe(false);
+    if (result.allowed) return;
+    expect(result.reason).toContain("別のPRで本番を復旧した場合");
+    expect(result.reason).toContain(successorWaitingText("latest_running"));
+  });
+
+  it("後続の版で閉じない停止・理由が無いときは従来の文面のまま", () => {
+    const base = "この候補の稼働確認を直して確かめ直すまで、新しい候補は作れません";
+    expect(decideSuccessorStart({ stopReason: "version_mismatch", developKind: null, slotTaken: false, successorWaiting: "latest_running" })).toEqual({ allowed: false, reason: base });
+    expect(decideSuccessorStart({ stopReason: "deploy_failed", developKind: null, slotTaken: false, successorWaiting: null })).toEqual({ allowed: false, reason: base });
+  });
+
+  it("理由ごとに次の操作が分かる文面を持つ", () => {
+    expect(successorWaitingText("latest_not_success")).toContain("デプロイを再実行");
+    expect(successorWaitingText("no_version_check")).toContain("APP_COMMIT_SHA");
+    expect(successorWaitingText("not_including")).toContain("マージコミットを含みません");
   });
 });
