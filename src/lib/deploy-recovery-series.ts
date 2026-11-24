@@ -74,7 +74,22 @@ export const DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS = 3;
  * 報告コメントに修正済みのPR番号（`issue-deck-deploy-recovery-fix-pr`）を添える。
  * このとき新しい修正PRや空PRは作らず、そのPRを使って復旧PRの工程へ進む（#4451）。
  */
-export const DEPLOY_RECOVERY_CAUSES = ["code", "already_fixed", "config", "database", "external", "unknown"] as const;
+export const DEPLOY_RECOVERY_CAUSES = [
+  "code",
+  "already_fixed",
+  /**
+   * マイグレーションの失敗（記録が残るP3009・SQLの失敗P3018）を、修正と記録の解消手段
+   * （`deploy/pre-migrate.sh`）を同じ修正PRに入れて直す（#5632）。コードの修正と同じ工程を進み、
+   * 復旧PRを作る前に解消手段が本番へ出ることを確かめる
+   */
+  "migration",
+  /** マイグレーションが途中まで適用されている恐れがあり、自動では解消しない（#5632） */
+  "migration_unsafe",
+  "config",
+  "database",
+  "external",
+  "unknown",
+] as const;
 export type DeployRecoveryCause = (typeof DEPLOY_RECOVERY_CAUSES)[number];
 
 export type DeployRecoveryStopReason =
@@ -95,6 +110,7 @@ export type DeployRecoveryStopReason =
   | "recovery_conflict"
   | "release_stalled"
   | "release_attempts_exhausted"
+  | "migration_resolver_missing"
   | RecoveryMergeStopReason
   | "merge_failed";
 
@@ -201,8 +217,9 @@ export function decideDeployRecovery(
         pullRequestNumber: fixed.number,
       };
     }
-    // コード以外（設定・Secrets・DB状態・外部障害・不明）はコード修正では直らない。PRが出ていても先へ進めない。
-    if (cause !== "code") return { action: "stop", reason: "non_code_cause", detail: cause };
+    // コード以外（設定・Secrets・DB状態・外部障害・不明・部分適用の恐れ）はコード修正では直らない。
+    // PRが出ていても先へ進めない。`migration`は修正PRで直す区分なので、コードと同じ工程を進む。
+    if (cause !== "code" && cause !== "migration") return { action: "stop", reason: "non_code_cause", detail: cause };
     return { action: "transition", status: "fixing", cause };
   }
 
@@ -240,6 +257,32 @@ export function decideDeployRecovery(
   }
 
   return { action: "wait" };
+}
+
+/**
+ * マイグレーションの失敗記録を解消する手段の置き場（#5632）。app-deploy-gate（guchi-apps/vps
+ * `scripts/app-deploy-gate.sh`）が、配布物にあれば`prisma migrate deploy`の直前に実行する。
+ * gate経由のデプロイではシェルを取れないため、記録の解消はこのファイルを本番へ出すしかない。
+ */
+export const DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH = "deploy/pre-migrate.sh";
+
+/**
+ * 区分`migration`の系列で、復旧PRを作ってよいか（#5632）。復旧PRはmainを起点に修正PRの差分だけを
+ * 取り込むため、**解消手段が修正PRに含まれるか、mainに既にある**ときだけ本番で効く。どちらも無いまま
+ * 出すと、修正を出してもP3009で止まり続ける（asset-manager#1632）。
+ *
+ * 中身が今回の失敗に効くか（決め打ちのマイグレーション名など）はここでは確かめない。区分の報告時に
+ * 実装セッションへ書かせる（修正Issueの指示文）。
+ */
+export function decideMigrationResolver(params: {
+  cause: string | null;
+  fixPullRequestFiles: readonly string[];
+  mainHasResolver: boolean;
+}): { ok: true } | { ok: false; reason: "migration_resolver_missing" } {
+  if (params.cause !== "migration") return { ok: true };
+  if (params.fixPullRequestFiles.includes(DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH)) return { ok: true };
+  if (params.mainHasResolver) return { ok: true };
+  return { ok: false, reason: "migration_resolver_missing" };
 }
 
 /** 対象SHAに対するdeploy workflowの実行（GitHubから読んだもの）。 */
@@ -440,6 +483,8 @@ export function deployRecoveryStopReasonLabel(reason: string | null, detail: str
       return `復旧PRを作る際に、選んだ修正がmainと競合しました${detail ? `: ${detail}` : ""}。競合を解消するか、履歴だけの差かを確かめてください。`;
     case "release_stalled":
       return `同じ内容のデプロイ失敗が続いたため止めました${detail ? `: ${detail}` : ""}。前回の直し方が効いていません。原因を確かめ直してください。`;
+    case "migration_resolver_missing":
+      return `マイグレーションの失敗記録を解消する手段（${DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH}）が、修正PR${detail ? `（${detail}）` : ""}にもmainにもありません。このまま本番へ出してもP3009で止まるため、復旧PRを作りませんでした。解消手段を入れたPRをdevelopへマージし、「既存の修正PRを選んで復旧」で修正PRと一緒に選んでください（手順は docs/deploy-recovery-runbook.md）。`;
     case "release_attempts_exhausted":
       return `本番反映の試行の上限（${DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS}回）に達しました${detail ? `: ${detail}` : ""}。`;
     case "max_rounds_reached":
@@ -457,6 +502,8 @@ function causeLabel(cause: string | null): string {
       return "設定・Secrets";
     case "database":
       return "DB状態";
+    case "migration_unsafe":
+      return "マイグレーションの部分適用の恐れ";
     case "external":
       return "外部障害";
     default:
