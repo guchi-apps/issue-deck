@@ -91,6 +91,21 @@ poller claim → POST /api/dispatch/claim が REMOTE_SESSION ジョブにだけ 
 - 指示にシークレットは書かない（欄の注記にも出す）。払い出し後にpollerが落ちた場合は指示が失われ、
   失敗として画面に出るので入れ直す
 
+### 最初の指示への写真の添付（#5637）
+
+「最初の指示」欄は`MentionTextarea`で、貼り付け・ドロップ・追加ボタン（スマホはカメラ／ライブラリ）で画像を
+添付できる。画像は`POST /api/issues/images`へ保存され、URLがMarkdownとして指示文に入る。
+
+- 起動ボタンは**アップロード中と、枚数が上限（5枚。`REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES`）を超えている間は押せない**。
+  APIも同じ判定（`normalizeRemoteSessionInitialPrompt`）で`invalid`を返す。URLの形式検証はしない
+  （取得側が接続先を`APP_BASE_URL`に固定しUUIDだけを抽出するため）
+- `start-remote-session.sh`が、指示に`/api/issues/images/`があれば`fetch-issue-images.sh`でセッション専用の
+  ディレクトリ（`$TMPDIR/issue-deck-remote-images.*`）へ取得し、パスを指示の末尾へ足す。**そのディレクトリだけを
+  `--allowedTools "Read(//<dir>/**)"`で許可する**（無いと起動直後の`Read`が承認待ちになり、スマホからは承認できない）
+- 取得できない（`dispatch.env`が無い等）ときも起動は続け、「画像は読めません」と指示へ足す
+- 画像URLも20,000字の上限に含まれる。パスの追記は上限判定の外（指示は一時ファイル渡しで長さに影響されない）
+- 反映にはpollerの更新が要る。古いpollerではURLがそのまま指示に残るだけで、画像は読まれない
+
 ### 「終了中」のまま終わらなかった不具合（#4871）
 
 「更新して再起動」（`SELF_UPDATE`）を実行したpollerは`exec`で新しいスクリプトへ入れ替わる。以前は

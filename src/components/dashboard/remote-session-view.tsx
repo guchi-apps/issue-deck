@@ -11,14 +11,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { Textarea } from "@/components/ui/textarea";
+import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { useRemoteSessions, type RemoteSessionLaunch } from "@/hooks/use-remote-sessions";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { clearRemoteSessionHandoff, peekRemoteSessionHandoff } from "@/lib/dispatch/remote-session-handoff";
 import {
   ACTIVE_REMOTE_SESSION_STATUSES,
   describeRemoteSessionStatus,
+  REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES,
   REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH,
+  countRemoteSessionPromptImages,
   isRemoteSessionResumable,
   REMOTE_SESSION_REPOSITORY_PARAM,
   type RemoteSessionState,
@@ -278,11 +280,15 @@ function RepositoryDetail({
   const [stopTarget, setStopTarget] = useState<RemoteSession | null>(null);
   // 起動時に最初に渡す指示（#5405）。起動が受け付けられるまで保持し、失敗したら残して再試行できる
   const [initialPrompt, setInitialPrompt] = useState(presetPrompt ?? "");
+  // 画像のアップロード中は起動を押せない（URLが指示へ入る前に起動すると画像が落ちる。#5637）
+  const [imageUploading, setImageUploading] = useState(false);
+  const imageCount = countRemoteSessionPromptImages(initialPrompt);
+  const tooManyImages = imageCount > REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES;
   const host = state?.hosts.find((item) => item.remoteSessionCapable && item.repositories.includes(repository.fullName)) ?? null;
   const launching = launch !== null && !launch.gaveUp;
   const launchedSession = launch ? sessions.find((session) => session.id === launch.sessionId) ?? null : null;
   const limitReached = host !== null && state !== null && host.activeCount >= state.maxPerHost;
-  const startDisabled = pending || launching || !host || !host.online || limitReached;
+  const startDisabled = pending || launching || !host || !host.online || limitReached || imageUploading || tooManyImages;
   const visible = sessions.filter((session) => isActive(session) || session.id === launch?.sessionId);
   // 会話ごと再開できる終了済みのセッション（#4874）。最後に動いていた順
   const history = sessions
@@ -312,10 +318,13 @@ function RepositoryDetail({
           <label htmlFor="remote-session-initial-prompt" className="text-sm font-medium">
             最初の指示（任意）
           </label>
-          <Textarea
+          <MentionTextarea
             id="remote-session-initial-prompt"
+            onUploadingChange={setImageUploading}
+            showPreviewToggle={false}
+            repositoryFullName={repository.fullName}
             value={initialPrompt}
-            onChange={(event) => setInitialPrompt(event.target.value)}
+            onChange={setInitialPrompt}
             maxLength={REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH}
             rows={compact ? 5 : 4}
             disabled={pending || launching}
@@ -323,7 +332,9 @@ function RepositoryDetail({
             className="min-h-20 resize-y text-base md:text-sm"
           />
           <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-muted-foreground">
-            <span>起動直後に自動で送信されます。シークレットは書かないでください。</span>
+            <span className={cn(tooManyImages && "text-destructive")}>
+              起動直後に自動で送信されます。写真は貼り付け・ドロップ・追加ボタンで添付できます（{imageCount} / {REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES}枚）。シークレットは書かないでください。
+            </span>
             <span className="tabular-nums">
               {initialPrompt.length.toLocaleString()} / {REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH.toLocaleString()}
             </span>

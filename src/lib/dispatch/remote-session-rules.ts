@@ -1,3 +1,5 @@
+import { extractUploadedImageFilenames } from "@/lib/uploaded-images";
+
 /**
  * リモートセッション（#4743）の判定と表示。**DBに触らない側**で、画面とAPIが同じ関数を使う。
  *
@@ -140,6 +142,14 @@ export const REMOTE_SESSION_INITIAL_PROMPT_MIN_AGENT_VERSION = 43;
 /** 最初の指示の上限文字数（#5405）。環境変数で渡すため、`execve`の上限（128KiB）に十分収まる大きさにする */
 export const REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH = 20_000;
 
+/** 最初の指示へ添付できる画像の枚数（#5637） */
+export const REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES = 5;
+
+/** 最初の指示に含まれる、アップロード済み画像のファイル名の数（同じ画像は1枚と数える） */
+export function countRemoteSessionPromptImages(prompt: string): number {
+  return extractUploadedImageFilenames(prompt).length;
+}
+
 /** ホスト申告の`agentVersion`が最初の指示に対応しているか */
 export function supportsRemoteSessionInitialPrompt(agentVersion: string | null | undefined): boolean {
   if (!agentVersion || !/^\d+$/.test(agentVersion)) return false;
@@ -158,6 +168,7 @@ export function normalizeRemoteSessionInitialPrompt(value: unknown): string | nu
   const trimmed = value.trim();
   if (trimmed === "") return null;
   if (trimmed.length > REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH) return "invalid";
+  if (countRemoteSessionPromptImages(trimmed) > REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES) return "invalid";
   return trimmed;
 }
 
