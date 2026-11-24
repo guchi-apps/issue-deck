@@ -8,8 +8,10 @@ import type {
   ClaudeLocalModel,
   ClaudeLocalModelSetting,
   ClaudeModel,
+  CodexModel,
   CodexModelSetting,
   CodexLocalModel,
+  CodexReasoningEffort,
   DefaultDispatchAgent,
   GithubActionsAgent,
   ModelPickEngine,
@@ -61,6 +63,9 @@ export function useAppSettingsMutations() {
       planReviewCodexModel: CodexLocalModel;
       dispatchFailoverEnabled: boolean;
       dispatchFailoverThresholdPercent: number;
+      workflowClaudeModel: ClaudeModel;
+      workflowCodexModel: CodexModel;
+      workflowCodexReasoningEffort: CodexReasoningEffort;
     }>,
   ): Promise<boolean> {
     setIsSubmitting(true);

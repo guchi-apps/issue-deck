@@ -48,6 +48,7 @@ import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import type { ConnectedRepository } from "@/types/repository";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
+import { scrollToSetting } from "@/components/dashboard/settings/ai-model-layout";
 
 type SettingsDialogProps = {
   /** 最初に開く区分（#5452）。開いたあとの切り替えには効かないので、変えるときは`key`で作り直す */
@@ -147,7 +148,7 @@ export function SettingsDialog({
     // 自動化区分から、AI・モデル区分の計画レビュー欄へ移る（#4139）
     onOpenPlanReviewSettings: () => {
       setSection("ai-models");
-      setTimeout(() => document.getElementById("plan-review-settings")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      setTimeout(() => scrollToSetting("plan-review-settings"), 50);
     },
   };
 

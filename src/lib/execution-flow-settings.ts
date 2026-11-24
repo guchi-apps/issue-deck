@@ -1,6 +1,8 @@
 import {
+  AI_PROVIDER_INHERIT,
   APP_AI_MODEL_OPTIONS,
   CODEX_MODEL_DEFAULT,
+  CODEX_REASONING_EFFORT_DEFAULT,
   appAiProvider,
   parseAppAiModel,
   parseDefaultDispatchAgent,
@@ -274,8 +276,6 @@ export type ProviderFlowRow = {
   entries: ProviderFlowEntry[];
   /** 「設定へ」で移動する設定欄のid */
   sourceId: string;
-  /** PRレビュー・修復のworkflow専用モデルは、行から直接変更する */
-  editsWorkflowModels: boolean;
 };
 
 export type ProviderFlowSettings = ExecutionFlowSettings & {
@@ -369,7 +369,6 @@ export function resolveProviderFlowRows(
         entry(find("計画作成（無人実行）"), actionsBinding),
       ],
       sourceId: "subpc-model-settings",
-      editsWorkflowModels: false,
     },
     {
       step: "実装",
@@ -378,16 +377,14 @@ export function resolveProviderFlowRows(
         entry(find("通常実装・追加修正（無人実行）"), actionsBinding),
       ],
       sourceId: "subpc-model-settings",
-      editsWorkflowModels: false,
     },
     {
       step: "計画レビュー",
       entries: planReviewEntries(),
       sourceId: "plan-review-settings",
-      editsWorkflowModels: false,
     },
-    { step: "PRレビュー", entries: reviewFlows("PRコードレビュー"), sourceId: "github-actions-settings", editsWorkflowModels: true },
-    { step: "レビュー修復", entries: reviewFlows("レビュー指摘修正"), sourceId: "github-actions-settings", editsWorkflowModels: true },
+    { step: "PRレビュー", entries: reviewFlows("PRコードレビュー"), sourceId: "workflow-model-settings" },
+    { step: "レビュー修復", entries: reviewFlows("レビュー指摘修正"), sourceId: "workflow-model-settings" },
     {
       step: "アプリ内AI",
       entries: [
@@ -396,7 +393,6 @@ export function resolveProviderFlowRows(
         entry(find("新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案・判断の推奨"),
       ],
       sourceId: "app-ai-settings",
-      editsWorkflowModels: false,
     },
     {
       step: "判定",
@@ -408,7 +404,28 @@ export function resolveProviderFlowRows(
         ),
       ],
       sourceId: "model-pick-settings",
-      editsWorkflowModels: false,
     },
   ];
+}
+
+/**
+ * 「工程ごとの個別設定」で、全体設定から外して固定している項目の数（#5643）。
+ *
+ * 計画レビューの担当は`inherit`以外、PRレビュー・修復のworkflow専用モデルは既定（任せる・既定の推論強度）
+ * 以外を固定として数える。畳んだ見出しに件数を出し、開かなくても固定の有無が分かるようにする。
+ */
+export function countProcessOverrides(values: {
+  planReviewAgentForClaude: string;
+  planReviewAgentForCodex: string;
+  workflowClaudeModel: string;
+  workflowCodexModel: string;
+  workflowCodexReasoningEffort: string;
+}): number {
+  return [
+    values.planReviewAgentForClaude !== AI_PROVIDER_INHERIT,
+    values.planReviewAgentForCodex !== AI_PROVIDER_INHERIT,
+    values.workflowClaudeModel !== "auto",
+    values.workflowCodexModel !== "auto",
+    values.workflowCodexReasoningEffort !== CODEX_REASONING_EFFORT_DEFAULT,
+  ].filter(Boolean).length;
 }
