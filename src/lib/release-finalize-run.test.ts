@@ -612,6 +612,16 @@ describe("reconcileRcFinalization（稼働確認の停止と後続の版によ�
     expect(completion()).toBeUndefined();
   });
 
+  it("デプロイ失敗で止まった候補は、人が別のPRで復旧していれば後続の版で完了する（#5633）", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate({ phase: "deploying", productionStopReason: "deploy_failed", productionStopDetail: "u" }));
+    mocks.observeProduction.mockResolvedValue({ ...noEvidence, runs: [{ ...succeededRun, conclusion: "failure", attempt: 2 }], decision: { verified: false, reason: "deploy_not_succeeded" } });
+    mocks.observeSuccessor.mockResolvedValue({ ok: true, evidence: { coveredSha: MERGE, successorSha: NEXT, deployRunUrl: "u2" } });
+    await reconcileRcFinalization(ctx, "c1");
+    expect(mocks.observeSuccessor).toHaveBeenCalled();
+    expect(completion()).toBeDefined();
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "successor", expect.anything());
+  });
+
   it("止まった後に再実行が始まれば、停止の記録を消してデプロイの進行へ戻す", async () => {
     mocks.loadCandidateRow.mockResolvedValue(candidate({ phase: "deploying", productionStopReason: "deploy_failed", productionStopDetail: "u" }));
     mocks.observeProduction.mockResolvedValue({ ...noEvidence, runs: [{ ...succeededRun, id: 2, status: "in_progress", conclusion: null, attempt: 2 }], decision: { verified: false, reason: "deploy_not_succeeded" } });

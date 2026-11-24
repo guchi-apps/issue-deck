@@ -53,9 +53,15 @@ async function fetchLatestMainDeployRun(ctx: Ctx): Promise<DeployRunObservation 
  * `deploy`ジョブが成功していて、対象コミットを祖先に持つときだけ認める。今動いている版で確かめるため、最新のrunが
  * 成功していなければ（失敗・進行中）認めない
  */
-export async function observeSuccessorProof(ctx: Ctx, coveredSha: string): Promise<ReturnType<typeof decideSuccessorProof>> {
+export async function observeSuccessorProof(
+  ctx: Ctx,
+  coveredSha: string,
+  options: { excludeShas?: readonly (string | null)[] } = {},
+): Promise<ReturnType<typeof decideSuccessorProof>> {
   const latest = await fetchLatestMainDeployRun(ctx);
   if (!latest || latest.status !== "completed" || latest.conclusion !== "success" || latest.headSha === coveredSha) return { ok: false };
+  // 呼び出し側が自分で追跡しているコミット（復旧系列の本番反映）は、後続ではなく本来の復旧として扱う
+  if (options.excludeShas?.includes(latest.headSha)) return { ok: false };
   const kind = await readProductionTargetKind(ctx, latest.headSha);
   if (kind !== "deploy_version_check") return { ok: false };
   const versionCheckPassed = await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token);

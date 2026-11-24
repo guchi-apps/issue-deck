@@ -111,6 +111,8 @@ export type DeployRecoveryStopReason =
   | "release_stalled"
   | "release_attempts_exhausted"
   | "migration_resolver_missing"
+  /** 系列の外（人が出した別PRなど）で本番が復旧し、系列を閉じた（#5633）。`recovered`と一緒に記録する */
+  | "recovered_elsewhere"
   | RecoveryMergeStopReason
   | "merge_failed";
 
@@ -485,6 +487,8 @@ export function deployRecoveryStopReasonLabel(reason: string | null, detail: str
       return `同じ内容のデプロイ失敗が続いたため止めました${detail ? `: ${detail}` : ""}。前回の直し方が効いていません。原因を確かめ直してください。`;
     case "migration_resolver_missing":
       return `マイグレーションの失敗記録を解消する手段（${DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH}）が、修正PR${detail ? `（${detail}）` : ""}にもmainにもありません。このまま本番へ出してもP3009で止まるため、復旧PRを作りませんでした。解消手段を入れたPRをdevelopへマージし、「既存の修正PRを選んで復旧」で修正PRと一緒に選んでください（手順は docs/deploy-recovery-runbook.md）。`;
+    case "recovered_elsewhere":
+      return `この系列の外で本番が復旧したため閉じました${detail ? `（後続のデプロイ: ${detail}）` : ""}。再デプロイは不要です。`;
     case "release_attempts_exhausted":
       return `本番反映の試行の上限（${DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS}回）に達しました${detail ? `: ${detail}` : ""}。`;
     case "max_rounds_reached":

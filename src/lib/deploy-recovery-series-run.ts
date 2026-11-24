@@ -68,6 +68,7 @@ import {
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isTrustedGithubAuthor } from "@/lib/github/trusted-author";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { observeSuccessorProof } from "@/lib/release-production-stop-run";
 
 /**
  * 本番デプロイ失敗からの復旧系列（#3998）の外部操作。判断は`deploy-recovery-series.ts`の純関数が持つ。
@@ -429,6 +430,10 @@ async function advanceSeries(
     return prepareSeries(series, token, hostName, now);
   }
 
+  // 系列の外（人が出した別PRなど）で、失敗したコミットを含む版が本番で稼働していれば閉じる（#5633）
+  const closed = await closeIfRecoveredElsewhere(series, token);
+  if (closed) return closed;
+
   if (series.status === "awaiting_release") return advanceManualRecovery(series, token, now);
   if (series.status === "awaiting_main_merge") return advanceMainMerge(series, token, now);
   if (series.status === "releasing" || series.status === "verifying") {
@@ -453,6 +458,51 @@ async function advanceSeries(
     await db.deployRecoverySeries.update({ where: { id: series.id }, data: { repairRoundsUsed: roundsUsed } });
   }
   return applyDecision(series, decision, token, observation.pullRequest?.headSha ?? null, observation.pullRequest?.mergeCommitSha ?? null);
+}
+
+/**
+ * 系列の外で本番が復旧したとき、止まった系列を「復旧済み」で閉じる（#5633）。
+ *
+ * 根拠は、mainの最新のデプロイが成功し、稼働版の照合を含むジョブが通り、失敗したコミットを祖先に持つこと
+ * （RCの稼働確認と同じ`observeSuccessorProof`）。系列自身が追っている本番反映のコミット・復旧PRのマージコミットは
+ * 本来の復旧として`advanceRelease`が扱うので除く。読めなかったときは閉じない。
+ */
+async function closeIfRecoveredElsewhere(series: SeriesRow, token: string): Promise<{ action: string; detail?: string } | null> {
+  const [owner, repo] = splitFullName(series.repositoryFullName);
+  const proof = await observeSuccessorProof(
+    { owner, repo, token },
+    series.failedSha,
+    { excludeShas: [series.releaseSha, series.recoveryMergedSha] },
+  ).catch(() => ({ ok: false as const }));
+  if (!proof.ok) return null;
+  const now = new Date();
+  const updated = await db.deployRecoverySeries.updateMany({
+    where: { id: series.id, status: series.status },
+    data: {
+      status: "recovered",
+      activeKey: null,
+      recoveredAt: now,
+      releaseRunUrl: proof.evidence.deployRunUrl,
+      stopReason: "recovered_elsewhere",
+      stopDetail: proof.evidence.deployRunUrl,
+    },
+  });
+  if (updated.count !== 1) return null;
+  if (series.issueNumber !== null) {
+    await createComment(owner, repo, series.issueNumber, token, {
+      body: [
+        "この系列の外で本番が復旧したことを確認したため、系列を閉じました。再デプロイは不要です。",
+        "",
+        `- 稼働を確認した版: \`${proof.evidence.successorSha.slice(0, 7)}\`（失敗したコミット \`${series.failedSha.slice(0, 7)}\` を含みます）`,
+        `- デプロイ: ${proof.evidence.deployRunUrl}`,
+        `- 失敗した実行: ${series.failedRunUrl}`,
+        ...(series.recoveryPullRequestNumber !== null ? [`- 復旧PR #${series.recoveryPullRequestNumber} は不要になった可能性があります。確かめて閉じてください`] : []),
+        "",
+        "<!-- issue-deck-agent:guide -->",
+      ].join("\n"),
+    }).catch((error: unknown) => console.error("[deploy-recovery] 別経路の復旧コメントに失敗しました", series.id, error));
+  }
+  return { action: "recovered_elsewhere", detail: proof.evidence.deployRunUrl };
 }
 
 /** 本番へ出したあとの追跡（#4007）。判断は`decideDeployRecoveryRelease`、ここは観測と記録だけ。 */

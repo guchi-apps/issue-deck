@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DeployRunObservation } from "@/lib/deploy-recovery-series";
 import {
+  canCloseBySuccessor,
   decideProductionStop,
   decideSuccessorProof,
   decideSuccessorStart,
@@ -121,5 +122,19 @@ describe("productionKindNotice（#4712）", () => {
     expect(productionKindNotice("source_publish_only")).toContain("実機への配備は稼働確認の対象外");
     expect(productionKindNotice("unknown")).toContain("人の確認");
     expect(productionKindNotice(null)).toContain("読めず");
+  });
+});
+
+describe("canCloseBySuccessor（#5633）", () => {
+  it("デプロイ失敗など、別のPRで復旧され得る停止は後続の版で確かめ直す", () => {
+    for (const reason of ["contract_missing", "deploy_failed", "deploy_cancelled", "deploy_not_started", "version_unverified", "evidence_unreadable"] as const) {
+      expect(canCloseBySuccessor(reason)).toBe(true);
+    }
+  });
+
+  it("止まっていない・ソース公開の停止は対象にしない", () => {
+    expect(canCloseBySuccessor(null)).toBe(false);
+    expect(canCloseBySuccessor("source_unpublished")).toBe(false);
+    expect(canCloseBySuccessor("version_mismatch")).toBe(false);
   });
 });
