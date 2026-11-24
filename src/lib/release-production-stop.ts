@@ -161,6 +161,17 @@ function afterDeploySucceeded(input: ProductionStopInput, runUrl: string | null)
 }
 
 /**
+ * 後続の版で確かめ直してよい停止理由（#5633）。デプロイの失敗・取消・未起動・照合の未完了・取得不能は、
+ * 人が別のPRで復旧すると、対象コミットのデプロイは失敗のまま残る。後続の版が稼働を確かめていれば、それで閉じる。
+ * 旧版の応答（`version_mismatch`）は、
+ * 公開URLが対象と別の版を返している事実なので、後続の版で代用しない（#4712の判断を保つ）。
+ * ソース公開（`source_unpublished`）は配布方式が違い、後続の稼働版では確かめられないので含めない
+ */
+export function canCloseBySuccessor(reason: ProductionStopReason | null): boolean {
+  return reason !== null && reason !== "source_unpublished" && reason !== "version_mismatch";
+}
+
+/**
  * 後続の版による確認。後続のコミットが**照合付きのWeb配備で稼働を確かめられ**、かつこの候補のマージコミットを
  * 祖先に持つときだけ認める。ソース公開・照合の無い後続では認めない
  */
