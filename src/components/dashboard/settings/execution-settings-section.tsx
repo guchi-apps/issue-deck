@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { ReleaseAutoApprovalField } from "@/components/dashboard/settings/release-auto-approval-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -864,6 +865,7 @@ export function ExecutionSettingsSection({
           {describeReleaseReviewAssignee(resolveReleaseReviewAssignee({ appAiModelReasoning, aiExecutionProvider }))}
           （公開承認の自動化がONの間は、この設定にかかわらずCodexで実行します）
         </p>
+        <ReleaseAutoApprovalField />
       </div>
       </>}
 
