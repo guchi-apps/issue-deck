@@ -45,6 +45,8 @@ import {
 } from "@/hooks/use-issue-draft";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { setRemoteSessionHandoff } from "@/lib/dispatch/remote-session-handoff";
+import { buildRemoteSessionPromptFromDraft } from "@/lib/dispatch/remote-session-rules";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
@@ -592,6 +594,9 @@ export function CreateIssueDialog({
    */
   function handleOpenRemoteSession() {
     if (!onOpenRemoteSession) return;
+    // 書いた内容は、移った先の「最初の指示」欄へ転記する（#5628。起動は画面で人が押す）
+    const prompt = buildRemoteSessionPromptFromDraft(title, body);
+    if (prompt && repositoryFullName) setRemoteSessionHandoff(repositoryFullName, prompt);
     closeDialog();
     onOpenRemoteSession(repositoryFullName || undefined);
   }
