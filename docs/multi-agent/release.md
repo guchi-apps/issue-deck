@@ -931,7 +931,13 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 止まる条件（`needs_attention`＋修正Issueへ引き継ぎコメントと`00.check-user`）: 停止・期限切れ・範囲外・
 復旧PRの不一致・HEAD変更・main前進・コンフリクト・差分が記録外・CI失敗・人の確認ラベル・別リリースによる置換済み。
-マージ後の稼働版の確認（`recovered`）は#4007で足す。
+マージ後は#4007の追跡（`releasing`→`verifying`→`recovered`）が稼働版の一致まで確かめる。
+
+**マイグレーションの失敗（P3009・P3018）は区分`migration`で扱う**（#5632）。復旧PRはmain起点に修正PRの
+差分だけを取り込むため、失敗の記録を解消する`deploy/pre-migrate.sh`が修正PRにもmainにも無いと、
+出してもP3009で止まり続ける。系列は復旧PRを作る前にこれを確かめ（`decideMigrationResolver`）、無ければ
+`migration_resolver_missing`で止まる。部分適用の恐れがあるとき（`migration_unsafe`）は修正へ進まない。
+種類ごとの切り分けと次の一手は[../deploy-recovery-runbook.md](../deploy-recovery-runbook.md)。
 
 ## リリース完了系列に限り、リリース候補を本番へ自動マージする（#4480）
 

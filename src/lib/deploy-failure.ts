@@ -5,6 +5,8 @@
  * 「修正Issueを作成」を押したときに開く新規作成ダイアログの下書きだけで、起票はしない。
  */
 
+import { deployFailureKindLabel, isMigrationFailureKind, type DeployFailureClassification } from "@/lib/deploy-failure-kind";
+
 /** 修正Issueのタイトル接頭辞 */
 export const DEPLOY_FAILURE_FIX_TITLE_PREFIX = "[デプロイ失敗の修正]";
 
@@ -69,6 +71,8 @@ export function buildDeployRecoveryIssueSection(params: {
   failedJobs: readonly string[];
   runningSha: string | null;
   logExcerpt: string | null;
+  /** ログ全文からの失敗の種類の判別（#5632）。読めなければnull */
+  failureKind?: DeployFailureClassification | null;
   causeMarkerPrefix: string;
   /** 修正済みのPR番号を報告するマーカーの接頭辞。無ければ`already_fixed`の案内を出さない */
   fixPrMarkerPrefix?: string;
@@ -82,6 +86,34 @@ export function buildDeployRecoveryIssueSection(params: {
     ...(params.failedJobs.length > 0 ? [`- 失敗したジョブ: \`${params.failedJobs.join("`, `")}\``] : []),
   ];
   const marker = (cause: string) => `\`<!-- ${params.causeMarkerPrefix}${cause} -->\``;
+  const kind = params.failureKind ?? null;
+  const migration = kind !== null && isMigrationFailureKind(kind.kind);
+  const kindLines =
+    kind === null
+      ? []
+      : [
+          "### ログからの判別（機械判定・手掛かり）",
+          "",
+          `- 種類: ${deployFailureKindLabel(kind.kind)}`,
+          ...(kind.migrationName ? [`- マイグレーション: \`${kind.migrationName}\``] : []),
+          ...(kind.failedQueryNumber !== null ? [`- 失敗した文: マイグレーションの${kind.failedQueryNumber}番目の文`] : []),
+          ...(kind.evidence ? [`- 根拠: \`${kind.evidence.replace(/`/g, "'")}\``] : []),
+          "- 種類ごとの切り分けと次の一手: issue-deckの`docs/deploy-recovery-runbook.md`",
+          "",
+        ];
+  // 判別は手掛かりで、ログが読めない・判別を外すこともあるため、扱いの節は常に出す。
+  // マイグレーションの失敗と判別できたときだけ、節を指示の手前に置いて先に読ませる。
+  const migrationGuideLines = [
+    "",
+    "### マイグレーションの失敗の扱い",
+    "",
+    "失敗したマイグレーションは本番DBの`_prisma_migrations`に「失敗」として残り、残っている間は以降のデプロイが毎回P3009で止まる。gate経由のデプロイではシェルを取れないため、**記録の解消もコードとして本番へ出す**。区分は`database`ではなく次の2つで報告する。",
+    "",
+    `- 自動で解消してよい: ${marker("migration")}。マイグレーションの修正と、失敗の記録を解消する \`deploy/pre-migrate.sh\`（gateが\`prisma migrate deploy\`の直前に実行する。\`prisma migrate resolve --rolled-back <名前>\`で記録を外す）を**同じ修正PR**に入れる。mainに既にあれば、それが今回のマイグレーションに効くか（名前の決め打ちになっていないか）を確かめ、効かなければ直して同じPRに入れる。報告コメントに、解消手段がどこにあり今回の失敗に効く理由を書く`,
+    `- 途中まで適用されている恐れがある: ${marker("migration_unsafe")}。**コミットもPRも作らない。** 自動で記録を外して再適用すると、残った変更とぶつかるか二重に適用される`,
+    "",
+    "部分適用の判定材料: 失敗したマイグレーションのSQLで、**失敗した文より前に、スキーマかデータを変える文があるか**（MySQL/MariaDBのDDLは文ごとに自動コミットされ、失敗しても前の文は残る）。P3009のログには失敗した文が出ないため、最初に失敗した実行（P3018）のログの「query number N」を読む（Actionsの履歴から同じマイグレーション名で探す）。**そのログが見つからないときは**、リポジトリのマイグレーションSQLが1文だけか、全文が冪等（`IF NOT EXISTS`・存在確認つき）のときだけ`migration`とし、それ以外は`migration_unsafe`に倒す。前の文が無い（1番目の文で失敗）、または修正版がその文を適用済みの状態でも通る（冪等）なら`migration`、それ以外・判断できないときは`migration_unsafe`。`migration_unsafe`の報告には、確認すべき本番の状態（表・列・インデックス）と、人が取る最小の操作を書く",
+  ];
   return [
     "## 本番復旧の自動化（AIに修正を依頼）",
     "",
@@ -89,6 +121,8 @@ export function buildDeployRecoveryIssueSection(params: {
     "",
     ...facts,
     "",
+    ...kindLines,
+    ...(migration ? [...migrationGuideLines.slice(1), ""] : []),
     "### 実装セッションへの指示",
     "",
     "1. **最初に**実行ログ・失敗工程・失敗したコミットまでの変更・本番で動いている版を確かめて原因を調べ、区分を次のマーカーのどれか1つを含むIssueコメントで報告する。ログ末尾の推定だけで決めない",
@@ -99,11 +133,13 @@ export function buildDeployRecoveryIssueSection(params: {
         ]
       : []),
     `   - 設定・Secrets・外部サービスの設定が原因: ${marker("config")}`,
-    `   - DBの状態（失敗したマイグレーションの履歴など）が原因: ${marker("database")}`,
+    `   - マイグレーションの失敗（記録が残ってP3009で止まる・SQLが本番で失敗した）: ${marker("migration")} または ${marker("migration_unsafe")}（「マイグレーションの失敗の扱い」の節）`,
+    `   - それ以外のDBの状態（データの不整合など）が原因: ${marker("database")}`,
     `   - 外部障害（GitHub・VPS・ネットワークの一時的な障害）: ${marker("external")}`,
     `   - 判断できない: ${marker("unknown")}`,
-    "2. `code`以外と判断した場合は、**コミットもPRも作らずに終える。** 報告コメントに、人が次にやる操作（コマンド・設定場所）を具体的に書く。データの削除や状態の分からないDBの修復は行わない",
-    "3. `code`の場合だけ修正してdevelop向けPRを作る。修正は失敗の原因に限り、ほかの変更を混ぜない",
+    "2. `code`・`migration`以外と判断した場合は、**コミットもPRも作らずに終える。** 報告コメントに、人が次にやる操作（コマンド・設定場所）を具体的に書く。データの削除や状態の分からないDBの修復は行わない",
+    "3. `code`・`migration`の場合だけ修正してdevelop向けPRを作る。修正は失敗の原因に限り、ほかの変更を混ぜない",
+    ...(migration ? [] : migrationGuideLines),
     "",
     params.throughMain
       ? "開始者がmainへの反映まで許可しています。developへマージされると、issue-deckが復旧PRを作り、CIが通れば自動でmainへ反映し、稼働中の版が一致するまで確かめます。この反映はあなたが行わないでください。"

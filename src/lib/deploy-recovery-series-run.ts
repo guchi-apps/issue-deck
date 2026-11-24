@@ -2,17 +2,25 @@ import { hasVersionCheck } from "@/lib/deploy-version-check";
 import type { DeployRecoverySeries } from "@prisma/client";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
-import { tailDeployLog } from "@/lib/claude/deploy-failure-analysis";
+import { sanitizeDeployLog, tailDeployLog } from "@/lib/claude/deploy-failure-analysis";
+import {
+  classifyDeployFailureLog,
+  deployFailureKindLabel,
+  isMigrationFailureKind,
+  type DeployFailureClassification,
+} from "@/lib/deploy-failure-kind";
 import { db } from "@/lib/db";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { buildDeployRecoveryIssueSection, DEPLOY_FAILURE_FIX_TITLE_PREFIX } from "@/lib/deploy-failure";
 import {
   decideDeployRecovery,
   decideDeployRecoveryRelease,
+  decideMigrationResolver,
   deployFailureKey,
   deployRecoveryStage,
   DEPLOY_RECOVERY_CAUSE_MARKER_PREFIX,
   DEPLOY_RECOVERY_FIX_PR_MARKER_PREFIX,
+  DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH,
   DEPLOY_RECOVERY_PREPARING_TIMEOUT_MS,
   DEPLOY_RECOVERY_SCOPE,
   DEPLOY_RECOVERY_TTL_MS,
@@ -652,13 +660,29 @@ async function requeueAfterDeployFailure(
   if (updated.count !== 1) return null;
   if (series.issueNumber !== null) {
     const [owner, repo] = splitFullName(series.repositoryFullName);
+    // 戻りの原因が前回と違う種類になることがある（SQLの失敗を直して出したら、失敗の記録が残っていて
+    // P3009で止まった。asset-manager#1632）。種類の手掛かりをコメントへ添える（#5632）。
+    const kind = await fetchFailedJobLog(owner, repo, run.id, token)
+      .then((log) => (log.raw === null ? null : classifyDeployFailureLog(sanitizeDeployLog(log.raw))))
+      .catch(() => null);
     await createComment(owner, repo, series.issueNumber, token, {
       body: [
         `本番へ反映したデプロイが再実行も失敗しました。同じ復旧の系列で、原因を調べ直します（${series.releaseAttempts + 1}回目の戻り）。`,
         "",
         `- 失敗したデプロイ: ${run.htmlUrl}`,
         `- 失敗の署名: \`${failureKey}\``,
+        ...(kind && kind.kind !== "unknown"
+          ? [
+              `- ログからの判別: ${deployFailureKindLabel(kind.kind)}${kind.migrationName ? `（\`${kind.migrationName}\`）` : ""}`,
+            ]
+          : []),
         "",
+        ...(kind && isMigrationFailureKind(kind.kind)
+          ? [
+              "マイグレーションの失敗です。本文の「マイグレーションの失敗の扱い」（本文に無ければissue-deckの`docs/deploy-recovery-runbook.md`）に従い、区分を`migration`か`migration_unsafe`で報告してください。`migration`なら、失敗の記録を解消する`deploy/pre-migrate.sh`を修正と同じPRに入れます。",
+              "",
+            ]
+          : []),
         "前の修正で直らなかった原因を、このデプロイの実行ログから改めて調べ、区分を報告してください。",
         "すでにdevelopに修正が入っているだけでコードを変える必要が無い場合は、区分を`already_fixed`として修正済みのPR番号を添えてください。",
         "",
@@ -787,6 +811,12 @@ async function applyDecision(
           "",
           "この系列はmainへの自動反映を許可されていません（開始時の範囲: developまで）。",
           "デプロイ失敗の帯の「既存の修正PRを選んで復旧」でこのPRだけをmainへ出すか、通常のリリースで反映してください。",
+          ...(series.cause === "migration"
+            ? [
+                "",
+                `マイグレーションの失敗記録の解消が要る区分です。復旧PRはmainを起点に選んだPRの差分だけを取り込むため、\`${DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH}\`がmainに無ければ、それを入れたPRも一緒に選んでください（docs/deploy-recovery-runbook.md）。`,
+              ]
+            : []),
         ].join("\n"),
       );
     }
@@ -839,6 +869,14 @@ async function fetchPullFiles(prefix: string, number: number, token: string): Pr
   return { names, truncated: names.length >= DEPLOY_RECOVERY_PULL_FILES_LIMIT };
 }
 
+/** mainにファイルがあるか。404ならfalse、読めなければnull（判断しない）。 */
+async function hasFileOnMain(prefix: string, path: string, token: string): Promise<boolean | null> {
+  const response = await githubFetch(`${prefix}/contents/${path}?ref=main`, token).catch(() => null);
+  if (response === null) return null;
+  if (response.status === 404) return false;
+  return response.ok ? true : null;
+}
+
 /** 修正のマージコミットがすでにmainの履歴にあるか。 */
 async function isFixInMain(prefix: string, sha: string | null, token: string): Promise<boolean> {
   if (!sha) return false;
@@ -870,6 +908,17 @@ async function advanceMainMerge(
     if (now >= series.expiresAt) return stopMainMerge(series, token, "timed_out", null);
     if (await isFixInMain(prefix, series.fixMergeCommitSha, token)) {
       return stopMainMerge(series, token, "superseded_by_release", null);
+    }
+    if (series.cause === "migration") {
+      // マイグレーションの失敗は、失敗記録の解消手段が本番へ出ないと直らない（#5632）。
+      // 読めないときは決めずに次の巡回へ回す（期限は上で見ている）。
+      const [fixFiles, mainHasResolver] = await Promise.all([
+        fetchPullFiles(prefix, series.pullRequestNumber, token).catch(() => null),
+        hasFileOnMain(prefix, DEPLOY_RECOVERY_MIGRATION_RESOLVER_PATH, token),
+      ]);
+      if (fixFiles === null || mainHasResolver === null) return null;
+      const resolver = decideMigrationResolver({ cause: series.cause, fixPullRequestFiles: fixFiles.names, mainHasResolver });
+      if (!resolver.ok) return stopMainMerge(series, token, resolver.reason, `#${series.pullRequestNumber}`);
     }
     // 作成前のmainを基点として記録する。作成中にmainが進んだ場合は後の判定で止まる（安全側）。
     const baseSha = await fetchMainHeadSha(owner, repo, token);
@@ -1215,19 +1264,36 @@ async function prepareSeries(
   return { action: "dispatched", detail: `#${issueNumber}` };
 }
 
+/** 失敗したジョブの名前と、先頭の失敗ジョブのログ（伏せ字前）。 */
+async function fetchFailedJobLog(
+  owner: string,
+  repo: string,
+  runId: number,
+  token: string,
+): Promise<{ failedJobs: string[]; raw: string | null }> {
+  const jobs = await fetchWorkflowRunJobs(owner, repo, runId, token);
+  const failed = jobs.filter((job) => job.conclusion === "failure" && typeof job.id === "number");
+  const raw = failed[0] ? await fetchWorkflowJobLogs(owner, repo, failed[0].id as number, token) : null;
+  return { failedJobs: failed.map((job) => job.name ?? "不明"), raw };
+}
+
 /** 修正Issueに書く引き継ぎ情報。ログ・失敗工程・直近の成功版はここで読み直す（失敗しても本文は作る）。 */
 async function buildIssueSection(series: SeriesRow, token: string, marker: string): Promise<string> {
   const [owner, repo] = splitFullName(series.repositoryFullName);
   const runId = Number(series.failedRunId);
   let failedJobs: string[] = [];
   let logExcerpt: string | null = null;
+  let failureKind: DeployFailureClassification | null = null;
   try {
-    const jobs = await fetchWorkflowRunJobs(owner, repo, runId, token);
-    const failed = jobs.filter((job) => job.conclusion === "failure" && typeof job.id === "number");
-    failedJobs = failed.map((job) => job.name ?? "不明");
-    if (failed[0]) {
+    const log = await fetchFailedJobLog(owner, repo, runId, token);
+    failedJobs = log.failedJobs;
+    const raw = log.raw;
+    if (raw !== null) {
+      // 種類の判別は末尾だけでなく全文で行う（Prismaのエラーより後ろに後片付けのログが長く続く）。
+      // 根拠の1行もIssueに載るため、伏せ字済みのログから取る。
+      failureKind = classifyDeployFailureLog(sanitizeDeployLog(raw));
       // ログは公開リポジトリのIssueに載るため、秘密値になりうる文字列を伏せてから載せる。
-      logExcerpt = tailDeployLog(await fetchWorkflowJobLogs(owner, repo, failed[0].id as number, token), LOG_EXCERPT_MAX_LENGTH);
+      logExcerpt = tailDeployLog(raw, LOG_EXCERPT_MAX_LENGTH);
     }
   } catch (error) {
     console.error("[deploy-recovery] 失敗したジョブのログを読めませんでした", series.id, error);
@@ -1250,6 +1316,7 @@ async function buildIssueSection(series: SeriesRow, token: string, marker: strin
     failedJobs,
     runningSha,
     logExcerpt,
+    failureKind,
     causeMarkerPrefix: DEPLOY_RECOVERY_CAUSE_MARKER_PREFIX,
     fixPrMarkerPrefix: DEPLOY_RECOVERY_FIX_PR_MARKER_PREFIX,
     throughMain: allowsMainMerge(series.scope),
