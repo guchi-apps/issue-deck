@@ -273,6 +273,22 @@ if [[ -n "${ISSUE_DECK_CLAUDE_MODEL:-}" && "${ISSUE_DECK_CLAUDE_MODEL}" != "auto
   CLAUDE_ARGS+=(--model "$ISSUE_DECK_CLAUDE_MODEL")
 fi
 
+# 添付画像（#5637）。指示に`/api/issues/images/<UUID>`のURLがあれば、`fetch-issue-images.sh`（#2967）で
+# セッション専用のディレクトリへ取得し、保存先のパスを指示の末尾へ足す（Claudeが`Read`で開く）。
+# **そのディレクトリだけを`Read`許可に渡す。** 渡さないと起動直後の`Read`が承認待ちになり、スマホ・iPadから
+# 起動した人は承認できない。実装セッションの`agent_allowed_tools`は`gh`・`git`の許可まで含み広すぎるので、
+# `Read(//<dir>/**)`の1規則だけを自前で組む。取得できなくても起動は続け、その旨を指示へ足す。
+# 追記後の長さは上限判定（20,000字）の外。指示は一時ファイル渡しなので長さは問題にならない
+if [[ -n "$INITIAL_PROMPT" && "$INITIAL_PROMPT" == *"/api/issues/images/"* ]]; then
+  IMAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/issue-deck-remote-images.XXXXXX")"
+  if IMAGE_PATHS="$(printf '%s' "$INITIAL_PROMPT" | "$SCRIPT_DIR/fetch-issue-images.sh" --out "$IMAGE_DIR" - 2>/dev/null)" && [[ -n "$IMAGE_PATHS" ]]; then
+    INITIAL_PROMPT+=$'\n\n'"[添付画像] 次のファイルが添付されています。Readツールで開いて内容を確認してから取りかかってください。"$'\n'"$IMAGE_PATHS"
+    CLAUDE_ARGS+=(--allowedTools "Read(/${IMAGE_DIR}/**)")
+  else
+    INITIAL_PROMPT+=$'\n\n'"[添付画像] 画像URLが指示に含まれていますが、サブPCから取得できませんでした。画像は読めません。"
+  fi
+fi
+
 SESSION_CMD="cd $(printf '%q' "$WORKTREE_DIR") && exec claude"
 for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
