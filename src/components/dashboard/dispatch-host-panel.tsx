@@ -18,7 +18,11 @@ import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title"
 import { ModelDot } from "@/components/dashboard/model-dot";
 import { SessionCloseDialog } from "@/components/dashboard/session-close-dialog";
 import { pickPrimaryModel } from "@/lib/agent-model-color";
-import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import {
+  describePlanReviewAssignee,
+  type DispatchHostView,
+  type DispatchJobView,
+} from "@/lib/dispatch/dispatch-job";
 import type { DispatchPlanReviewSession } from "@/lib/dispatch/plan-review-session";
 import {
   findSessionControlJobForIssue,
@@ -423,6 +427,7 @@ function HostCard({
             <PlanReviewSessionRow
               key={`${session.repositoryFullName}#${session.issueNumber}`}
               session={session}
+              job={findPlanReviewJob(jobs, session)}
               onOpenIssue={onOpenIssue}
             />
           ))}
@@ -1117,15 +1122,24 @@ function SessionRow({
 /** 実装セッションと別枠で動く計画レビュー（G1）の、実行状況用の1行。 */
 function PlanReviewSessionRow({
   session,
+  job,
   onOpenIssue,
 }: {
   session: DispatchPlanReviewSession;
+  /** 同じIssueの計画レビューのジョブ。担当エージェントとモデルはここから読む（#5648）。見つからなければ従来の表示 */
+  job?: DispatchJobView;
   onOpenIssue?: (issueId: string) => void;
 }) {
   const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+  const model = job ? (job.agent === "codex" ? job.codexModel : job.claudeModel) : null;
   return (
     <li className="flex items-start gap-1.5 text-xs">
-      <span aria-hidden className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-500" />
+      {job ? (
+        // 色でエージェントを示す（他の実行状況の行と同じ`ModelDot`）
+        <ModelDot agent={job.agent} model={model ?? null} className="mt-1" />
+      ) : (
+        <span aria-hidden className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-500" />
+      )}
       <span className="min-w-0 flex-1">
         <DispatchIssueTitle
           issueNumber={session.issueNumber}
@@ -1133,9 +1147,24 @@ function PlanReviewSessionRow({
           issueId={session.issueId}
           onOpenIssue={onOpenIssue}
         />
-        <span className="block truncate text-muted-foreground">{repoName}・計画レビュー中</span>
+        <span className="block truncate text-muted-foreground">
+          {repoName}・計画レビュー中{job ? `・${describePlanReviewAssignee(job)}` : ""}
+        </span>
       </span>
     </li>
+  );
+}
+
+function findPlanReviewJob(
+  jobs: readonly DispatchJobView[],
+  session: DispatchPlanReviewSession,
+): DispatchJobView | undefined {
+  return jobs.find(
+    (job) =>
+      job.kind === "PLAN_REVIEW" &&
+      job.repositoryFullName === session.repositoryFullName &&
+      job.issueNumber === session.issueNumber &&
+      isActiveDispatchJobStatus(job.status),
   );
 }
 

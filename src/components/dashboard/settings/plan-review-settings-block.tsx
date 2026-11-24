@@ -14,6 +14,7 @@ import {
   CODEX_MODEL_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
   DISPATCH_AGENT_OPTIONS,
+  oppositeDispatchAgent,
   type AiExecutionProvider,
   type ClaudeLocalModel,
   type ClaudeModel,
@@ -30,7 +31,8 @@ export type WorkflowModelValues = {
 };
 
 type ProcessOverrideSettingsBlockProps = {
-  aiExecutionProvider: AiExecutionProvider;
+  /** 計画レビューは全体プロバイダーに追従しなくなったため未使用（呼び出し側の互換のため残す） */
+  aiExecutionProvider?: AiExecutionProvider;
   /** 全体設定から外して固定している項目の数（`countProcessOverrides`） */
   fixedCount: number;
   agentForClaude: PlanReviewAgentSetting;
@@ -54,12 +56,13 @@ function providerName(provider: AiExecutionProvider) {
 }
 
 function AgentSelect({
-  id, label, value, provider, changed, onChange,
+  id, label, value, source, changed, onChange,
 }: {
   id: string;
   label: string;
   value: PlanReviewAgentSetting;
-  provider: AiExecutionProvider;
+  /** 計画を出した側。未固定のときの担当は、その反対側になる（#5648） */
+  source: AiExecutionProvider;
   changed: boolean;
   onChange: (value: PlanReviewAgentSetting) => void;
 }) {
@@ -69,12 +72,12 @@ function AgentSelect({
       id={id}
       label={label}
       changed={changed}
-      badge={fixed ? <ScopeChip tone="amber">個別設定</ScopeChip> : <ScopeChip tone="muted">全体設定に従う</ScopeChip>}
+      badge={fixed ? <ScopeChip tone="amber">個別設定</ScopeChip> : <ScopeChip tone="muted">開始元と別のエージェント</ScopeChip>}
     >
       <Select value={value} onValueChange={(next) => onChange(next as PlanReviewAgentSetting)}>
         <SelectTrigger id={id} className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
-          <SelectItem value={AI_PROVIDER_INHERIT}>全体設定に従う（いまは{providerName(provider)}）</SelectItem>
+          <SelectItem value={AI_PROVIDER_INHERIT}>開始元と別のエージェント（いまは{providerName(oppositeDispatchAgent(source))}）</SelectItem>
           {DISPATCH_AGENT_OPTIONS.map((option) => (
             <SelectItem key={option.value} value={option.value}>{option.label}に固定</SelectItem>
           ))}
@@ -92,7 +95,7 @@ function AgentSelect({
  * 以前はPRレビュー・修復だけが即時保存だったが、区分の保存ボタンへ揃えた。
  */
 export function PlanReviewSettingsBlock({
-  aiExecutionProvider, fixedCount,
+  fixedCount,
   agentForClaude, agentForCodex, onAgentForClaudeChange, onAgentForCodexChange,
   claudeModel, codexModel, onClaudeModelChange, onCodexModelChange,
   workflow, workflowLoaded, onWorkflowChange, changedIds,
@@ -135,12 +138,12 @@ export function PlanReviewSettingsBlock({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <AgentSelect
               id="plan-review-agent-for-claude" label="担当（Claude Codeで計画を出したとき）"
-              value={agentForClaude} provider={aiExecutionProvider}
+              value={agentForClaude} source="claude"
               changed={changedIds.has("plan-review-agent-for-claude")} onChange={onAgentForClaudeChange}
             />
             <AgentSelect
               id="plan-review-agent-for-codex" label="担当（Codex CLIで計画を出したとき）"
-              value={agentForCodex} provider={aiExecutionProvider}
+              value={agentForCodex} source="codex"
               changed={changedIds.has("plan-review-agent-for-codex")} onChange={onAgentForCodexChange}
             />
             <SettingField id="plan-review-claude-model" label="Claudeで動かすときのモデル" changed={changedIds.has("plan-review-claude-model")}>

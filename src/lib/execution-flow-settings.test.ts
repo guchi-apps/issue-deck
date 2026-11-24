@@ -117,7 +117,8 @@ describe("resolveProviderFlowRows", () => {
       expect.objectContaining({ label: "GitHub Actions", agent: "Codex Action", model: "GPT-5.6 Terra", binding: "provider" }),
     ]);
     expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
-      expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "provider" }),
+      // 計画レビューは全体プロバイダーに追従せず、開始元（Claude Code）の反対側になる（#5648）
+      expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "opposite" }),
     );
     const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
     expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
@@ -135,22 +136,24 @@ describe("resolveProviderFlowRows", () => {
       expect.objectContaining({ agent: "Claude Code", model: "Opus 5.5", binding: "override" }),
     );
     expect(planReview.find((entry) => entry.label.includes("Claude Codeの計画"))).toEqual(
-      expect.objectContaining({ agent: "Codex CLI", binding: "provider" }),
+      expect.objectContaining({ agent: "Codex CLI", binding: "opposite" }),
     );
     expect(rows.find((row) => row.step === "アプリ内AI")!.entries[0]).toEqual(
       expect.objectContaining({ agent: "Anthropic API", binding: "override" }),
     );
   });
 
-  it("継承なら計画の作成元に関わらず全体の切替に従い、実効エージェントが1行に揃う（#4139）", () => {
-    for (const provider of ["claude", "codex", "claude"] as const) {
+  it("継承なら全体の切替に関わらず開始元の反対側になり、開始元ごとに2行で出す（#5648）", () => {
+    for (const provider of ["claude", "codex"] as const) {
       const entries = resolveProviderFlowRows(resolved, provider, NO_AI_PROVIDER_OVERRIDES)
         .find((row) => row.step === "計画レビュー")!.entries;
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).toEqual(expect.objectContaining({
-        agent: provider === "claude" ? "Claude Code" : "Codex CLI",
-        binding: "provider",
-      }));
+      expect(entries).toHaveLength(2);
+      expect(entries.find((entry) => entry.label.includes("Claude Codeの計画"))).toEqual(
+        expect.objectContaining({ agent: "Codex CLI", binding: "opposite" }),
+      );
+      expect(entries.find((entry) => entry.label.includes("Codex CLIの計画"))).toEqual(
+        expect.objectContaining({ agent: "Claude Code", binding: "opposite" }),
+      );
     }
   });
 

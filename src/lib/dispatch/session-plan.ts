@@ -21,9 +21,8 @@ import {
   PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   parseClaudeLocalModel,
   parseCodexLocalModel,
-  parseAiExecutionProvider,
   parsePlanReviewAgent,
-  resolveAiExecutionAgent,
+  resolvePlanReviewAgent,
   type ClaudeLocalModel,
   type CodexLocalModel,
   type PlanReviewAgent,
@@ -62,21 +61,19 @@ export function resolvePlanReviewAgentForSession(params: {
   sourceAgent?: SessionPlanAgent;
   planReviewAgentForClaude?: unknown;
   planReviewAgentForCodex?: unknown;
-  aiExecutionProvider?: unknown;
 }): PlanReviewAgent {
   const sourceAgent = params.sourceAgent ?? "claude";
   const configured =
     sourceAgent === "codex"
       ? parsePlanReviewAgent(params.planReviewAgentForCodex)
       : parsePlanReviewAgent(params.planReviewAgentForClaude);
-  return resolveAiExecutionAgent(
-    configured,
-    parseAiExecutionProvider(params.aiExecutionProvider) ?? sourceAgent,
-  );
+  return resolvePlanReviewAgent(configured, sourceAgent);
 }
 
 async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent): Promise<{
   agent: PlanReviewAgent;
+  /** 既定（開始元の反対側）で導いたときだけ入る。個別固定のときは`undefined`（フォールバックしない） */
+  fallbackAgent?: PlanReviewAgent;
   claudeModel: ClaudeLocalModel;
   codexModel: CodexLocalModel;
 }> {
@@ -86,18 +83,21 @@ async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent):
       select: {
         planReviewAgentForClaude: true,
         planReviewAgentForCodex: true,
-        aiExecutionProvider: true,
         planReviewClaudeModel: true,
         planReviewCodexModel: true,
       },
     });
+    const source: SessionPlanAgent = sourceAgent ?? "claude";
+    const fixed = parsePlanReviewAgent(
+      source === "codex" ? setting?.planReviewAgentForCodex : setting?.planReviewAgentForClaude,
+    );
     return {
       agent: resolvePlanReviewAgentForSession({
         sourceAgent,
         planReviewAgentForClaude: setting?.planReviewAgentForClaude,
         planReviewAgentForCodex: setting?.planReviewAgentForCodex,
-        aiExecutionProvider: setting?.aiExecutionProvider,
       }),
+      fallbackAgent: fixed ? undefined : source,
       claudeModel:
         parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
       codexModel:
@@ -108,6 +108,7 @@ async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent):
     console.error("[dispatch] 計画レビュー用エージェント設定を読めませんでした", error);
     return {
       agent: resolvePlanReviewAgentForSession({ sourceAgent }),
+      fallbackAgent: sourceAgent ?? "claude",
       claudeModel: PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
       codexModel: PLAN_REVIEW_CODEX_MODEL_DEFAULT,
     };
@@ -267,9 +268,10 @@ export async function postSessionPlan(params: {
       issueNumber: params.issueNumber,
       hostName: params.hostName,
       agent: planReviewSettings.agent,
-      claudeModel:
-        planReviewSettings.agent === "claude" ? planReviewSettings.claudeModel : undefined,
-      codexModel: planReviewSettings.agent === "codex" ? planReviewSettings.codexModel : undefined,
+      fallbackAgent: planReviewSettings.fallbackAgent,
+      // フォールバックで担当が変わっても使えるよう、両方のモデルを渡す（使うのはジョブのagentの側）
+      claudeModel: planReviewSettings.claudeModel,
+      codexModel: planReviewSettings.codexModel,
       labels,
       plan: params.plan,
       post: (body) => createComment(parsed.owner, parsed.repo, params.issueNumber, token, { body }),
@@ -309,6 +311,7 @@ async function requestPlanReview(params: {
   issueNumber: number;
   hostName: string | null;
   agent?: "claude" | "codex";
+  fallbackAgent?: "claude" | "codex";
   claudeModel?: ClaudeLocalModel;
   codexModel?: CodexLocalModel;
   /** `addCheckUserWithReason`が返した付与後のラベル名。取れなければ`null` */
@@ -359,6 +362,7 @@ async function requestPlanReview(params: {
       issueNumber: params.issueNumber,
       hostName: params.hostName,
       agent: params.agent,
+      fallbackAgent: params.fallbackAgent,
       claudeModel: params.claudeModel,
       codexModel: params.codexModel,
       // 人が押したわけではないので積んだユーザーは残らない（無人実行の起動と同じ扱い）

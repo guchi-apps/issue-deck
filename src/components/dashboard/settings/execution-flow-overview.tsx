@@ -37,6 +37,11 @@ const BINDING_LABELS: Record<ProviderFlowBinding, { label: string; className: st
     className: "border bg-muted text-muted-foreground",
     description: "その前に実装したエージェントの側で動きます",
   },
+  opposite: {
+    label: "開始元と別",
+    className: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+    description: "計画を出したエージェントとは別のエージェントで動きます（全体プロバイダーには追従しません）",
+  },
   independent: {
     label: "固定",
     className: "border bg-muted text-muted-foreground",

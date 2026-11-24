@@ -85,6 +85,14 @@ Actionsからは`--root "$GITHUB_WORKSPACE"`を渡す。`prompts-ref`経由だ�
 - **`21.plan-required`が付いた計画だけを対象にする。** 無人実行のG1（`mode=plan`）と同じ範囲で、
   ad hocにPlan modeへ入っただけの計画まで拾わない（1本$0.7〜1.5が予定外に増える）。判定に使う
   ラベルは`00.check-user`を付けたときの戻り値から分かるので、GitHubへの問い合わせは増えない
+- **レビューは計画を立てたのと別のエージェントで行うのが既定**（#5648）。担当は ①開始元ごとの個別固定
+  （`planReviewAgentForClaude`／`ForCodex`） → ②開始元の反対側（Claude→Codex、Codex→Claude）の順で決め、
+  全体プロバイダー（`aiExecutionProvider`）には追従しない。決める関数は`resolvePlanReviewAgent`
+  （`src/lib/app-settings.ts`）の1つで、実行時・設定API・設定画面・実行経路表示が共用する。反対側（Codex）を
+  立てられないホスト（`codexCapable`・`planReviewAgentCapable`が未申告）では、**既定で導いたときだけ**
+  `enqueuePlanReviewJob`が開始元のエージェントへ1回戻す。個別に固定したCodexは従来どおり拒否する。
+  実行状況（ホストカード・キュー）の計画レビュー行には、担当エージェントを色（`ModelDot`）と
+  「Codex CLI・モデル名」の文字で出す
 - **計画が実際に投稿された回だけ起こす**（無人側の`plan_posted`と同じ条件）。積めなかった場合
   （pollerが未対応・同じ計画のレビューが動いている）でも計画の投稿は成功として扱う
 - **読むのは対象リポジトリの`origin/develop`のスナップショット**（仕組みは

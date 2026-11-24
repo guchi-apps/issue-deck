@@ -25,6 +25,7 @@ import {
   parseModelPickEngine,
   parsePlanReviewAgentSetting,
   resolveAiExecutionAgent,
+  resolvePlanReviewAgent,
   resolveAppAiModel,
 } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
@@ -54,10 +55,8 @@ async function getClaudeModels() {
     codexModel: parseCodexModelSetting(setting?.codexModel) ?? CODEX_MODEL_DEFAULT,
     defaultDispatchAgent:
       resolveAiExecutionAgent(setting?.defaultDispatchAgent, setting?.aiExecutionProvider),
-    planReviewAgentForClaude:
-      resolveAiExecutionAgent(setting?.planReviewAgentForClaude, setting?.aiExecutionProvider),
-    planReviewAgentForCodex:
-      resolveAiExecutionAgent(setting?.planReviewAgentForCodex, setting?.aiExecutionProvider),
+    planReviewAgentForClaude: resolvePlanReviewAgent(setting?.planReviewAgentForClaude, "claude"),
+    planReviewAgentForCodex: resolvePlanReviewAgent(setting?.planReviewAgentForCodex, "codex"),
     planReviewClaudeModel:
       parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
     planReviewCodexModel:
@@ -319,10 +318,8 @@ export async function PATCH(request: NextRequest) {
     modelPickEngine: parseModelPickEngine(updated.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
     defaultDispatchAgent:
       resolveAiExecutionAgent(updated.defaultDispatchAgent, updated.aiExecutionProvider),
-    planReviewAgentForClaude:
-      resolveAiExecutionAgent(updated.planReviewAgentForClaude, updated.aiExecutionProvider),
-    planReviewAgentForCodex:
-      resolveAiExecutionAgent(updated.planReviewAgentForCodex, updated.aiExecutionProvider),
+    planReviewAgentForClaude: resolvePlanReviewAgent(updated.planReviewAgentForClaude, "claude"),
+    planReviewAgentForCodex: resolvePlanReviewAgent(updated.planReviewAgentForCodex, "codex"),
     planReviewClaudeModel:
       parseClaudeLocalModel(updated.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
     planReviewCodexModel:

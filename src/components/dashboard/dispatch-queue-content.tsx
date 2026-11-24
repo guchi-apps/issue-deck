@@ -11,6 +11,7 @@ import { RefreshIndicatorButton } from "@/components/dashboard/refresh-indicator
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
+  describePlanReviewAssignee,
   describeDispatchJobKind,
   describeDispatchJobStatus,
   isCancelableDispatchJobStatus,
@@ -237,6 +238,7 @@ export function DispatchQueueContent({
         jobs={summary.planReviews}
         onCancel={dispatch.cancel}
         onOpenIssue={onOpenIssue}
+        showModel
       />
       {/*
         まだ届いていない停止・セッション終了・追加指示（#1519）。**上の実行中・順番待ちとは
@@ -523,6 +525,8 @@ function QueueSection({
                 >
                   {job.repositoryFullName.split("/")[1]}・{formatDispatchHostName(job.targetHost)}・
                   {status.label}・{formatRelativeDate(job.createdAt)}
+                  {/* 計画レビューは誰が見ているかを文字でも出す（点の色だけでは判別しづらい。#5648） */}
+                  {job.kind === "PLAN_REVIEW" && `・${describePlanReviewAssignee(job)}`}
                 </span>
                 {/* 失敗理由はホバーではなく本文で出す（主な用途が外出先のスマホ） */}
                 {job.message && (

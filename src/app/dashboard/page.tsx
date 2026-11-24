@@ -18,6 +18,7 @@ import {
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
   resolveAiExecutionAgent,
+  resolvePlanReviewAgent,
   resolveAppAiModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
@@ -101,10 +102,8 @@ export default async function DashboardPage() {
   const codexModel = parseCodexModelSetting(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   const defaultDispatchAgent =
     resolveAiExecutionAgent(appSetting?.defaultDispatchAgent, aiExecutionProvider);
-  const planReviewAgentForClaude =
-    resolveAiExecutionAgent(appSetting?.planReviewAgentForClaude, aiExecutionProvider);
-  const planReviewAgentForCodex =
-    resolveAiExecutionAgent(appSetting?.planReviewAgentForCodex, aiExecutionProvider);
+  const planReviewAgentForClaude = resolvePlanReviewAgent(appSetting?.planReviewAgentForClaude, "claude");
+  const planReviewAgentForCodex = resolvePlanReviewAgent(appSetting?.planReviewAgentForCodex, "codex");
   const planReviewClaudeModel =
     parseClaudeLocalModel(appSetting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT;
   const planReviewCodexModel =

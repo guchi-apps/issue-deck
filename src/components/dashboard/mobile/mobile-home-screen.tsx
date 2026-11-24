@@ -324,6 +324,7 @@ export function MobileHomeScreenView({
                     hosts={dispatch.hosts}
                     sessions={dispatch.sessions}
                     remoteSessions={dispatch.remoteSessions}
+                    jobs={dispatch.jobs}
                     compact
                     queuedCounts={countQueuedJobsByHost(
                       summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts)

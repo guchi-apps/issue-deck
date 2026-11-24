@@ -22,6 +22,7 @@ import {
   type GithubActionsAgent,
   type ModelPickEngine,
   type PlanReviewAgent,
+  resolvePlanReviewAgent,
 } from "@/lib/app-settings";
 
 /** 設定画面が表示する、利用者の処理単位の実行経路。実行側の既定値は app-settings の定数から読む。 */
@@ -257,7 +258,7 @@ export function readAiProviderOverrides(row: {
  * - implementation: その工程の前に実装したエージェントで決まる（PRレビュー・修復）
  * - independent: プロバイダーと無関係な設定（判定に使うAI）
  */
-export type ProviderFlowBinding = "provider" | "override" | "implementation" | "independent";
+export type ProviderFlowBinding = "provider" | "override" | "implementation" | "independent" | "opposite";
 
 export type ProviderFlowEntry = {
   /** 実行先、またはアプリ内AIのように同じ実行先で用途が分かれるときは用途 */
@@ -301,8 +302,9 @@ export function resolveProviderFlowRows(
   const pick = <T>(fixed: boolean, value: T, inherited: T) => (fixed ? value : inherited);
   const subAgent = pick(overrides.defaultDispatchAgent, settings.defaultDispatchAgent, provider);
   const actionsAgentValue = pick(overrides.githubActionsAgent, settings.githubActionsAgent, provider);
-  const planReviewAgentForClaude = pick(overrides.planReviewAgentForClaude, settings.planReviewAgentForClaude, provider);
-  const planReviewAgentForCodex = pick(overrides.planReviewAgentForCodex, settings.planReviewAgentForCodex, provider);
+  // 計画レビューは全体プロバイダーに追従せず、未固定なら開始元の反対側（#5648）
+  const planReviewAgentForClaude = pick(overrides.planReviewAgentForClaude, settings.planReviewAgentForClaude, resolvePlanReviewAgent(undefined, "claude"));
+  const planReviewAgentForCodex = pick(overrides.planReviewAgentForCodex, settings.planReviewAgentForCodex, resolvePlanReviewAgent(undefined, "codex"));
   const appAiModel = pick(overrides.appAiModel, settings.appAiModel, resolveAppAiModel(undefined, provider));
   const appAiModelReasoning = pick(
     overrides.appAiModelReasoning,
@@ -344,8 +346,8 @@ export function resolveProviderFlowRows(
       return entry(flow, "implementation", `${flow.location}（${agent === "claude" ? "Claude" : "Codex"}実装）`);
     });
   const pickFlow = find("おまかせのモデル選択・Issueラベル判定");
-  // 計画レビューは、計画を出したCLIごとに担当AIを持つ。継承なら全体設定（provider）で同じ結果になるので1行にまとめ、
-  // 個別に固定して結果が分かれるときだけ開始元ごとに分けて見せる（#4139）
+  // 計画レビューは、計画を出したCLIごとに担当AIを持つ。未固定なら開始元の反対側になり（#5648）開始元ごとに
+  // 結果が分かれるので2行で見せる。両方を同じ担当に固定して結果が揃ったときだけ1行にまとめる（#4139）
   const planReviewEntries = (): ProviderFlowEntry[] => {
     const sources = [
       { start: "Claude Codeで開始後", fixed: overrides.planReviewAgentForClaude, label: "Claude Codeの計画" },
@@ -353,7 +355,7 @@ export function resolveProviderFlowRows(
     ] as const;
     const built = sources.map((source) => {
       const flow = find(`自動計画レビュー（${source.start}）`);
-      return { source, flow, binding: (source.fixed ? "override" : "provider") as ProviderFlowBinding };
+      return { source, flow, binding: (source.fixed ? "override" : "opposite") as ProviderFlowBinding };
     });
     const same = built[0].flow.agent === built[1].flow.agent && built[0].flow.model === built[1].flow.model &&
       built[0].binding === built[1].binding;

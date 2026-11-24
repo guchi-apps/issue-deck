@@ -292,7 +292,7 @@ describe("SettingsDialog", () => {
       claudeLocalModel: "sonnet",
       codexModel: "auto",
       defaultDispatchAgent: "claude",
-      planReviewAgentForClaude: "claude",
+      planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
