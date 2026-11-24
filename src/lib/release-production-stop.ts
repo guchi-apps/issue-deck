@@ -57,7 +57,7 @@ export const PRODUCTION_STOP_TEXT: Record<ProductionStopReason, { label: string;
   deploy_failed: {
     label: "デプロイ失敗",
     cause: "本番デプロイが失敗しました（照合付きのrepoでは、稼働版の不一致・旧版の応答もヘルスチェックの失敗としてここに出ます）",
-    action: `デプロイを再実行するか本番復旧で直してください。${RECHECK}`,
+    action: `デプロイを再実行するか本番復旧で直してください。別のPRで本番を直した場合は、この候補を含む版のデプロイが照合付きで成功した時点でこの候補も自動で完了します。${RECHECK}`,
   },
   deploy_cancelled: {
     label: "デプロイ取消",
@@ -178,10 +178,58 @@ export function canCloseBySuccessor(reason: ProductionStopReason | null): boolea
 export function decideSuccessorProof(input: {
   coveredSha: string;
   successor: { sha: string; runUrl: string; kind: ProductionTargetKind | null; versionCheckPassed: boolean; includesCovered: boolean } | null;
-}): { ok: true; evidence: { coveredSha: string; successorSha: string; deployRunUrl: string } } | { ok: false } {
+}): SuccessorProofResult {
   const s = input.successor;
-  if (!s || s.sha === input.coveredSha || s.kind !== "deploy_version_check" || !s.versionCheckPassed || !s.includesCovered) return { ok: false };
+  if (!s) return { ok: false, waiting: "latest_unreadable" };
+  if (s.sha === input.coveredSha) return { ok: false, waiting: "latest_is_candidate" };
+  if (s.kind !== "deploy_version_check") return { ok: false, waiting: s.kind === null ? "latest_unreadable" : "no_version_check" };
+  if (!s.versionCheckPassed) return { ok: false, waiting: "version_check_not_passed" };
+  if (!s.includesCovered) return { ok: false, waiting: "not_including" };
   return { ok: true, evidence: { coveredSha: input.coveredSha, successorSha: s.sha, deployRunUrl: s.runUrl } };
+}
+
+/**
+ * 後続の版でまだ確かめられない理由（#5638）。止まった候補の開始不可の理由に添え、何が揃えば閉じるかを画面に出す。
+ * 判定の材料は`observeSuccessorProof`が取る。この理由は記録せず、開始判定のたびに観測し直す
+ */
+export type SuccessorProofWaiting =
+  /** mainのデプロイ履歴・配布workflowを読めなかった */
+  | "latest_unreadable"
+  /** mainの最新のデプロイが実行中（待てば確かめられる） */
+  | "latest_running"
+  /** mainの最新のデプロイが失敗・取消で終わった */
+  | "latest_not_success"
+  /** mainの最新のデプロイがこの候補自身のコミット（後続の版がまだ本番へ出ていない） */
+  | "latest_is_candidate"
+  /** 呼び出し側が自分で追跡しているコミット（復旧系列の本番反映） */
+  | "latest_excluded"
+  /** 最新のデプロイのコミットの`deploy.yml`が稼働版を照合しない */
+  | "no_version_check"
+  /** 照合を含む`deploy`ジョブの成功を確かめられない */
+  | "version_check_not_passed"
+  /** 最新のデプロイのコミットがこの候補のマージコミットを含まない */
+  | "not_including";
+
+export type SuccessorProofResult =
+  | { ok: true; evidence: { coveredSha: string; successorSha: string; deployRunUrl: string } }
+  | { ok: false; waiting: SuccessorProofWaiting };
+
+const SUCCESSOR_WAITING_TEXT: Record<SuccessorProofWaiting, string> = {
+  latest_unreadable: "mainのデプロイ履歴を読めず、後続の版で確かめられていません。時間をおいて「稼働確認をやり直す」を押してください",
+  latest_running: "mainの最新のデプロイが実行中です。成功すれば、この候補は後続の版の稼働で自動で完了します",
+  latest_not_success:
+    "mainの最新のデプロイが成功していません。本番を直したPRをmainへ出してデプロイを成功させるか、デプロイを再実行してください。成功すればこの候補も自動で完了します",
+  latest_is_candidate:
+    "mainの最新のデプロイはこの候補自身のコミットです。デプロイを再実行するか、本番を直したPRをmainへ出してデプロイしてください。成功すればこの候補も自動で完了します",
+  latest_excluded: "mainの最新のデプロイは本番復旧の系列が追っています。系列の本番反映の結果を待ってください",
+  no_version_check:
+    "mainの最新の版のdeploy.ymlは稼働版を照合しないため、後続の版でこの候補の稼働を確かめられません。照合（APP_COMMIT_SHAと/api/app-version）を入れた版をmainへ出してデプロイしてください",
+  version_check_not_passed: "mainの最新のデプロイで、稼働版を照合するdeployジョブの成功を確かめられません。デプロイの実行内容を確かめてください",
+  not_including: "mainの最新の版がこの候補のマージコミットを含みません。この候補を含む版をmainからデプロイしてください",
+};
+
+export function successorWaitingText(waiting: SuccessorProofWaiting): string {
+  return SUCCESSOR_WAITING_TEXT[waiting];
 }
 
 /**
@@ -194,8 +242,20 @@ export function decideSuccessorStart(input: {
   developKind: ProductionTargetKind | null;
   /** 後続の確認を待つ候補が既にあるか（同じリポジトリで1本まで） */
   slotTaken: boolean;
+  /**
+   * 後続の版で閉じられる停止（`canCloseBySuccessor`）について、いま閉じられない理由（#5638）。
+   * 別のPRで本番を復旧した場合に、何が揃えばこの候補が閉じて開始できるようになるかを理由へ添える
+   */
+  successorWaiting?: SuccessorProofWaiting | null;
 }): { allowed: true } | { allowed: false; reason: string } {
-  if (input.stopReason !== "contract_missing") return { allowed: false, reason: "この候補の稼働確認を直して確かめ直すまで、新しい候補は作れません" };
+  if (input.stopReason !== "contract_missing") {
+    const base = "この候補の稼働確認を直して確かめ直すまで、新しい候補は作れません";
+    if (!canCloseBySuccessor(input.stopReason) || !input.successorWaiting) return { allowed: false, reason: base };
+    return {
+      allowed: false,
+      reason: `${base}。別のPRで本番を復旧した場合は、この候補を含む版のデプロイが照合付きで成功した時点でこの候補も自動で完了し、開始できるようになります。いまの状況: ${successorWaitingText(input.successorWaiting)}`,
+    };
+  }
   if (input.slotTaken) return { allowed: false, reason: "後続の稼働確認を待っている別の候補があります。その候補の完了を先に確かめてください" };
   if (input.developKind === null) return { allowed: false, reason: "developの配布workflowを読めず、次の候補が稼働版の照合を持つか確かめられません" };
   if (input.developKind !== "deploy_version_check") {

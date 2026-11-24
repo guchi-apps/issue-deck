@@ -5,7 +5,7 @@
  * OFFは`PushMutedKind`の行で表す（行があればOFF）。既定は全ON。
  */
 
-export const PUSH_KINDS = ["check-user", "release-merge", "release", "deploy-launch", "review-stalled"] as const;
+export const PUSH_KINDS = ["check-user", "release-merge", "release", "deploy-launch", "review-stalled", "token-expiry"] as const;
 
 export type PushKind = (typeof PUSH_KINDS)[number];
 
@@ -29,6 +29,10 @@ export const PUSH_KIND_LABELS: Record<PushKind, { title: string; description: st
   "review-stalled": {
     title: "自動レビューの停止",
     description: "実行機待ちで止まった自動レビューが、自動でやり直しても直らなかったとき",
+  },
+  "token-expiry": {
+    title: "外部エージェント用トークンの期限",
+    description: "外部エージェント用トークン（MCP）の期限が14日以内に迫ったとき・切れたとき",
   },
 };
 

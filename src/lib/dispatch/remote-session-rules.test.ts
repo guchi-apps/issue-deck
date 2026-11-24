@@ -8,6 +8,8 @@ import {
   buildRemoteSessionPromptFromDraft,
   normalizeRemoteSessionInitialPrompt,
   REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH,
+  REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES,
+  countRemoteSessionPromptImages,
   supportsRemoteSessionInitialPrompt,
   isRemoteSessionResumable,
   parseIdleEndedRemoteSessions,
@@ -215,5 +217,20 @@ describe("書きかけIssueからの転記（#5628）", () => {
     const text = buildRemoteSessionPromptFromDraft("", "a".repeat(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH + 5));
     expect(text).toHaveLength(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH);
     expect(normalizeRemoteSessionInitialPrompt(text)).toBe(text);
+  });
+});
+
+describe("最初の指示の画像添付（#5637）", () => {
+  const url = (n: number) =>
+    `https://x.test/api/issues/images/0b1c2d3e-0000-4000-8000-00000000000${n}.png`;
+
+  it("同じ画像は1枚と数える", () => {
+    expect(countRemoteSessionPromptImages(`![](${url(1)}) ![](${url(1)}) ![](${url(2)})`)).toBe(2);
+  });
+
+  it("上限までは通し、超えたら invalid", () => {
+    const ok = Array.from({ length: REMOTE_SESSION_INITIAL_PROMPT_MAX_IMAGES }, (_, i) => `![](${url(i)})`).join("\n");
+    expect(normalizeRemoteSessionInitialPrompt(ok)).toBe(ok);
+    expect(normalizeRemoteSessionInitialPrompt(`${ok}\n![](${url(9)})`)).toBe("invalid");
   });
 });

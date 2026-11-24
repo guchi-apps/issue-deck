@@ -177,3 +177,21 @@ run_remote_session_job j1 REMOTE_SESSION guchi-apps issue-deck issue-deck-remote
   expect(run('調べて')).toEqual(['prompt=[調べて]', 'prompt=[調べて]']);
   expect(run('')).toEqual(['prompt=[unset]', 'prompt=[unset]']);
 });
+
+it('画像URLを取得できなくても起動し、取得できなかった旨を指示へ足す（#5637）', () => {
+  const ctx = setup();
+  try {
+    const url = 'https://example.test/api/issues/images/0b1c2d3e-0000-4000-8000-000000000001.png';
+    // 取得先・鍵の設定が無い環境（dispatch.env無し）を再現する
+    const r = launch(ctx, {
+      ISSUE_DECK_REMOTE_INITIAL_PROMPT: `見て ![](${url})`,
+      ISSUE_DECK_DISPATCH_ENV: join(ctx.dir, 'none.env'),
+    });
+    expect(r.status).toBe(0);
+    expect(r.argv.at(-1)).toContain(url);
+    expect(r.argv.at(-1)).toContain('取得できませんでした');
+    expect(r.argv).not.toContain('--allowedTools');
+  } finally {
+    rmSync(ctx.dir, { recursive: true, force: true });
+  }
+});
