@@ -70,7 +70,7 @@ import {
 } from "@/lib/release-rc-run";
 import { loadProductionView, observeProduction, recordProductionVerified, type RcProductionView } from "@/lib/release-production-verification-run";
 import type { ProductionVerificationMethod } from "@/lib/release-production-verification";
-import { decideProductionStop } from "@/lib/release-production-stop";
+import { canCloseBySuccessor, decideProductionStop } from "@/lib/release-production-stop";
 import { observeSuccessorProof } from "@/lib/release-production-stop-run";
 import { canTransitionRcPhase, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import {
@@ -1057,8 +1057,9 @@ async function advanceProduction(ctx: Context, candidate: CandidateRow, row: Fin
         waitingReason: observed.decision.reason,
         runs: observed.runs,
       });
-  // 証拠未設定の候補は、照合付きの後続の版の稼働で確かめられる（#4712。循環を避ける経路）
-  if (stop.stop === "contract_missing") {
+  // 証拠未設定の候補は、照合付きの後続の版の稼働で確かめられる（#4712。循環を避ける経路）。
+  // デプロイ失敗などで止まった候補も、人が別のPRで復旧していれば同じ証拠で閉じる（#5633）
+  if (canCloseBySuccessor(stop.stop)) {
     const proof = await observeSuccessorProof(ctx, mergeSha).catch(() => ({ ok: false as const }));
     if (proof.ok) {
       await complete("successor", { mergeSha, ...proof.evidence });

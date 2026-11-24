@@ -931,7 +931,13 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 止まる条件（`needs_attention`＋修正Issueへ引き継ぎコメントと`00.check-user`）: 停止・期限切れ・範囲外・
 復旧PRの不一致・HEAD変更・main前進・コンフリクト・差分が記録外・CI失敗・人の確認ラベル・別リリースによる置換済み。
-マージ後の稼働版の確認（`recovered`）は#4007で足す。
+マージ後は#4007の追跡（`releasing`→`verifying`→`recovered`）が稼働版の一致まで確かめる。
+
+**マイグレーションの失敗（P3009・P3018）は区分`migration`で扱う**（#5632）。復旧PRはmain起点に修正PRの
+差分だけを取り込むため、失敗の記録を解消する`deploy/pre-migrate.sh`が修正PRにもmainにも無いと、
+出してもP3009で止まり続ける。系列は復旧PRを作る前にこれを確かめ（`decideMigrationResolver`）、無ければ
+`migration_resolver_missing`で止まる。部分適用の恐れがあるとき（`migration_unsafe`）は修正へ進まない。
+種類ごとの切り分けと次の一手は[../deploy-recovery-runbook.md](../deploy-recovery-runbook.md)。
 
 ## リリース完了系列に限り、リリース候補を本番へ自動マージする（#4480）
 
@@ -1202,6 +1208,17 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - **競合（GitHubの`mergeable`）が「確認中」でも公開承認は止めない**（#5178・#5361。#5305で一度「判定が出るまで押せない」にしたが、GitHubの遅延計算で承認が押せない時間だけが生じ、安全性は増えていなかったため戻した）。止めるのは`false`（競合ありと確定）のときだけ（`decideConflictBlock`）。判定中を止めなくてよい根拠は3つ——統合検証が`scripts/run-release-verify.sh`でmain先端（base SHA）へheadを実際に`git merge`して合格していること、承認時にmain・headが検証時と一致することを確かめていること、そして承認後の本番mainへのマージは`decideCompletionMerge`がマージ直前に取り直した候補で判定し、`null`（GitHubが計算中）なら`mergeable_unknown`で待ち、`false`なら止めること（マージAPIにもHEADのSHAを渡す）。本番PR詳細「現在候補の検証」の競合セルは、確認中のとき理由欄でこの関係を案内する。競合の確認自体は残す（base SHA一致の検査は候補作成後のmainの前進しか捕まえず、本番復旧PRのようにdevelopを経由せずmainへ入った変更との競合はGitHubの判定でしか分からないため）
 - PR詳細API（`/api/pull-requests/detail`）は、openなPRの`mergeable`が未判定なら1秒おきに最大2回取り直してから返す（`settlePullRequestMergeable`）。GitHubは単体取得を契機に非同期で計算するため初回はnullになりやすく、詳細はポーリングしないので「確認中」が再読み込みまで残っていた
 
+### 公開承認の自動化（#5629）
+
+公開承認が「ほぼ確認せず押される」形だけの操作になっていたため、**作った側（Claude）とは別系統のエージェントが全体レビューを指摘なしで合格させた**ことを根拠に、巡回が代わりに承認する。判断は純関数`src/lib/release-auto-approval.ts`の`decideAutoApproval`、巡回は`release-auto-approval-run.ts`（`deploy-recovery-series/sweep`へ相乗り）。
+
+- **設定は`AppSetting.releaseAutoApprovalEnabled`（既定OFF）。** `GET/PATCH /api/settings/release-auto-approval`で切り替える。OFFなら候補も読まない
+- **承認する条件（全て）**: `review`段階で公開準備の契約が出ている（CI・統合検証・Mac検証が合格）／全体レビューが合格している（`requiresAiReviewWaiver: false`。承知で進む明示が要る候補は自動承認しない）／現在のbase/headに対する`ai_review`の担当（`ReleaseVerification.agent`）が**Claude以外**／候補PRに`22.merge-confirm-required`・`00.check-user`が無い
+- **独立性の置き方**: トグルをONにすると、全体レビューの担当（`resolveReleaseReviewAssignee`）が**設定にかかわらずCodexになる**（モデルはローカルセッション用の`codexModel`）。「アプリ内AI：原因診断・新規アプリ相談」など他の設定は書き換えない。OFFへ戻せば従来の設定に従う。担当を切り替えただけでは、実行できるCodex対応ホストが無いときは全体レビューが`no_host`で失敗し承認は出ない（人が押す従来の流れ）
+- **承認の作成経路は増やさない。** 既存の`requestRcFinalize`を、候補の作成者を承認者・上げ幅自動判定・要求キー`auto-<候補>-<head>`（人の承認と区別できる）で呼ぶ。押した時点のhead・mainの先端・契約が一致するときだけ受け付ける検査も同じ。再送しても公開準備を二重に作らない
+- **自動マージ不可カテゴリは再判定しない**（認証・DBスキーマ・Secrets等は各PRの作成・マージ時に確認済みの前提）。人の確認ラベルだけは、正式バンプへ進む前に止める
+- **マージ操作は従来のまま**。承認後の自動公開の系列（`decideCompletionMerge`）・失効・取消・期限（24時間）も変えない。マージ操作を持つ場所は増やさない（[gates.md](gates.md)）
+
 ### 全体レビューは公開の必須条件ではない（#4807）
 
 **公開に必須なのはCI・統合検証（とMac検証・pre-releaseの前提・人の確認ラベル）で、全体レビュー（`ai_review`）は人が結果を承知で明示すれば外せる。** AIの全体レビューは指摘の取りこぼしを補う安全網で、指摘・実行失敗・未完了（バッチの途中・未確認範囲）が残るたびに公開を止め続けると、レビュー自体を100%完了させない限り本番へ出せなくなっていた。逆に、承知の明示なしに自動で外すと重大な指摘も素通りするため、**外すのは人の操作だけ**にする。
@@ -1278,6 +1295,7 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 - 「稼働確認をやり直す」（`POST /api/repositories/release/rc` `action=recheck_production`）は待ち時間の起点（`productionCheckStartedAt`）を今に取り直して1巡確かめるだけで、**証拠を代わりに書かない**
 - **証拠未設定の候補は、照合付きの次の候補で確かめられる（循環の回避）。** 照合を入れるにも次の候補を公開するしかないので、停止理由が`contract_missing`で、developの`deploy.yml`が照合を持ち、後続の確認を待つ候補が他に無いときだけ（`decideSuccessorStart`）、開始判定は`blocked`ではなく`candidate`に`successorOf`を添えて返す。開始すると旧い候補は`activeKey`から`successorProofKey`（repoごとに1本・一意制約）へ移る。**完了・取消にはしない**（段階・版の予約・履歴・developへの同期の追跡はそのまま）
 - 後続の確認を待つ候補は、mainの**最新の**deployが成功し、そのコミットの`deploy.yml`が照合を持ち、照合ジョブが成功し、旧い候補のマージコミットを祖先に持つと確かめた時点で（`observeSuccessorProof`）、方式`successor`（後続の版の稼働SHA照合）で完了する。照合付きの候補が完了した巡回で、待っている候補を確かめ直す
+- **系列の外で本番が復旧したときも、同じ証拠で閉じる（#5633）。** 人が別PRで復旧すると、止まった候補のdeployは失敗のまま残り、「稼働確認が停止（デプロイ失敗）」と再デプロイの案内が出続ける。停止理由が`deploy_failed`・`deploy_cancelled`・`deploy_not_started`・`version_unverified`・`evidence_unreadable`の候補にも`observeSuccessorProof`を当て、成立したら方式`successor`で完了する（`canCloseBySuccessor`）。`version_mismatch`（公開URLが別の版を返している）とソース公開は代用しない。本番復旧の系列（`DeployRecoverySeries`）も、進行中のあいだ同じ観測で、失敗したコミットを含む後続の版の稼働が確かめられたら`recovered`（`stopReason: recovered_elsewhere`）で閉じ、修正Issueへコメントする（系列自身の本番反映のコミットは除く）。稼働版を照合できないrepo（`deploy_version_check`でない）は自動では閉じず、従来どおり人が確かめる
 - 開始判定は、developの方式が照合付きでなければ「公開後は公開URLの照合か人の確認が要る」ことを開始前に出す（`productionKindNotice`。開始自体は止めない）
 - 新規アプリの雛形は`src/app/api/app-version/route.ts`と、gateへの`APP_COMMIT_SHA`の受け渡しを持つ。**照合はVPSのgate側（guchi-apps/vps#298）の対応待ち**なので、雛形の`deploy.yml`は照合を名乗らない（照合していないのに照合付きと判定されないよう`scaffold.test.ts`で固定している）。**共有workflowの参照タグを上げても、各repoの`deploy.yml`やAPIは配られない**ので、repoごとにIssueを立てて直す（car-careはguchi-apps/car-care#257）
 

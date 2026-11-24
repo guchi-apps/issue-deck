@@ -153,7 +153,7 @@ export async function requestReleaseReviewJob(
 ): Promise<RequestReleaseReviewResult> {
   const setting = await db.appSetting.findUnique({
     where: { id: 1 },
-    select: { appAiModelReasoning: true, aiExecutionProvider: true },
+    select: { appAiModelReasoning: true, aiExecutionProvider: true, releaseAutoApprovalEnabled: true, codexModel: true },
   });
   const assignee = resolveReleaseReviewAssignee(setting);
 

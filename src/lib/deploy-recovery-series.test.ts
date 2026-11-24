@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   decideDeployRecovery,
+  decideMigrationResolver,
+  deployRecoveryStopReasonLabel,
   decideDeployRecoveryRelease,
   deployFailureKey,
   deployRecoveryStage,
@@ -47,7 +49,7 @@ describe("decideDeployRecovery", () => {
   });
 
   it("コード以外の区分では、PRが出ていても修正へ進めない", () => {
-    for (const cause of ["config", "database", "external", "unknown"] as const) {
+    for (const cause of ["config", "database", "external", "unknown", "migration_unsafe"] as const) {
       expect(decideDeployRecovery(series(), observed({ reportedCause: cause, pullRequest: openPr }))).toEqual({
         action: "stop",
         reason: "non_code_cause",
@@ -298,5 +300,43 @@ describe("修正済み（already_fixed）の分岐（#4451）", () => {
       parseDeployRecoveryFixPullRequest(["<!-- issue-deck-deploy-recovery-fix-pr:4446 -->", "<!-- issue-deck-deploy-recovery-fix-pr:4447 -->"]),
     ).toBe(4447);
     expect(parseDeployRecoveryFixPullRequest(["なし", null])).toBeNull();
+  });
+});
+
+describe("マイグレーションの失敗（#5632）", () => {
+  it("区分migrationはコードと同じく修正中へ進み、区分を記録する", () => {
+    expect(decideDeployRecovery(series(), observed({ reportedCause: "migration" }))).toEqual({
+      action: "transition",
+      status: "fixing",
+      cause: "migration",
+    });
+  });
+
+  it("migration・migration_unsafeを区分として読む", () => {
+    expect(parseDeployRecoveryCause(["<!-- issue-deck-deploy-recovery-cause:migration -->"])).toBe("migration");
+    expect(parseDeployRecoveryCause(["<!-- issue-deck-deploy-recovery-cause:migration_unsafe -->"])).toBe("migration_unsafe");
+  });
+
+  it("部分適用の恐れは、人へ渡す理由として言い換える", () => {
+    expect(deployRecoveryStopReasonLabel("non_code_cause", "migration_unsafe")).toContain("部分適用の恐れ");
+  });
+
+  it("解消手段が修正PRかmainにあるときだけ復旧PRへ進める", () => {
+    const base = { cause: "migration", fixPullRequestFiles: ["prisma/migrations/x/migration.sql"], mainHasResolver: false };
+    expect(decideMigrationResolver(base)).toEqual({ ok: false, reason: "migration_resolver_missing" });
+    expect(decideMigrationResolver({ ...base, fixPullRequestFiles: [...base.fixPullRequestFiles, "deploy/pre-migrate.sh"] })).toEqual({
+      ok: true,
+    });
+    expect(decideMigrationResolver({ ...base, mainHasResolver: true })).toEqual({ ok: true });
+  });
+
+  it("区分がmigration以外なら解消手段を問わない", () => {
+    expect(decideMigrationResolver({ cause: "code", fixPullRequestFiles: [], mainHasResolver: false })).toEqual({ ok: true });
+  });
+
+  it("解消手段が無いときの文言に、次の操作を書く", () => {
+    const label = deployRecoveryStopReasonLabel("migration_resolver_missing", "#12") ?? "";
+    expect(label).toContain("deploy/pre-migrate.sh");
+    expect(label).toContain("既存の修正PRを選んで復旧");
   });
 });

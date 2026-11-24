@@ -115,6 +115,9 @@ const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...args: unknown[]) => enqueueDispatchJob(...args) }));
 vi.mock("@/lib/github/pull-request-auto-repair-start", () => ({ enrollPullRequestAutoRepairLoop: vi.fn(async () => true) }));
 
+const observeSuccessorProof = vi.fn();
+vi.mock("@/lib/release-production-stop-run", () => ({ observeSuccessorProof: (...args: unknown[]) => observeSuccessorProof(...args) }));
+
 const failedRun = {
   id: 100,
   path: ".github/workflows/deploy.yml",
@@ -144,6 +147,7 @@ beforeEach(() => {
   fetchOpenIssuesForRepo.mockResolvedValue([]);
   createIssue.mockResolvedValue({ number: 55 });
   createComment.mockResolvedValue({});
+  observeSuccessorProof.mockResolvedValue({ ok: false });
   enqueueDispatchJob.mockResolvedValue({ ok: true, job: { id: "job1" } });
 });
 
@@ -322,6 +326,31 @@ describe("本番反映後のdeploy失敗（#4451）", () => {
     await runDeployRecoverySweep({ hostName: "subpc" });
     expect(rows[0]).toMatchObject({ status: "verifying", activeKey: "o/r" });
     expect(rows[0].recoveredAt).toBeUndefined();
+  });
+
+  it("系列の外で本番が復旧したら、失敗したコミットを含む後続の版の稼働で系列を閉じる（#5633）", async () => {
+    await releasingSeries({ status: "fixing", releaseSha: null, releaseStartedAt: null, failedSha: "bad1" });
+    observeSuccessorProof.mockResolvedValue({
+      ok: true,
+      evidence: { coveredSha: "bad1", successorSha: "good2222", deployRunUrl: "https://github.com/o/r/actions/runs/300" },
+    });
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(observeSuccessorProof).toHaveBeenCalledWith(expect.anything(), "bad1", { excludeShas: [null, undefined] });
+    expect(rows[0]).toMatchObject({ status: "recovered", activeKey: null, stopReason: "recovered_elsewhere" });
+    expect(createComment).toHaveBeenCalledWith("o", "r", 55, "token", expect.objectContaining({ body: expect.stringContaining("再デプロイは不要") }));
+  });
+
+  it("系列自身の本番反映・復旧PRのマージコミットは、別経路の復旧の判定から除く（#5633）", async () => {
+    await releasingSeries({ status: "releasing", releaseSha: "rel1", recoveryMergedSha: "merged1", failedSha: "bad1" });
+    githubFetch.mockImplementation(async () => jsonResponse({ workflow_runs: [] }));
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(observeSuccessorProof).toHaveBeenCalledWith(expect.anything(), "bad1", { excludeShas: ["rel1", "merged1"] });
+  });
+
+  it("後続の版で確かめられないときは系列を閉じない", async () => {
+    await releasingSeries({ status: "fixing", releaseSha: null, releaseStartedAt: null });
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0].status).not.toBe("recovered");
   });
 
   it("本番反映中の系列は停止でき、その後は巡回が書き込まない", async () => {

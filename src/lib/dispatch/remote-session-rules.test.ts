@@ -5,6 +5,7 @@ import {
   REMOTE_SESSION_MAX_PER_HOST,
   REMOTE_SESSION_NAME_PATTERN,
   buildRemoteSessionName,
+  buildRemoteSessionPromptFromDraft,
   normalizeRemoteSessionInitialPrompt,
   REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH,
   supportsRemoteSessionInitialPrompt,
@@ -199,5 +200,20 @@ describe("最初の指示（#5405）", () => {
     expect(supportsRemoteSessionInitialPrompt("42")).toBe(false);
     expect(supportsRemoteSessionInitialPrompt("43")).toBe(true);
     expect(supportsRemoteSessionInitialPrompt(null)).toBe(false);
+  });
+});
+
+describe("書きかけIssueからの転記（#5628）", () => {
+  it("タイトルと本文を空行でつなぐ。片方だけでもよく、両方空ならnull", () => {
+    expect(buildRemoteSessionPromptFromDraft(" 題 ", "本文\n")).toBe("題\n\n本文");
+    expect(buildRemoteSessionPromptFromDraft("", "本文")).toBe("本文");
+    expect(buildRemoteSessionPromptFromDraft("題", "")).toBe("題");
+    expect(buildRemoteSessionPromptFromDraft(" ", "\n")).toBeNull();
+  });
+
+  it("上限を超える分は切り詰め、組み立てた結果は正規化を通る", () => {
+    const text = buildRemoteSessionPromptFromDraft("", "a".repeat(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH + 5));
+    expect(text).toHaveLength(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH);
+    expect(normalizeRemoteSessionInitialPrompt(text)).toBe(text);
   });
 });

@@ -1023,6 +1023,8 @@ Issue/PR・稼働SHAは「詳細」のリンクから追える。この節は第
 
 `DeployFailureAlert`（ブランチ画面・PR詳細の2か所）に「修正Issueを作成」と「原因をAIに聞く」を足した。
 再デプロイで直らない失敗の次の一手を、ログを別タブで読まずに取れるようにするためのもの。
+失敗の種類（P3009・マイグレーションのSQLエラー・ビルド・gate）ごとの切り分けと次の一手は
+[../deploy-recovery-runbook.md](../deploy-recovery-runbook.md)にまとめてある（#5632）。
 
 - **「原因をAIに聞く」**は`POST /api/repositories/deploy-failure/analysis`。画面が送るのはリポジトリとrun idだけで、
   失敗ジョブとログ（末尾6,000文字）はサーバーがGitHubから読み直す。ログは`sanitizeDeployLog`で

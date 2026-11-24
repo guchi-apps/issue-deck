@@ -162,6 +162,16 @@ export function normalizeRemoteSessionInitialPrompt(value: unknown): string | nu
 }
 
 /**
+ * 新規Issueの書きかけ（タイトル・本文）から、リモートセッションの最初の指示を組み立てる（#5628）。
+ * どちらも空なら`null`（転記しない）。上限を超える分は末尾を切り詰める。
+ */
+export function buildRemoteSessionPromptFromDraft(title: string, body: string): string | null {
+  const text = [title.trim(), body.trim()].filter(Boolean).join("\n\n").replaceAll("\0", "");
+  if (text === "") return null;
+  return text.slice(0, REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH);
+}
+
+/**
  * 終了したセッションを会話ごと再開できるか（#4874）。
  *
  * **一度でも動いた（`lastSeenAt`がある）`ended`・`failed`だけ**を対象にする。起動に失敗したまま

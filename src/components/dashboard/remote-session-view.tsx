@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { Textarea } from "@/components/ui/textarea";
 import { useRemoteSessions, type RemoteSessionLaunch } from "@/hooks/use-remote-sessions";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { clearRemoteSessionHandoff, peekRemoteSessionHandoff } from "@/lib/dispatch/remote-session-handoff";
 import {
   ACTIVE_REMOTE_SESSION_STATUSES,
   describeRemoteSessionStatus,
@@ -173,7 +174,13 @@ export function RemoteSessionView({
       launch={remote.launch?.repositoryFullName === currentRepo.fullName ? remote.launch : null}
       pending={remote.pending}
       error={remote.error}
-      onStart={(initialPrompt) => remote.start(currentRepo.fullName, initialPrompt)}
+      presetPrompt={peekRemoteSessionHandoff(currentRepo.fullName === requested ? requested : null)}
+      onStart={(initialPrompt) =>
+        remote.start(currentRepo.fullName, initialPrompt).then((accepted) => {
+          if (accepted) clearRemoteSessionHandoff();
+          return accepted;
+        })
+      }
       onResume={(session) => void remote.resume(session)}
       onStop={(id) => void remote.stop(id)}
       onDismissLaunch={remote.dismissLaunch}
@@ -246,6 +253,7 @@ function RepositoryDetail({
   pending,
   error,
   onStart,
+  presetPrompt,
   onResume,
   onStop,
   onDismissLaunch,
@@ -259,6 +267,8 @@ function RepositoryDetail({
   error: string | null;
   /** 起動する。受け付けられたら`true`（指示欄を空に戻す） */
   onStart: (initialPrompt: string) => Promise<boolean>;
+  /** 新規Issueの書きかけからの転記（#5628）。指示欄の初期値になる */
+  presetPrompt?: string | null;
   onResume: (session: RemoteSession) => void;
   onStop: (id: string) => void;
   onDismissLaunch: () => void;
@@ -267,7 +277,7 @@ function RepositoryDetail({
   // 「終了」は確認ダイアログを通してから実行する（#5346）
   const [stopTarget, setStopTarget] = useState<RemoteSession | null>(null);
   // 起動時に最初に渡す指示（#5405）。起動が受け付けられるまで保持し、失敗したら残して再試行できる
-  const [initialPrompt, setInitialPrompt] = useState("");
+  const [initialPrompt, setInitialPrompt] = useState(presetPrompt ?? "");
   const host = state?.hosts.find((item) => item.remoteSessionCapable && item.repositories.includes(repository.fullName)) ?? null;
   const launching = launch !== null && !launch.gaveUp;
   const launchedSession = launch ? sessions.find((session) => session.id === launch.sessionId) ?? null : null;
