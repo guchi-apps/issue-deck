@@ -1208,7 +1208,7 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 
 - **設定は`AppSetting.releaseAutoApprovalEnabled`（既定OFF）。** `GET/PATCH /api/settings/release-auto-approval`で切り替える。OFFなら候補も読まない
 - **承認する条件（全て）**: `review`段階で公開準備の契約が出ている（CI・統合検証・Mac検証が合格）／全体レビューが合格している（`requiresAiReviewWaiver: false`。承知で進む明示が要る候補は自動承認しない）／現在のbase/headに対する`ai_review`の担当（`ReleaseVerification.agent`）が**Claude以外**／候補PRに`22.merge-confirm-required`・`00.check-user`が無い
-- **独立性の置き方**: 全体レビューの担当は設定の「アプリ内AI：原因診断・新規アプリ相談」（`appAiModelReasoning`）で決まる。Codex（OpenAI系）にしておくと、Claudeが実装したコードをCodexが検証する形になる。担当がClaudeのままなら承認は出ず、人が押す従来の流れのまま
+- **独立性の置き方**: トグルをONにすると、全体レビューの担当（`resolveReleaseReviewAssignee`）が**設定にかかわらずCodexになる**（モデルはローカルセッション用の`codexModel`）。「アプリ内AI：原因診断・新規アプリ相談」など他の設定は書き換えない。OFFへ戻せば従来の設定に従う。担当を切り替えただけでは、実行できるCodex対応ホストが無いときは全体レビューが`no_host`で失敗し承認は出ない（人が押す従来の流れ）
 - **承認の作成経路は増やさない。** 既存の`requestRcFinalize`を、候補の作成者を承認者・上げ幅自動判定・要求キー`auto-<候補>-<head>`（人の承認と区別できる）で呼ぶ。押した時点のhead・mainの先端・契約が一致するときだけ受け付ける検査も同じ。再送しても公開準備を二重に作らない
 - **自動マージ不可カテゴリは再判定しない**（認証・DBスキーマ・Secrets等は各PRの作成・マージ時に確認済みの前提）。人の確認ラベルだけは、正式バンプへ進む前に止める
 - **マージ操作は従来のまま**。承認後の自動公開の系列（`decideCompletionMerge`）・失効・取消・期限（24時間）も変えない。マージ操作を持つ場所は増やさない（[gates.md](gates.md)）

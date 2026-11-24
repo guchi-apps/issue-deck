@@ -862,6 +862,7 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground" data-testid="release-review-assignee">
           リリース全体レビューの担当（実効）:{" "}
           {describeReleaseReviewAssignee(resolveReleaseReviewAssignee({ appAiModelReasoning, aiExecutionProvider }))}
+          （公開承認の自動化がONの間は、この設定にかかわらずCodexで実行します）
         </p>
       </div>
       </>}
