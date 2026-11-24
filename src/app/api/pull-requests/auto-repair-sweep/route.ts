@@ -7,6 +7,7 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { runReviewHandoffRescueSweep } from "@/lib/github/pull-request-review-handoff-rescue";
 import { runPullRequestAutoRepairSweep } from "@/lib/github/pull-request-auto-repair-sweep";
 import { runReviewStallRescueSweep } from "@/lib/github/pull-request-review-stall-rescue";
+import { runReviewAgentTokenExpiryNotice } from "@/lib/review-agent/expiry-notice";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /** サブPCのpollerが自動修復系列を進めるための内部入口。 */
@@ -26,6 +27,10 @@ export async function POST(request: NextRequest) {
     const stall = await withGithubApiFeature("review_stall_rescue", () => runReviewStallRescueSweep()).catch((error: unknown) => {
       console.error("[POST /api/pull-requests/auto-repair-sweep] 取り残されたレビューの巡回に失敗:", error);
       return null;
+    });
+    // 外部エージェント用トークンの期限切れ予告（#5639）。これも失敗しても系列の巡回は止めない。
+    await runReviewAgentTokenExpiryNotice().catch((error: unknown) => {
+      console.error("[POST /api/pull-requests/auto-repair-sweep] トークン期限の通知に失敗:", error);
     });
     return NextResponse.json({ ok: true, ...(await runPullRequestAutoRepairSweep()), rescued: rescue?.started.length ?? 0, reviewStallRetried: stall?.retried.length ?? 0, reviewStallNotified: stall?.notified.length ?? 0 }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

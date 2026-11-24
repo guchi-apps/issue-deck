@@ -20,6 +20,7 @@
 | repository | 許可リスト（1〜50件）。全許可は無い。リスト外は`403 repository_not_allowed`。画面ではissue-deckが管理するrepositoryから選択し、発行後も「許可repositoryを編集」（`PATCH /api/settings/review-agent-tokens`）で値を変えずに追加・削除できる（失効・期限切れは不可。新たに加えるものだけ連携を確認し、残すものは照合しない）。変更は`ReviewAgentAuditLog`へ1repositoryにつき1行（`token_repo_add`／`token_repo_remove`）残る |
 | 操作範囲 | `read`（取得）・`write`（担当の取得/解放・一時停止・テストと独立レビューの報告）・`resume`（一時停止の再開）。足りなければ`403 scope_not_allowed` |
 | 期限・失効 | 1〜365日。失効・期限切れは`401`（`token_revoked`・`token_expired`）＋`WWW-Authenticate` |
+| 期限の予告と更新手順（#5639） | 期限の14日前から、発行した利用者へPush通知（種類「外部エージェント用トークンの期限」。通知設定でOFF可）を1トークンにつき1度送る（`src/lib/review-agent/expiry-notice.ts`。サブPCのpollerが叩く`auto-repair-sweep`が実行する）。**自動更新はしない**。更新は、設定＞フリート運用で同じ名前・操作範囲・repositoryの新トークンを発行し、利用側（AIDEのissue-deck MCP設定）の`ida_…`を差し替え、`list_release_candidates`が返ることを確かめてから古いトークンを失効させる。長さは1〜365日で、通知を前提に既定は長め（90日以上）を勧める |
 | 本番マージ・公開 | **どの範囲にも含まない**。この経路の再開・報告で本番マージ・公開の承認を代替しない |
 
 ## ツール
