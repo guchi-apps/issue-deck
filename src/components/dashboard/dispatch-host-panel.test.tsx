@@ -207,6 +207,32 @@ describe("DispatchHostPanel", () => {
     expect(screen.getByText("issue-deck・計画レビュー中")).toBeTruthy();
   });
 
+  it("計画レビューのジョブがあれば、担当エージェントを色と文字で出す（#5648）", () => {
+    const { container } = render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({
+            planReviewSessions: [
+              { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 5648, issueTitle: "計画レビュー", issueId: "issue-5648" },
+            ],
+          }),
+        ]}
+        sessions={[]}
+        jobs={[
+          makeSelfUpdateJob({
+            kind: "PLAN_REVIEW",
+            status: "RUNNING",
+            issueNumber: 5648,
+            agent: "codex",
+            codexModel: "gpt-6-sol",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("issue-deck・計画レビュー中・Codex CLI・gpt-6-sol")).toBeTruthy();
+    expect(container.querySelector('[data-agent="codex"]')).toBeTruthy();
+  });
+
   // #1817。Issue詳細と同じ`describeSessionReap`を通す（同じ状態が画面によって違う言い方に
   // ならないようにする）。理由の1行はここには出さない（行が2倍になるため）
   it("自動終了までの残り時間を行の末尾に足す", () => {

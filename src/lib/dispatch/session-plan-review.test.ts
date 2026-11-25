@@ -64,19 +64,34 @@ describe("postSessionPlan の計画レビュー起動", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1855,
       hostName: "subpc",
-      agent: "claude",
+      // 既定は開始元（Claude）の反対側。立てられないホストでは開始元へ戻すため`fallbackAgent`を渡す（#5648）
+      agent: "codex",
+      fallbackAgent: "claude",
       claudeModel: "sonnet",
-      codexModel: undefined,
+      codexModel: "gpt-5.6-terra",
       // 人が押したわけではないので、積んだユーザーは残らない
       requestedByUserId: null,
     });
   });
 
-  it("Codexが投稿した計画はCodexのレビューを積む", async () => {
+  it("Codexが投稿した計画は、既定ではClaudeがレビューする（Codexへ戻れる）", async () => {
     await expect(postSessionPlan({ ...PLAN, agent: "codex" })).resolves.toBe(true);
 
     expect(enqueuePlanReviewJob).toHaveBeenCalledWith(
-      expect.objectContaining({ agent: "codex" }),
+      expect.objectContaining({ agent: "claude", fallbackAgent: "codex" }),
+    );
+  });
+
+  it("個別に固定した担当には、立てられなくてもフォールバックを渡さない", async () => {
+    findAppSetting.mockResolvedValue({
+      planReviewAgentForClaude: "codex",
+      planReviewAgentForCodex: "inherit",
+    });
+
+    await postSessionPlan(PLAN);
+
+    expect(enqueuePlanReviewJob).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "codex", fallbackAgent: undefined }),
     );
   });
 
@@ -101,38 +116,42 @@ describe("postSessionPlan の計画レビュー起動", () => {
     );
   });
 
-  it("継承（inherit）なら計画の作成元に関わらず全体のプロバイダーに従う（#4139）", () => {
-    for (const aiExecutionProvider of ["claude", "codex", "claude"] as const) {
-      for (const sourceAgent of ["claude", "codex"] as const) {
-        expect(
-          resolvePlanReviewAgentForSession({
-            sourceAgent,
-            planReviewAgentForClaude: "inherit",
-            planReviewAgentForCodex: "inherit",
-            aiExecutionProvider,
-          }),
-        ).toBe(aiExecutionProvider);
-      }
+  it("継承（inherit）・未設定なら、全体のプロバイダーに関わらず開始元の反対側になる（#5648）", () => {
+    for (const sourceAgent of ["claude", "codex"] as const) {
+      expect(
+        resolvePlanReviewAgentForSession({
+          sourceAgent,
+          planReviewAgentForClaude: "inherit",
+          planReviewAgentForCodex: "inherit",
+        }),
+      ).toBe(sourceAgent === "claude" ? "codex" : "claude");
     }
   });
 
-  it("個別固定は全体のプロバイダーより優先する（#4139）", () => {
+  it("個別固定は反対側の既定より優先する。片側だけ固定しても他方は反対側（#5648）", () => {
     expect(
       resolvePlanReviewAgentForSession({
         sourceAgent: "claude",
-        planReviewAgentForClaude: "codex",
-        aiExecutionProvider: "claude",
+        planReviewAgentForClaude: "claude",
+        planReviewAgentForCodex: "inherit",
       }),
-    ).toBe("codex");
+    ).toBe("claude");
+    expect(
+      resolvePlanReviewAgentForSession({
+        sourceAgent: "codex",
+        planReviewAgentForClaude: "claude",
+        planReviewAgentForCodex: "inherit",
+      }),
+    ).toBe("claude");
   });
 
-  it("不正な設定値は開始元と同じCLIへ戻す", () => {
+  it("不正な設定値は反対側の既定へ戻す", () => {
     expect(
       resolvePlanReviewAgentForSession({
         sourceAgent: "codex",
         planReviewAgentForCodex: "other",
       }),
-    ).toBe("codex");
+    ).toBe("claude");
   });
 
   /**

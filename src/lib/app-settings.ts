@@ -38,10 +38,25 @@ export function parseGithubActionsAgent(value: unknown): GithubActionsAgent | nu
   return parseDefaultDispatchAgent(value);
 }
 
-// 計画を投稿したCLIごとに、続く自動計画レビューで使うCLIを選ぶ。既定は従来どおり開始元と同じ。
-export const PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT = "claude" as const;
-export const PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT = "codex" as const;
+// 計画を投稿したCLIごとに、続く自動計画レビューで使うCLIを選ぶ。
 export type PlanReviewAgent = DefaultDispatchAgent;
+
+/** 計画を立てたのと別のエージェント（claude⇄codex）。 */
+export function oppositeDispatchAgent(agent: DefaultDispatchAgent): DefaultDispatchAgent {
+  return agent === "codex" ? "claude" : "codex";
+}
+
+/**
+ * 計画レビューの担当を解決する（#5648）。優先順位は ①開始元ごとの個別固定 → ②開始元の反対側。
+ * **全体プロバイダー（`aiExecutionProvider`）は使わない**（使うとClaude→Claudeのまま変わらない）。
+ * 実行時・設定API・設定画面・実行経路表示のすべてがこの関数を通る。
+ */
+export function resolvePlanReviewAgent(
+  fixed: unknown,
+  sourceAgent: DefaultDispatchAgent,
+): PlanReviewAgent {
+  return parseDefaultDispatchAgent(fixed) ?? oppositeDispatchAgent(sourceAgent);
+}
 
 export function parseDefaultDispatchAgent(value: unknown): DefaultDispatchAgent | null {
   if (typeof value !== "string") return null;

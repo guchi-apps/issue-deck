@@ -273,6 +273,14 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
   return agent === "codex" ? "Codex CLI" : "Claude Code";
 }
 
+/** 計画レビューの担当表示（「Codex CLI・gpt-5」のように、エージェント名とモデルを文字で出す。#5648）。 */
+export function describePlanReviewAssignee(
+  job: Pick<DispatchJobView, "agent" | "claudeModel" | "codexModel">,
+): string {
+  const model = job.agent === "codex" ? job.codexModel : job.claudeModel;
+  return model ? `${describeDispatchAgent(job.agent)}・${model}` : describeDispatchAgent(job.agent);
+}
+
 /**
  * Codexで効かなくなる画面連携（#2505・docs/multi-agent/codex.md の比較表）。
  *
