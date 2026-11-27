@@ -92,7 +92,7 @@ describe("requestReleaseReviewJob", () => {
     expect(verificationUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("統合検証の完了後の開始（#4763）: 優先ホストが適格ならそこへ、不適格なら名前順の先頭へ積む", async () => {
+  it("統合検証の完了後の開始（#4763）: 優先ホストが適格ならそこへ、不適格なら既定の先頭へ積む", async () => {
     hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host" })]);
     jobCreate.mockImplementation(({ data }) => Promise.resolve({ id: "j1", ...data }));
     await requestReleaseReviewJob(target, NOW, { preferredHost: "verify-host" });
@@ -101,6 +101,27 @@ describe("requestReleaseReviewJob", () => {
     hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host", releaseReviewCapable: false })]);
     await requestReleaseReviewJob(target, NOW, { preferredHost: "verify-host" });
     expect(jobCreate.mock.calls[1][0].data.targetHost).toBe("a-host");
+  });
+
+  it("優先指定が無ければ、名前順で先のMac miniよりDeskMiniに積む（#5657）", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "macmini" }), host({ name: "subpc" })]);
+    jobCreate.mockImplementation(({ data }) => Promise.resolve({ id: "j1", ...data }));
+    await requestReleaseReviewJob(target, NOW);
+    expect(jobCreate.mock.calls[0][0].data.targetHost).toBe("subpc");
+
+    await requestReleaseReviewJob(target, NOW, { preferredHost: "offline-host" });
+    expect(jobCreate.mock.calls[1][0].data.targetHost).toBe("subpc");
+  });
+
+  it.each([
+    ["オフライン", { lastSeenAt: new Date(0) }],
+    ["未対応", { releaseReviewCapable: false }],
+    ["リポジトリ未登録", { repositories: JSON.stringify([]) }],
+  ])("DeskMiniが%sなら他のホストに積む（#5657）", async (_label, overrides) => {
+    hostFindMany.mockResolvedValue([host({ name: "macmini" }), host({ name: "subpc", ...overrides })]);
+    jobCreate.mockImplementation(({ data }) => Promise.resolve({ id: "j1", ...data }));
+    await requestReleaseReviewJob(target, NOW);
+    expect(jobCreate.mock.calls[0][0].data.targetHost).toBe("macmini");
   });
 
   it("同じ対象の未完了ジョブがあれば積まない", async () => {
