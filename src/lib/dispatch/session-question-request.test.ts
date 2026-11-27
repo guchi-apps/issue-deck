@@ -266,6 +266,20 @@ describe("buildSessionQuestionAnswerCommentBody", () => {
     expect(body.trimEnd().endsWith("<!-- issue-deck:posted-by:m-guchi -->")).toBe(true);
   });
 
+  it("フェンス入りの質問は、コマンドを箇条書きの下のコードブロックへ分ける", () => {
+    const question = "実行してよいですか？ ```bash VPS\npm2 status\n```";
+    const body = buildSessionQuestionAnswerCommentBody({
+      decision: "answer",
+      questions: [{ ...QUESTIONS[0], question }],
+      answers: { [question]: "はい" },
+      posterMarker: "<!-- issue-deck:posted-by:m-guchi -->",
+    });
+
+    expect(body).toContain(
+      "- **実行してよいですか？**\n  ```bash VPS\n  pm2 status\n  ```\n  - はい",
+    );
+  });
+
   it("端末で答えることにしたときは、回答を並べない", () => {
     const body = buildSessionQuestionAnswerCommentBody({
       decision: "defer",
