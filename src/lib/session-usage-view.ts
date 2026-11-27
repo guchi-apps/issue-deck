@@ -954,6 +954,65 @@ export function sessionUsagePhaseSplit(
   return { planCostUsd, implementationCostUsd };
 }
 
+/** 明細のカード1枚ぶん（#5654）。実装セッションは計画立案と実装の2枚に分かれる */
+export type SessionUsageDetailRow = {
+  entry: SessionUsageEntry;
+  /** 計画立案ぶんのカードか。見出しを「実装」ではなく「計画立案」にする */
+  isPlan: boolean;
+  /** 1本を2枚に分けたか。トークン・入出力の内訳は金額比の按分で、時刻は2枚とも同じ */
+  isSplit: boolean;
+};
+
+/** この金額未満の側は画面で$0.00になるので、カードを分けずに残りの側へまとめる */
+const MIN_SPLIT_CARD_COST_USD = 0.005;
+
+/**
+ * セッション1本を明細のカードへ分ける（#5654）。**計画の金額は「種別別」の計画立案の行と同じ
+ * 出し方**（`kindRowsForEntry`）で、残りを実装にするので、2枚の合計は元の金額と一致する。
+ * 計画の区分が無い（`sessionUsagePhaseSplit`がnull・計画0）セッションは1枚のまま。
+ */
+function sessionUsageDetailRowsForEntry(entry: SessionUsageEntry): SessionUsageDetailRow[] {
+  const whole = { entry, isPlan: false, isSplit: false };
+  if (entry.kind !== "implementation") return [whole];
+  if ((sessionUsagePhaseSplit(entry)?.planCostUsd ?? 0) <= 0) return [whole];
+  const planKey = usagePhaseKindKey("plan");
+  const planCostUsd = kindRowsForEntry(entry).find((row) => row.key === planKey)?.entry.costUsd ?? 0;
+  if (planCostUsd < MIN_SPLIT_CARD_COST_USD) return [whole];
+  const restCostUsd = entry.costUsd - planCostUsd;
+  if (restCostUsd < MIN_SPLIT_CARD_COST_USD) return [{ entry, isPlan: true, isSplit: false }];
+
+  const part = (costUsd: number, isPlan: boolean): SessionUsageDetailRow => {
+    const ratio = costUsd / entry.costUsd;
+    const scaled = scaleEntryToPhase(entry, costUsd);
+    return {
+      entry: {
+        ...scaled,
+        // 応答0は「使用量の記録なし」の意味になる（`sessionUsageGap`）ので、丸めで0にしない
+        responses: entry.responses > 0 ? Math.max(1, scaled.responses) : 0,
+        inputCostUsd: typeof entry.inputCostUsd === "number" ? entry.inputCostUsd * ratio : entry.inputCostUsd,
+        outputCostUsd: typeof entry.outputCostUsd === "number" ? entry.outputCostUsd * ratio : entry.outputCostUsd,
+      },
+      isPlan,
+      isSplit: true,
+    };
+  };
+  return [part(planCostUsd, true), part(restCostUsd, false)];
+}
+
+/**
+ * 明細のカードの並び（#5654）。**上の「種別別」の横棒と同じ順**（`compareUsageKinds`。計画立案 →
+ * 計画レビュー → 実装 → …）にする。同じ種別の中は渡された順（開始日時の新しい順）のまま。
+ */
+export function sessionUsageDetailRows(entries: SessionUsageEntry[]): SessionUsageDetailRow[] {
+  const orderKey = ({ entry, isPlan }: SessionUsageDetailRow) => {
+    if (isPlan) return usagePhaseKindKey("plan");
+    return entry.kind === "implementation" ? usagePhaseKindKey("coding") : entry.kind;
+  };
+  return entries
+    .flatMap(sessionUsageDetailRowsForEntry)
+    .sort((a, b) => compareUsageKinds({ key: orderKey(a), costUsd: 0 }, { key: orderKey(b), costUsd: 0 }));
+}
+
 function addPhaseModels(target: string[], models: string[]): void {
   for (const model of models) {
     if (!target.includes(model)) target.push(model);

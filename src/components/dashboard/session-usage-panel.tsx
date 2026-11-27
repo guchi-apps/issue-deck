@@ -39,7 +39,8 @@ import {
   sessionUsageKindLabel,
   sessionUsageLocationLabel,
   sessionUsageModelLabel,
-  sessionUsagePhaseSplit,
+  sessionUsageDetailRows,
+  type SessionUsageDetailRow,
   USAGE_BASIS_LABELS,
   usageBasisValue,
   usagePhaseKindKey,
@@ -230,7 +231,7 @@ const OUTPUT_COLOR = "#4776e6";
  * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
  * GitHub Actionsと Actionsの入力トークンが同じ紫で完全に一致していた。色覚多様性
  * シミュレーション（protanopia/deuteranopia）と通常視認の両方で、`TOKEN_COLORS`・`OUTPUT_COLOR`・
- * `PHASE_COLORS`のどの色とも離れることを確認して選んでいる（datavizスキルの
+ * `PLAN_PHASE_COLOR`のどれとも離れることを確認して選んでいる（datavizスキルの
  * `validate_palette.js`で検証。IssueAgentBadge（#2635）のindigo/emeraldは`OUTPUT_COLOR`・
  * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかった）。
  *
@@ -245,10 +246,10 @@ const OUTPUT_COLOR = "#4776e6";
  */
 
 /**
- * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_BASE_COLORS`）とは別軸**なので、
- * 既存のオレンジ／青を再利用せず、計画だけ目立たせるティール1色＋残りは中立色にする。
+ * 計画立案の行の色（#2646）。**誰が使ったか（`AGENT_BASE_COLORS`）とは別軸**なので、
+ * 既存のオレンジ／青を再利用せずティールにする。
  */
-const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
+const PLAN_PHASE_COLOR = "#0d9488";
 
 /**
  * 「セッション種別別」の行に付ける点の色（#2779・#3425）。**棒の色分け（誰が使ったか）とは
@@ -256,7 +257,7 @@ const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
  * 全種別へ色相の違う固定色を割り当てた（種別を色で見分けられるように）。
  */
 const KIND_ROW_COLORS: Record<string, string> = {
-  [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
+  [usagePhaseKindKey("plan")]: PLAN_PHASE_COLOR,
   "plan-review": "#0ea5e9",
   [usagePhaseKindKey("research")]: "#ca8a04",
   [usagePhaseKindKey("coding")]: "#6366f1",
@@ -311,7 +312,16 @@ function TokenBar({ segments, widthPercent }: { segments: TokenSegment[]; widthP
 }
 
 /** 棒の下に出す内訳の数値。カードでは幅が足りないので2列へ畳む */
-function TokenBreakdown({ segments, columns }: { segments: TokenSegment[]; columns?: boolean }) {
+function TokenBreakdown({
+  segments,
+  columns,
+  approximate,
+}: {
+  segments: TokenSegment[];
+  columns?: boolean;
+  /** 金額比で按分した値（#5654）。数値に「約」を付ける */
+  approximate?: boolean;
+}) {
   return (
     <div
       className={cn(
@@ -326,7 +336,8 @@ function TokenBreakdown({ segments, columns }: { segments: TokenSegment[]; colum
             className="mr-1 inline-block size-1.5 rounded-full"
             style={{ backgroundColor: segment.color }}
           />
-          {segment.label} {formatUsageTokens(segment.value)}
+          {segment.label} {approximate && segment.value > 0 ? "約" : ""}
+          {formatUsageTokens(segment.value)}
         </span>
       ))}
     </div>
@@ -878,32 +889,6 @@ function Breakdown({
   );
 }
 
-/**
- * 料金の下に添える計画/実装の内訳（#2646）。`sessionUsagePhaseSplit`が値を返すセッション
- * （Plan modeを使った実装セッション）だけ出す。**常にドル表示**——`内訳`列の入力/出力と同じく、
- * 枠%のときも金額のまま出す（按分し直さないため）。
- */
-function PhaseSplitNote({ entry }: { entry: SessionUsageEntry }) {
-  const split = sessionUsagePhaseSplit(entry);
-  if (!split) return null;
-  const total = split.planCostUsd + split.implementationCostUsd;
-  const planPercent = total > 0 ? (split.planCostUsd / total) * 100 : 0;
-  return (
-    <div className="mt-1">
-      <div className="flex h-1 overflow-hidden rounded-full bg-muted">
-        <span className="min-w-[2px]" style={{ width: `${planPercent}%`, backgroundColor: PHASE_COLORS.plan }} />
-        <span
-          className="min-w-[2px]"
-          style={{ width: `${100 - planPercent}%`, backgroundColor: PHASE_COLORS.implementation }}
-        />
-      </div>
-      <p className="mt-0.5 text-[9px] font-normal whitespace-nowrap text-muted-foreground">
-        計画 {formatUsageUsd(split.planCostUsd)}・実装 {formatUsageUsd(split.implementationCostUsd)}
-      </p>
-    </div>
-  );
-}
-
 type SessionRow = { issue: UsageIssue; entry: SessionUsageEntry };
 
 /** issueNumberがあればIssue表示、無くprNumberがあればPR表示。両方無ければ未特定（#2650） */
@@ -928,7 +913,10 @@ function SessionName({
   entry,
   onOpenIssue,
   hideIssueLabel = false,
+  isPlan = false,
 }: SessionRow & {
+  /** 実装セッションの計画立案ぶんのカード（#5654） */
+  isPlan?: boolean;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
   hideIssueLabel?: boolean;
 }) {
@@ -951,7 +939,7 @@ function SessionName({
             {/* 「CI/CD・レビュー」は場所がActionsとDeskMiniに分かれるので、種別ではなく実行場所を出す（#3995） */}
             {entry.source === "github-actions" || entry.kind === "actions"
               ? sessionUsageLocationLabel(entry)
-              : sessionUsageKindLabel(entry.kind)}{" "}
+              : sessionUsageKindLabel(isPlan ? usagePhaseKindKey("plan") : entry.kind)}{" "}
             ・ {entry.agent === "claude" ? "Claude" : "Codex"}
             {entry.workflowName ? ` ・ ${entry.workflowName}` : ""}
           </span>
@@ -1062,57 +1050,69 @@ function SessionCards({
   onOpenIssue,
   hideIssueLabel = false,
 }: {
-  sessions: SessionRow[];
+  sessions: (SessionRow & SessionUsageDetailRow)[];
   maxTokens: number;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
   hideIssueLabel?: boolean;
 }) {
   return (
     <ul className="flex flex-col gap-2">
-      {sessions.map(({ issue, entry }) => {
+      {sessions.map(({ issue, entry, isPlan, isSplit }) => {
         const segments = tokenSegments(entry);
         const totalTokens = entry.contextTokens + entry.outputTokens;
         const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
         // 内訳は集計側が単価から割ったものを使う（#2626）。持っていない行だけ近似になる。
         const costSplit = sessionUsageCostSplit(entry);
+        const costApproximate = costSplit.approximate || isSplit;
         return (
           <li
-            key={`${entry.host}:${entry.sessionId}`}
+            key={`${entry.host}:${entry.sessionId}:${isPlan ? "plan" : "main"}`}
             className="flex flex-col gap-1.5 rounded-lg border p-2.5 text-[11px]"
           >
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} hideIssueLabel={hideIssueLabel} />
+                <SessionName
+                  issue={issue}
+                  entry={entry}
+                  isPlan={isPlan}
+                  onOpenIssue={onOpenIssue}
+                  hideIssueLabel={hideIssueLabel}
+                />
               </div>
               <div className="shrink-0 text-right">
                 <EntryCost entry={entry} />
-                <PhaseSplitNote entry={entry} />
               </div>
             </div>
             <div>
               <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground">
-                <span>{formatUsageTokens(totalTokens)}</span>
+                <span>
+                  {isSplit ? "約" : ""}
+                  {formatUsageTokens(totalTokens)}
+                </span>
                 <span>{Math.round(totalWidth)}%</span>
               </div>
               <div className="mt-1">
                 <TokenBar segments={segments} widthPercent={totalWidth} />
               </div>
-              <TokenBreakdown segments={segments} columns />
+              <TokenBreakdown segments={segments} columns approximate={isSplit} />
             </div>
             {sessionUsageGap(entry) === null && <div
               className="text-[10px] tabular-nums text-muted-foreground"
               title={
                 costSplit.approximate
                   ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）"
-                  : undefined
+                  : isSplit
+                    ? "計画立案と実装の金額の比で按分した概算です"
+                    : undefined
               }
             >
-              入力 {costSplit.approximate ? "約" : ""}
-              {formatUsageUsd(costSplit.inputCostUsd)}・出力 {costSplit.approximate ? "約" : ""}
+              入力 {costApproximate ? "約" : ""}
+              {formatUsageUsd(costSplit.inputCostUsd)}・出力 {costApproximate ? "約" : ""}
               {formatUsageUsd(costSplit.outputCostUsd)}
             </div>}
             <div className="text-[10px] tabular-nums text-muted-foreground">
               {formatDateTime(entry.startedAt)} 〜 {formatDateTime(entry.endedAt)}
+              {isSplit && "（セッション全体）"}
             </div>
           </li>
         );
@@ -1227,7 +1227,7 @@ function IssueGroupRow({
 }) {
   const repository = issue.repository ?? "(不明)";
   const canOpen = Boolean(onOpenIssue && issue.repository && (issue.issueNumber || issue.prNumber));
-  const sessions: SessionRow[] = issue.entries.map((entry) => ({ issue, entry }));
+  const sessions = sessionUsageDetailRows(issue.entries).map((row) => ({ issue, ...row }));
   const sessionMaxTokens = sessions.reduce(
     (max, { entry }) => Math.max(max, entry.contextTokens + entry.outputTokens),
     0,

@@ -835,7 +835,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ——別の場所の「実装」を拾って偽陰性になる）。**部分一致の`getByText`/`queryByText`で日本語の
   短いラベルを使うテストは、将来同じラベルを出す要素が増える前提で書く**。件数だけを見るなら
   `getAllByText(...).length`、特定の1箇所を狙うなら結合されたテキスト全体（例:
-  `"計画 $1.20・実装 $3.80"`）やその要素にしか出ない値（セッションの開始・終了日時など）で絞る。
+  複数要素をまとめた文字列）やその要素にしか出ない値（セッションの開始・終了日時など）で絞る。
 - **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
   Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
   実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
@@ -3814,7 +3814,9 @@ export function POST(request: NextRequest) {
   「実装」として振り分ける（計画の修正で複数回呼ばれても最後の1回だけを境に使う）。
   Plan modeを使っていないセッション・Codexの行は`planCostUsd`/`implementationCostUsd`が
   両方nullになり、画面は「区分なし」として合算のみ出す（`inputCostUsd`/`outputCostUsd`の
-  内訳・#2626と同じ「集計側で割ってnullable列で運ぶ」形）。モデル名（`models`列）は
+  内訳・#2626と同じ「集計側で割ってnullable列で運ぶ」形）。
+  明細のカードは、区分のあるセッションを「計画立案」と「実装」の2枚に分けて「種別別」と同じ順に
+  並べる（#5654。`sessionUsageDetailRows`。金額以外は金額比の按分で、時刻・モデルは2枚とも同じ）。モデル名（`models`列）は
   以前から集計・保存されていたが、画面（`session-usage-panel.tsx`）には出していなかった。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは

@@ -22,6 +22,7 @@ import {
   sessionUsagePeriodStartMs,
   sessionUsageImplementationPhases,
   sessionUsageKindLabel,
+  sessionUsageDetailRows,
   sessionUsagePhaseSplit,
   usageBasisValue,
   type CurrentSessionInput,
@@ -690,6 +691,58 @@ describe("sessionUsagePhaseSplit", () => {
 
   it("片方だけしか無い行もnullを返す（合算だけを信用する）", () => {
     expect(sessionUsagePhaseSplit(entry({ planCostUsd: 1.2, implementationCostUsd: null }))).toBeNull();
+  });
+});
+
+describe("sessionUsageDetailRows", () => {
+  const implementation = (overrides: Partial<SessionUsageEntry> = {}) =>
+    entry({
+      kind: "implementation",
+      responses: 10,
+      inputTokens: 100,
+      costUsd: 10,
+      inputCostUsd: 8,
+      outputCostUsd: 2,
+      planCostUsd: 4,
+      implementationCostUsd: 6,
+      ...overrides,
+    });
+
+  it("計画と実装の2件へ分け、合計は変えない", () => {
+    const rows = sessionUsageDetailRows([implementation()]);
+    expect(rows.map((row) => [row.isPlan, row.isSplit, row.entry.costUsd])).toEqual([
+      [true, true, 4],
+      [false, true, 6],
+    ]);
+    expect(rows[0].entry.inputTokens).toBeCloseTo(40);
+    expect(rows[0].entry.inputCostUsd).toBeCloseTo(3.2);
+    expect(rows[1].entry.outputCostUsd).toBeCloseTo(1.2);
+  });
+
+  it("実装がまだ無ければ計画立案の1件だけにする", () => {
+    const rows = sessionUsageDetailRows([implementation({ planCostUsd: 10, implementationCostUsd: 0 })]);
+    expect(rows.map((row) => [row.isPlan, row.isSplit, row.entry.costUsd])).toEqual([[true, false, 10]]);
+  });
+
+  it("計画の区分が無いセッションは1件のまま", () => {
+    const rows = sessionUsageDetailRows([implementation({ planCostUsd: null, implementationCostUsd: null })]);
+    expect(rows.map((row) => [row.isPlan, row.isSplit])).toEqual([[false, false]]);
+  });
+
+  it("「種別別」と同じ順に並べ、同じ種別は渡した順のままにする", () => {
+    const rows = sessionUsageDetailRows([
+      entry({ sessionId: "actions", kind: "actions" }),
+      entry({ sessionId: "review-new", kind: "plan-review" }),
+      entry({ sessionId: "review-old", kind: "plan-review" }),
+      implementation({ sessionId: "impl" }),
+    ]);
+    expect(rows.map((row) => `${row.entry.sessionId}${row.isPlan ? ":plan" : ""}`)).toEqual([
+      "impl:plan",
+      "review-new",
+      "review-old",
+      "impl",
+      "actions",
+    ]);
   });
 });
 

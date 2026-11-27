@@ -579,20 +579,30 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getAllByText("Sonnet 5").length).toBeGreaterThan(0);
   });
 
-  it("Plan modeの内訳があるセッションだけ、料金の下に計画/実装を分けて出す（#2646）", () => {
+  it("計画の区分があるセッションは「計画立案」と「実装」の2枚に分けて出す（#5654）", () => {
     renderPanel(
       response([
         entry({ sessionId: "with-plan", costUsd: 5, planCostUsd: 1.2, implementationCostUsd: 3.8 }),
-        entry({ sessionId: "without-plan", costUsd: 2 }),
+        entry({ sessionId: "review", kind: "plan-review", costUsd: 2 }),
       ]),
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     openIssueGroup(detail);
-    // セッション明細側の計画/実装の内訳（PhaseSplitNote）は、区分のあるセッションだけに出る
-    // （「計画」「$1.20」単体は計画/実装/Actionサマリー（#2670）にも出るため、結合済みの
-    // 一意な文字列で判定する）。
-    expect(within(detail).getByText("計画 $1.20・実装 $3.80", { exact: false })).toBeTruthy();
+    // カードは「種別別」と同じ順（計画立案 → 計画レビュー → 実装）に並ぶ。
+    const cards = within(detail)
+      .getAllByRole("listitem")
+      .filter((item) => item.textContent?.includes(" 〜 ") && item.querySelector("li") === null);
+    expect(cards.map((card) => card.textContent?.match(/(計画立案|計画レビュー|実装) ・/)?.[1])).toEqual([
+      "計画立案",
+      "計画レビュー",
+      "実装",
+    ]);
+    expect(cards[0].textContent).toContain("$1.20");
+    expect(cards[2].textContent).toContain("$3.80");
+    expect(cards[0].textContent).toContain("（セッション全体）");
+    expect(cards[1].textContent).not.toContain("（セッション全体）");
+    expect(within(detail).queryByText("計画 $1.20・実装 $3.80", { exact: false })).toBeNull();
   });
 
   it("金額は常にドルで出し、単位を切り替える導線は無い", () => {
@@ -900,7 +910,7 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getAllByText("計画", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
     // "Action"は「GitHub Actions」にも部分一致するため件数だけ見る。金額もセッション明細側の
-    // PhaseSplitNote（結合テキスト）と部分一致し得るため、いずれも件数だけを見る。
+    // カードと一致し得るため、いずれも件数だけを見る。
     expect(within(detail).getAllByText("Action", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("$2.00", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("$3.00", { exact: false }).length).toBeGreaterThan(0);
