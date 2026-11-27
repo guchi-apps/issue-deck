@@ -3611,12 +3611,14 @@ export function POST(request: NextRequest) {
   られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
   Controlが無いため答える出口が消える）。
   **`question.question`はMarkdownとして描画しないプレーンテキスト**（`QuestionBlock`の
-  `<p>`）。`AskUserQuestion`の質問文にコマンド確認のため```bash```フェンスを埋め込むと、
-  バッククォートが文字どおり表示され複数コマンドが1行に潰れていた（#2818）。埋め込まれた
-  フェンスだけは`lib/session-question-commands.ts`の`extractQuestionCommandBlocks`が
-  取り出し、`&&`・改行の分割（`lib/shell-command-lines.ts`）を経て独立したコマンド一覧
-  として描く——地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は
-  従来どおり素通りする。
+  `<p>`）。埋め込まれたコマンドだけは`lib/session-question-commands.ts`の
+  `extractQuestionCommandBlocks`が取り出し、`question-command-card.tsx`の枠（実行先の見出し・
+  折り返し表示・全幅のコピーボタン）で描く（#2818・#5652）。対象は```` ```bash VPS ````の
+  ようなフェンス（言語指定の後が実行先。1フェンス＝1枠で、改行や`&&`で分けない）と、1個の
+  バッククォートのうち引数付きのコマンド。**実行先は書かれた語だけを読み**、無ければ`ssh`始まりを
+  「手元の端末」とする以外は「指定なし」。書き方は`scripts/prompts/`の各プロンプトにある。
+  地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は素通りする。
+  質問文は回答の照合キーなので、加工は表示（と回答コメント）だけで行い、保存値は変えない。
   **手作業Issue（`71.manual-step`）では、質問が指している手順の中身も同じパネルに出す**
   （#2820。当て方は`lib/manual-step-question.ts`＝引用された手順名で本文の手順を引き、
   質問文の`手順N`は食い違いを弾くのにだけ使う。描くのは手順のMarkdown・実行する端末・
