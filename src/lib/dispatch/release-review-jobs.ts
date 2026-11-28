@@ -6,6 +6,7 @@ import {
   isDispatchHostOnline,
   parseDispatchHostRepositories,
 } from "@/lib/dispatch/dispatch-job";
+import { sortDispatchHosts } from "@/lib/dispatch/host-label";
 import { expireStaleDispatchJobs } from "@/lib/dispatch/jobs";
 import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import {
@@ -50,7 +51,7 @@ export type ReleaseReviewRequestOptions = {
   requiredHost?: string;
   /**
    * 適格ならこのホストを優先する（#4763）。統合検証の完了後に開始する全体レビューは、証跡のある統合検証の実行ホストへ向ける。
-   * 不適格なら従来どおり名前順の先頭へフォールバックする（`requiredHost`と違い、積むこと自体はやめない）
+   * 不適格なら表示順の先頭（DeskMini優先。`sortDispatchHosts`）へフォールバックする（`requiredHost`と違い、積むこと自体はやめない）
    */
   preferredHost?: string | null;
   /** 積めるホストが無いとき`ai_review`へ失敗を記録するか（既定true）。自動経路は有効な結果を上書きしないためfalse */
@@ -68,7 +69,7 @@ async function pickReleaseReviewHost(
     where: { lastSeenAt: { gte: new Date(now.getTime() - DISPATCH_HOST_ONLINE_WINDOW_MS) } },
     orderBy: { name: "asc" },
   });
-  const capable = hosts.filter(
+  const capable = sortDispatchHosts(hosts).filter(
     (host) =>
       isDispatchHostOnline(host.lastSeenAt, now) &&
       host.releaseReviewCapable === true &&
