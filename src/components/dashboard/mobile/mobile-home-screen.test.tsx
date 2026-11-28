@@ -319,7 +319,7 @@ describe("MobileHomeScreen（#1690）", () => {
     renderHome();
 
     expect(screen.getByText("DeskMini")).toBeTruthy();
-    expect(screen.getByText("セッション 3/12")).toBeTruthy();
+    expect(screen.getByText("稼働 3/12")).toBeTruthy();
   });
 
   /**
@@ -347,7 +347,7 @@ describe("MobileHomeScreen（#1690）", () => {
     const { container } = renderHome();
 
     expect(container.querySelector('[data-testid="dispatch-host-skeleton"]')).toBeNull();
-    expect(screen.getByText("セッション 3/12")).toBeTruthy();
+    expect(screen.getByText("稼働 3/12")).toBeTruthy();
   });
 
   // 通知ベル（#1772）。PCのトップバー（実行キュー → ベル → アバター）と同じ順序にする
