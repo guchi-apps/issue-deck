@@ -2840,8 +2840,7 @@ function RepositorySection({
  * **リリース中・デプロイ中は、人が押す番になったときだけ数える**（#2038）。#1510・#1579では
  * リリースが動いていること自体を数えていたが、そのせいで「手が要るもの6件」の中身がCIの完了を
  * 待つだけのものばかりになり、件数を見ても押す番かどうかが分からなかった。自動で進んでいる
- * ぶんは`isProgressing`が「待てば進むもの◯件」として同じヘッダーに残すので、mainへマージして
- * から本番へ出るまでを見に来る手掛かり（#1579）は消えない。
+ * ぶんはヘッダーでは数えず（#5664）、畳んだ行の工程表示で分かる。
  *
  * **「リリース起動中」（#1955）だけはどちらにも含めない。** 押す操作の有無ではなく、判断の材料が
  * 端末ローカルの記録（起動時刻をlocalStorageへ置き、10分で失効する）でしかないため——
@@ -2852,7 +2851,7 @@ function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
   return (
     // 数えるのは本番リリース工程（バンプPR・リリースPR・候補の検証・デプロイ）だけ（#4540）。
-    // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
+    // 自動修正が走っている問題は`isProgressing`側へ回る（`pullRequestHealth.autoCount`）。
     // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
     summary.pullRequestHealth.humanCount > 0 ||
     // 本番リリースは工程の担当が人のときだけ数える（#5076）。畳んだ行・カード・PR一覧と同じ判定。
@@ -2898,13 +2897,8 @@ function candidateVerificationOf(repository: BranchFlowRepository): ReleaseCandi
 }
 
 /**
- * 待っていれば次へ進むリポジトリか。ヘッダーの「待てば進むもの◯件」に数える（#2038）。
- *
- * **「手が要るもの」と重ねて数えない**（呼び出し側で`needsAttention`を除く）。同じリポジトリが
- * 両方に出ると、2つの件数を足しても画面に並ぶ行数と合わなくなる。
- *
- * **畳んだ1行の「進行中 N件」とは別物。** あちらは作業レーンの本数（`activeLaneCount`）で、
- * こちらはリポジトリの件数。同じ画面で同じ言葉が2つの意味を持たないよう、言い回しを分けている。
+ * 待っていれば次へ進むリポジトリか。「動きがある時だけ表示」の判定（`hasBranchActivity`）で使う。
+ * ヘッダーの件数には出さない（#5664）。
  */
 function isProgressing(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
@@ -3085,15 +3079,11 @@ export function BranchFlowView({
     isLoading: !rowsLoaded,
     showAll: false,
   });
-  // 読み込み中は「設定で省略」と言い切らない（#5494。動きの有無が分かってから数える）
+  // 全件を省いたときの本文の案内で使う。読み込み中は「設定で省略」と言い切らない（#5494）
   const branchViewHiddenCount = rowsLoaded ? branchViewSelection.hidden.length : 0;
   const shownRepositories = branchViewSelection.visible;
   // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
   const attentionRepositories = shownRepositories.filter(needsAttention);
-  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
-  const progressingRepositories = shownRepositories.filter(
-    (repository) => !needsAttention(repository) && isProgressing(repository),
-  );
 
   // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
   // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
@@ -3175,11 +3165,6 @@ export function BranchFlowView({
             </h1>
             <p className="truncate text-xs text-muted-foreground">
               <span>{shownRepositories.length}リポジトリ</span>
-              {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
-                  左メニューの「すべて表示する」（Issue一覧の絞り込み）とも関係しない */}
-              {branchViewHiddenCount > 0 && (
-                <span>{` ・ 設定で${branchViewHiddenCount}件を省略中`}</span>
-              )}
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
                   出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
                   **2ペインでは同時に1件しか出せないので言い方を変える**（#2157）。
@@ -3193,11 +3178,6 @@ export function BranchFlowView({
               )}
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
-              )}
-              {/* 自動で進んでいるぶんは別に数える（#2038）。「手が要るもの」へ混ぜていたころは、
-                  件数を見ても押す番があるのかが分からなかった */}
-              {progressingRepositories.length > 0 && (
-                <span>{` ・ 待てば進むもの${progressingRepositories.length}件`}</span>
               )}
               {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
