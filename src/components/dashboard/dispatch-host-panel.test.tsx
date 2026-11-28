@@ -293,7 +293,7 @@ describe("DispatchHostPanel", () => {
         jobs={[makeSelfUpdateJob({ kind: "PLAN_REVIEW", status: "QUEUED", issueNumber: 5660 })]}
       />,
     );
-    expect(screen.getByText("計画レビュー 1")).toBeTruthy();
+    expect(screen.getByText("レビュー 1")).toBeTruthy();
   });
 
   // #1817。Issue詳細と同じ`describeSessionReap`を通す（同じ状態が画面によって違う言い方に
@@ -474,7 +474,7 @@ describe("DispatchHostPanel", () => {
       // 実数（`39%・12.4 / 31.9 GB`）は4列に入れると読める字幅にならないので割合だけにする
       expect(screen.getByText("39%")).toBeTruthy();
       expect(screen.queryByText("39%・12.4 / 31.9 GB")).toBeNull();
-      expect(screen.getByText("セッション 2/12")).toBeTruthy();
+      expect(screen.getByText("稼働 2/12")).toBeTruthy();
     });
 
     it("SWAPが未申告のホストでは3列にする（0%の枠を置かない）", () => {
@@ -502,6 +502,17 @@ describe("DispatchHostPanel", () => {
       expect(screen.queryByText("SWAP")).toBeNull();
     });
 
+    // 件数の印を右寄せの縮まない1行に並べると画面外へはみ出した（#5675）
+    it("件数の印は折り返せる並びに置く", () => {
+      render(
+        <DispatchHostPanel hosts={[makeHost()]} sessions={[]} queuedCounts={{ subpc: 1 }} compact />,
+      );
+
+      const row = screen.getByText("順番 1").parentElement;
+      expect(row?.classList.contains("flex-wrap")).toBe(true);
+      expect(row?.classList.contains("shrink-0")).toBe(false);
+    });
+
     // 同じ一覧をヘッダーの実行状況シートが持っているので、ホームには出さない（#1933）
     it("動いているセッションを出さない", () => {
       render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} compact />);
@@ -527,13 +538,13 @@ describe("DispatchHostPanel", () => {
         />,
       );
 
-      expect(screen.getByText("入力待ち 1")).toBeTruthy();
+      expect(screen.getByText("入力 1")).toBeTruthy();
     });
 
     it("入力待ちが無ければ印を出さない", () => {
       render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} compact />);
 
-      expect(screen.queryByText(/入力待ち/)).toBeNull();
+      expect(screen.queryByText(/入力 /)).toBeNull();
     });
 
     it("スクリプトの版は遅れているときだけ出す", () => {

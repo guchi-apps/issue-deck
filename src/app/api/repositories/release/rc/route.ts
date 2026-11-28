@@ -15,6 +15,7 @@ import {
   resolveRcCandidateId,
   settleReservationsOnCancel,
 } from "@/lib/release-finalize-run";
+import { resumeReleaseAutopilot, stopReleaseAutopilotByUser } from "@/lib/release-autopilot-run";
 import { ensureDevelopSync, observeDevelopSync } from "@/lib/release-develop-sync-run";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { recoverRcFixSeries } from "@/lib/release-fix-series-run";
@@ -38,6 +39,8 @@ import {
  * - POST `action=create`: developの先端を固定して候補を作る
  * - POST `action=import`: 関連修正（と明示的に承認したPR）を取り込み、revisionを進める
  * - POST `action=cancel`: 候補を取り消す（記録は残す）
+ * - POST `action=stop_auto`: 本番公開の全自動を止める（有効な公開承認・進行中の系列も止める。候補は残る）
+ * - POST `action=resume_auto`: 停止した全自動を再開する（押した人を指示者として記録し直す）
  * - POST `action=migrate`: 開いている旧方式の候補を新方式へ移す
  * - POST `action=develop_sync`: 公開内容をdevelopへ戻す同期PRを用意する（#4641。同期済み・作成済みなら何もしない）
  * - POST `action=recheck_production`: 稼働確認が止まった公開済み候補を、今から確かめ直す（#4712。証拠を代わりに書かない）
@@ -191,6 +194,18 @@ export async function POST(request: NextRequest) {
         // 公開前に中止した候補の版の予約は手放す（タグ・main上に版があれば消費済みにする）
         if (cancelled.ok && !cancelled.existing) await settleReservationsOnCancel(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] settle reservation failed", error));
         return respond(cancelled);
+      }
+      case "stop_auto": {
+        const candidateId = readString(payload?.candidateId);
+        if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+        const stopped = await stopReleaseAutopilotByUser({ owner, repo, token, userId, candidateId });
+        return NextResponse.json(stopped, { status: stopped.ok ? 200 : stopped.error === "not_found" ? 404 : 409 });
+      }
+      case "resume_auto": {
+        const candidateId = readString(payload?.candidateId);
+        if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+        const resumed = await resumeReleaseAutopilot({ owner, repo, token, userId, candidateId });
+        return NextResponse.json(resumed, { status: resumed.ok ? 200 : resumed.error === "not_found" ? 404 : 409 });
       }
       case "migrate": {
         const requestKey = parseRcRequestKey(payload?.requestKey);

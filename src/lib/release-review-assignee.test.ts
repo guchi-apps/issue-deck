@@ -28,15 +28,3 @@ describe("resolveReleaseReviewAssignee", () => {
     expect(resolveReleaseReviewAssignee({ appAiModelReasoning: "claude-haiku-5-5" }).claudeModel).toBe("sonnet");
   });
 });
-
-describe("公開承認の自動化がONのとき（#5629）", () => {
-  it("設定がClaudeでもCodexへ切り替える（ローカルのcodexModelに従う）", () => {
-    const a = resolveReleaseReviewAssignee({ appAiModelReasoning: "claude-opus-5-5", releaseAutoApprovalEnabled: true, codexModel: "gpt-6.2-sol" });
-    expect(a).toMatchObject({ agent: "codex", claudeModel: null, codexModel: "gpt-6.2-sol" });
-  });
-
-  it("codexModelが読めなければ既定のモデルを使い、OFFなら従来どおり", () => {
-    expect(resolveReleaseReviewAssignee({ appAiModelReasoning: "claude-opus-5-5", releaseAutoApprovalEnabled: true, codexModel: "auto" }).agent).toBe("codex");
-    expect(resolveReleaseReviewAssignee({ appAiModelReasoning: "claude-opus-5-5", releaseAutoApprovalEnabled: false }).agent).toBe("claude");
-  });
-});

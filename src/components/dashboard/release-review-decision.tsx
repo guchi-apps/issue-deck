@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { useReleaseReadOnly } from "@/components/dashboard/release-read-only";
 import { toJstParts } from "@/lib/format-date-time";
 import {
   RELEASE_REVIEW_DECISION_HINT,
@@ -300,6 +301,7 @@ export function FindingDecisionControl({
   recommendationLoading?: boolean;
   onRetryRecommendation?: () => void;
 }) {
+  const readOnly = useReleaseReadOnly();
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [quickBusy, setQuickBusy] = useState(false);
@@ -398,7 +400,7 @@ export function FindingDecisionControl({
           </ol>
         </details>
       )}
-      {needsDecision && !editing && (
+      {needsDecision && !editing && !readOnly && (
         <RecommendationCard
           rec={rec}
           stale={Boolean(current && view?.stale)}
@@ -415,7 +417,7 @@ export function FindingDecisionControl({
           {quickMessage}
         </p>
       )}
-      {editing ? (
+      {readOnly ? null : editing ? (
         <DecisionForm
           key={`${target.baseSha}:${target.headSha}:${findingId}:${latestId}`}
           preparedReason={prepareFixReason(finding, blocking)}

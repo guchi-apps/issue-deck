@@ -134,6 +134,8 @@ export type RcCandidateView = {
   cancelReason: string | null;
   cancelledAt: string | null;
   createdAt: string;
+  /** 本番公開の全自動。対象でない候補はnull */
+  autoPublish?: { active: boolean; stopCode: string | null; stopReason: string | null } | null;
   /** 公開準備（#4496）へ渡す契約。現在revisionが合格しているときだけ */
   finalizeContract: RcFinalizeContract | null;
   /** 本番の稼働確認（#4712）。止まった理由・詳細（実行のURLなど）・完了の方式（#4713）・後続の確認待ちか */
@@ -439,7 +441,11 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
     label: rcLabel(row.sequence),
     branch: rcBranchName(row.sequence),
     phase,
-    status,
+    // 全自動でmainマージ前の間は「公開準備可能」「公開承認待ち」など利用者の操作を思わせる段階名を出さない
+    status:
+      row.autoPublishUserId && row.autoPublishStoppedAt === null && ["creating", "review", "preparing", "awaiting_approval"].includes(phase) && status.attention === null
+        ? { ...status, label: "自動実行中" }
+        : status,
     frozenDevelopSha: row.frozenDevelopSha,
     frozenPrs,
     approvedExtraPrs: jsonArray<ApprovedExtra>(row.approvedExtraPrs),
@@ -450,6 +456,9 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
     cancelReason: row.cancelReason,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    autoPublish: row.autoPublishUserId
+      ? { active: row.autoPublishStoppedAt === null, stopCode: row.autoPublishStopCode, stopReason: row.autoPublishStopReason }
+      : null,
     production,
     finalizeContract: buildRcFinalizeContract({
       candidate: { id: row.id, sequence: row.sequence, frozenDevelopSha: row.frozenDevelopSha, frozenPrNumbers: frozenPrs.map((p) => p.number) },
@@ -748,6 +757,8 @@ async function createCandidate(input: {
           migratedFromPrNumber: input.migratedFrom?.prNumber ?? null,
           migratedFromHeadSha: input.migratedFrom?.headSha ?? null,
           createdByUserId: input.userId,
+          // 「本番公開を開始」（新規の作成）だけが全自動の対象。旧方式からの移行は公開の指示ではないので含めない
+          autoPublishUserId: input.reason === "initial" ? input.userId : null,
           revisions: {
             create: {
               revision: 1,

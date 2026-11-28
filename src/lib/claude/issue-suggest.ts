@@ -61,6 +61,8 @@ export type IssueSuggestPromptOptions = {
    * プロンプトからラベルの節を外す（#3245。タイトルと種別だけを聞く）。
    */
   includeLabels?: boolean;
+  /** 本文と一緒に渡す画像（#5673。共有画面の起案）。あれば画像も判断の材料にさせる */
+  images?: { mediaType: string; data: string }[];
 };
 
 /** Issue本文と選択可能なラベル一覧から、タイトル・ラベル提案生成用プロンプトを組み立てる。 */
@@ -70,6 +72,9 @@ export function buildIssueSuggestPrompt(
 ): string {
   const { body, availableLabels } = input;
   const includeLabels = options.includeLabels ?? true;
+  const imageRule = options.images?.length
+    ? "添付した画像はこのIssueに貼られるものです。画像に写っている画面や文字も、判断の材料にしてください。本文が空なら画像から判断してください。"
+    : "本文に画像のURLが含まれていても、そこからは判断できないので無視してください。";
   const selectableLabels = availableLabels.filter((label) => isAutoAssignableLabelName(label.name));
 
   const labelsText =
@@ -92,7 +97,7 @@ export function buildIssueSuggestPrompt(
 
 ${kindRules}
 
-本文に画像のURLが含まれていても、そこからは判断できないので無視してください。
+${imageRule}
 
 # 本文
 ${truncate(body, MAX_BODY_LENGTH)}`;
@@ -111,7 +116,7 @@ ${kindRules}
 - 優先度のように内容から判断できないものは、本文にはっきり書かれているときだけ選んでください。
 - 「利用可能なラベル一覧」が「(利用可能なラベルなし)」の場合だけ、空配列にしてください。
 
-本文に画像のURLが含まれていても、そこからは判断できないので無視してください。
+${imageRule}
 
 # 本文
 ${truncate(body, MAX_BODY_LENGTH)}
@@ -154,14 +159,24 @@ export async function generateIssueSuggestion(
   options: IssueSuggestPromptOptions = {},
 ): Promise<IssueSuggestResult> {
   const includeLabels = options.includeLabels ?? true;
-  const prompt = buildIssueSuggestPrompt(input, { includeLabels });
+  const images = options.images ?? [];
+  const prompt = buildIssueSuggestPrompt(input, { includeLabels, images });
+  const content = images.length
+    ? [
+        ...images.map((image) => ({
+          type: "image",
+          source: { type: "base64", media_type: image.mediaType, data: image.data },
+        })),
+        { type: "text", text: prompt },
+      ]
+    : prompt;
 
   const { response: res, json, error } = await callClaudeMessages<AnthropicMessageResponse>({
     feature: "issue_suggest",
     token,
     body: {
       max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content }],
     },
   });
 

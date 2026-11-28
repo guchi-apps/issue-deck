@@ -162,7 +162,7 @@ final class ShareModel: ObservableObject {
             repositories = try await ShareAPI.repositories(token: session.token)
             if selectedRepository == nil,
                let last = ShareSessionStore.lastRepository(for: session.userId),
-               repositories.contains(where: { $0.fullName == last && $0.disabledReason == nil }) {
+               repositories.contains(where: { $0.fullName == last }) {
                 selectedRepository = last
             }
         } catch ShareAPIError.unauthorized {
@@ -176,7 +176,6 @@ final class ShareModel: ObservableObject {
     }
 
     func select(_ repository: ShareRepository) {
-        guard repository.disabledReason == nil else { return }
         selectedRepository = repository.fullName
         isPickingRepository = false
         repositoryQuery = ""
@@ -394,7 +393,7 @@ private struct FormView: View {
                 if let reason = model.blockedReason {
                     Text(reason).font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    Text("「作成」を押すまでIssueは作られません。").font(.footnote).foregroundStyle(.secondary)
+                    Text("「作成」を押すまでIssueは作られません。ラベルは作成後に自動で付きます。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("Issueを作成") { model.create() }.disabled(!model.canCreate).fontWeight(.semibold)
             }
@@ -411,17 +410,11 @@ private struct RepositoryPicker: View {
                 ForEach(model.filteredRepositories) { repository in
                     Button { model.select(repository) } label: {
                         HStack {
-                            VStack(alignment: .leading) {
-                                Text(repository.fullName)
-                                if let reason = repository.disabledReason {
-                                    Text(reason).font(.footnote).foregroundStyle(.secondary)
-                                }
-                            }
+                            Text(repository.fullName)
                             Spacer()
                             if repository.fullName == model.selectedRepository { Image(systemName: "checkmark") }
                         }
                     }
-                    .disabled(repository.disabledReason != nil)
                 }
                 if model.filteredRepositories.isEmpty {
                     Text(model.repositories.isEmpty ? "Issueを作成できるリポジトリがありません" : "一致するリポジトリがありません")
@@ -457,7 +450,8 @@ private struct SucceededView: View {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 48)).foregroundStyle(.green)
             Text("Issueを作成しました").font(.title3.bold())
             Text("\(issue.repositoryFullName) #\(issue.number)").font(.subheadline.monospaced())
-            Text("タイトルが空欄の場合は、自動で記入されます").font(.caption).foregroundStyle(.secondary)
+            Text("ラベルは自動で付きます。タイトルが空欄の場合はタイトルも記入されます")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Issueを開く") { model.openIssue() }.buttonStyle(.borderedProminent)
         }
         .padding()

@@ -132,6 +132,11 @@ export type ReleaseRcFacts = {
   finalization: { status: string; failureReason: string | null; updatedAt: string } | null;
   /** 稼働確認が止まった理由の短い名前。止まっていなければnull */
   productionStopLabel: string | null;
+  /** 本番公開の全自動が動いている。指摘の扱い・公開承認を利用者の番にしない */
+  autoPublishActive?: boolean;
+  /** 本番公開の全自動の対象（停止中も含む）。公開承認の工程を出さない */
+  autoPublish?: boolean;
+  autoPublishStopReason?: string | null;
   /** 直前に取り消された候補（作り直しの元）。この候補の進捗には数えない */
   predecessor: { sequence: number; cancelReason: string | null } | null;
   /**

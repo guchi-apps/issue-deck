@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { authorizeImageUpload } from "@/lib/images/image-upload-auth";
 import { getUploadedImageInventory } from "@/lib/images/image-cleanup-run";
 import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
+import { recordShareImageUpload } from "@/lib/images/share-image-ownership";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { authenticateShareToken } from "@/lib/share-token/auth";
 import { extractShareToken } from "@/lib/share-token/token";
@@ -49,32 +50,35 @@ export async function GET() {
  * 付いていなければ従来どおりログインCookieを見る。ヘッダ付きで外れたときにCookieへ
  * フォールバックしない（誤った鍵を黙って通さない）。
  */
-async function authorizeUpload(request: NextRequest): Promise<NextResponse | null> {
+async function authorizeUpload(
+  request: NextRequest,
+): Promise<{ denied: NextResponse } | { shareUserId: string | null }> {
   const authorization = request.headers.get("authorization");
   // iOS共有画面の共有トークン（#4298）。画像アップロードだけに使え、無効ならCookieへ落とさない
   if (extractShareToken(authorization)) {
-    return (await authenticateShareToken(authorization))
-      ? null
-      : NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    const shareUser = await authenticateShareToken(authorization);
+    return shareUser
+      ? { shareUserId: shareUser.id }
+      : { denied: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   }
   if (authorization) {
     const auth = await authorizeImageUpload(authorization);
-    if (auth === "ok") return null;
+    if (auth === "ok") return { shareUserId: null };
     if (auth === "not_configured") {
-      return NextResponse.json({ error: "not_configured" }, { status: 503 });
+      return { denied: NextResponse.json({ error: "not_configured" }, { status: 503 }) };
     }
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return { denied: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   }
   const user = await getCurrentUser();
   if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return { denied: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   }
-  return null;
+  return { shareUserId: null };
 }
 
 export async function POST(request: NextRequest) {
-  const denied = await authorizeUpload(request);
-  if (denied) return denied;
+  const auth = await authorizeUpload(request);
+  if ("denied" in auth) return auth.denied;
 
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("file");
@@ -102,6 +106,12 @@ export async function POST(request: NextRequest) {
 
   await mkdir(UPLOADED_IMAGE_DIR, { recursive: true });
   await writeFile(path.join(UPLOADED_IMAGE_DIR, filename), buffer);
+  // 起案後のAI判定が読めるのは本人が上げた画像だけ（#5673）。記録できなくてもアップロードは成功させる
+  if (auth.shareUserId) {
+    await recordShareImageUpload(auth.shareUserId, filename).catch((error) =>
+      console.error("[POST /api/issues/images] 共有アップロードの記録に失敗しました", error),
+    );
+  }
 
   const url = `${getRequestOrigin(request)}/api/issues/images/${filename}`;
 
