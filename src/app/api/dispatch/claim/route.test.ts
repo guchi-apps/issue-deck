@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const claimDispatchJobs = vi.fn();
@@ -231,6 +233,53 @@ describe("POST /api/dispatch/claim", () => {
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
     expect((await res.json()).jobs[0].codexModel).toBe("gpt-6-luna");
+  });
+});
+
+// #5674。サーバーの公開がホストの更新より先でも、旧pollerのジョブが失敗しないこと
+describe("POST /api/dispatch/claim の旧pollerへのCodexモデルの読み替え（#5674）", () => {
+  const codexModelsFor = async (payload: object, kind: string) => {
+    claimDispatchJobs.mockResolvedValue(
+      ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna", null].map((model, index) => ({
+        id: `job-${index}`,
+        kind,
+        agent: "codex",
+        codexModel: model,
+      })),
+    );
+    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "pick" });
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 5, ...payload }));
+    const body = await res.json();
+    return body.jobs.map((job: { codexModel: string }) => job.codexModel);
+  };
+
+  it.each(["LAUNCH", "PLAN_REVIEW"])(
+    "申告の無いpollerへの%sは、同格の旧世代IDで払い出す（設定の既定も含む）",
+    async (kind) => {
+      expect(await codexModelsFor({}, kind)).toEqual([
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-luna",
+        "gpt-5.6-terra",
+      ]);
+    },
+  );
+
+  const latest = ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6.1-terra"];
+
+  it("申告したpollerへは新世代のIDのまま払い出す", async () => {
+    expect(await codexModelsFor({ gpt61CodexModels: true }, "LAUNCH")).toEqual(latest);
+  });
+
+  it("旧pollerもIDを検査しない種別は読み替えない", async () => {
+    expect(await codexModelsFor({}, "RELEASE_REVIEW")).toEqual(latest);
+  });
+
+  // 申告を送り忘れると、更新後のホストもずっと旧世代で起動する
+  it("pollerは起動ジョブを取りに行くときに対応を申告する", () => {
+    const poller = readFileSync("scripts/subpc-dispatch-poller.sh", "utf8");
+    expect(poller).toContain("planReviewMaxJobs: $planReviewMaxJobs, gpt61CodexModels: true}");
   });
 });
 

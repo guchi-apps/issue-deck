@@ -439,6 +439,24 @@ export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {
     : null;
 }
 
+/**
+ * 新世代のID（#5668）を知らないpollerへ払い出すときの同格の旧世代ID（#5674）。`gpt-6-luna`は世代が
+ * 変わっていないので対象外。
+ *
+ * 旧pollerは許可リストに無いIDのジョブを`failed`にし、旧ランチャー（`start-plan-review.sh`）も
+ * 起動を断る。サーバーの公開はホストの更新より先に起こりうるので、順序を手順で守らせず、
+ * pollerが`gpt61CodexModels: true`を申告しない間はここで読み替える。
+ */
+const PRE_GPT61_CODEX_MODELS: Readonly<Record<string, string>> = {
+  "gpt-6.2-astra": "gpt-6-astra",
+  "gpt-6.2-sol": "gpt-6-sol",
+  "gpt-6.1-terra": "gpt-5.6-terra",
+};
+
+export function toPreGpt61CodexModel(model: string): string {
+  return PRE_GPT61_CODEX_MODELS[model] ?? model;
+}
+
 /** 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前 */
 export const CODEX_MODEL_SHORT_LABELS: Readonly<Record<CodexModel, string>> = {
   auto: "CLIの既定",
