@@ -4,7 +4,7 @@ import { runDeployRecoverySweep } from "@/lib/deploy-recovery-series-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { runReleaseAutoApprovalSweep } from "@/lib/release-auto-approval-run";
+import { runReleaseAutopilotSweep } from "@/lib/release-autopilot-run";
 import { runReleaseCompletionSweep } from "@/lib/release-completion-run";
 import { runDevelopSyncSweep } from "@/lib/release-develop-sync-run";
 import { runRcProductionSweep } from "@/lib/release-rc-reconcile";
@@ -16,7 +16,7 @@ import { runRcProductionSweep } from "@/lib/release-rc-reconcile";
  * リリース完了系列（#4480）の巡回もここに相乗りする（修正Issueの起動に`host`が要るため。pollerは変更しない）。
  * 世代の進行（作り直し・再検証）は従来どおり`release/fix-series/sweep`が持つ。
  * 本番公開後のdevelop同期（#4641）の追跡も相乗りする（候補の完了・取消の後も、同期済みを確かめるまで追う）。
- * 別系統の全体レビューが合格したRCの公開承認の自動化（#5629。設定がOFFなら何もしない）も相乗りする。
+ * 「本番公開を開始」した候補の全自動（指摘の確定・自動修正・公開承認）も相乗りする。
  * mainへ出た候補の本番反映・稼働確認（#5404）も相乗りする（完了系列が閉じた後・人が手でマージした後も追う）。
  */
 export async function POST(request: NextRequest) {
@@ -32,8 +32,8 @@ export async function POST(request: NextRequest) {
     const recovery = await withGithubApiFeature("deploy_recovery_sweep", () => runDeployRecoverySweep({ hostName }));
     // 片方の障害で他方を止めない
     // 承認を出した候補の自動公開の系列を、同じ巡回で進められるよう完了系列より先に回す
-    const autoApproval = await withGithubApiFeature("release_auto_approval_sweep", () => runReleaseAutoApprovalSweep()).catch((error: unknown) => {
-      console.error("[POST /api/repositories/deploy-recovery-series/sweep] release auto approval", error);
+    const autopilot = await withGithubApiFeature("release_autopilot_sweep", () => runReleaseAutopilotSweep()).catch((error: unknown) => {
+      console.error("[POST /api/repositories/deploy-recovery-series/sweep] release autopilot", error);
       return null;
     });
     const completion = await withGithubApiFeature("release_completion_sweep", () => runReleaseCompletionSweep({ hostName })).catch((error: unknown) => {
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return null;
     });
     return NextResponse.json(
-      { ok: true, ...recovery, releaseAutoApproval: autoApproval, releaseCompletion: completion, developSync, rcProduction },
+      { ok: true, ...recovery, releaseAutopilot: autopilot, releaseCompletion: completion, developSync, rcProduction },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

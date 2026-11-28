@@ -1184,7 +1184,7 @@ describe("BranchFlowView", () => {
       mockFetchWithMode("candidate", new Response(JSON.stringify({ ok: true }), { status: 200 }));
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      expect(await screen.findByText("候補を作成して検証")).toBeTruthy();
+      expect(await screen.findByText("本番公開を開始")).toBeTruthy();
     });
 
     // #2711。押せない状態でもボタンは残し、理由を添える（消すと「次のリリース（本番未反映）」
@@ -1297,9 +1297,9 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(await screen.findByText("候補を作成して検証"));
+      fireEvent.click(await screen.findByText("本番公開を開始"));
 
-      expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
+      expect(screen.getByText("本番公開を開始しますか？")).toBeTruthy();
       expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
       expect(screen.getByText(/今回反映する内容/)).toBeTruthy();
       // 一覧は1PR1行に絞る（#5163）。関連Issue・機械的リスクの理由は出さない
@@ -1317,7 +1317,7 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(await screen.findByText("候補を作成して検証"));
+      fireEvent.click(await screen.findByText("本番公開を開始"));
 
       expect(await screen.findByText(/今回反映する内容を取得できませんでした/)).toBeTruthy();
       expect(screen.queryByText(/未反映のPRはありません/)).toBeNull();
@@ -1328,7 +1328,7 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
 
-      const button = (await screen.findByText("候補を作成して検証")).closest("button");
+      const button = (await screen.findByText("本番公開を開始")).closest("button");
       await waitFor(() => expect(screen.getByText("未対応")).toBeTruthy());
       expect(button?.disabled).toBe(true);
       expect(spy.mock.calls.some(([url]) => String(url) === "/api/repositories/release")).toBe(false);
@@ -1341,11 +1341,11 @@ describe("BranchFlowView", () => {
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(await screen.findByText("候補を作成して検証"));
-      fireEvent.click(screen.getByText("候補を作成する"));
+      fireEvent.click(await screen.findByText("本番公開を開始"));
+      fireEvent.click(screen.getByText("本番公開を開始する"));
 
       await screen.findByText("リリース起動中…");
-      expect(screen.queryByText("候補を作成して検証")).toBeNull();
+      expect(screen.queryByText("本番公開を開始")).toBeNull();
     });
 
     it("起動に成功しても完了のポップアップは出さない（#1590）", async () => {
@@ -1355,13 +1355,13 @@ describe("BranchFlowView", () => {
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(await screen.findByText("候補を作成して検証"));
-      fireEvent.click(screen.getByText("候補を作成する"));
+      fireEvent.click(await screen.findByText("本番公開を開始"));
+      fireEvent.click(screen.getByText("本番公開を開始する"));
 
       // 確認ダイアログは閉じ、「リリースを起動しました」のダイアログは現れない
       await screen.findByText("リリース起動中…");
       expect(screen.queryByText("リリースを起動しました")).toBeNull();
-      expect(screen.queryByText("リリース候補を作成して検証しますか？")).toBeNull();
+      expect(screen.queryByText("本番公開を開始しますか？")).toBeNull();
     });
 
     describe("畳んだ1行の「リリース起動中」（#1955）", () => {
@@ -1369,8 +1369,8 @@ describe("BranchFlowView", () => {
         mockFetchWithMode("candidate", 
           new Response(JSON.stringify({ ok: true }), { status: 200 }),
         );
-        fireEvent.click(await screen.findByText("候補を作成して検証"));
-        fireEvent.click(screen.getByText("候補を作成する"));
+        fireEvent.click(await screen.findByText("本番公開を開始"));
+        fireEvent.click(screen.getByText("本番公開を開始する"));
         await screen.findByText("リリース起動中…");
       }
 

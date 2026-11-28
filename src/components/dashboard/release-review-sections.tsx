@@ -12,6 +12,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { ChevronRight, ExternalLink, Loader2, RotateCcw } from "lucide-react";
 
+import { useReleaseReadOnly } from "@/components/dashboard/release-read-only";
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
@@ -483,6 +484,7 @@ function ReviewRerunButton({
   disabled?: boolean;
   onDone?: () => void;
 }) {
+  const readOnly = useReleaseReadOnly();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const run = async () => {
@@ -520,6 +522,8 @@ function ReviewRerunButton({
       setBusy(false);
     }
   };
+  // 全自動が動いている間は結果を読むだけにする
+  if (readOnly) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <button

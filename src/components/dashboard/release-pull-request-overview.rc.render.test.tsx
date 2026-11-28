@@ -257,3 +257,47 @@ describe("ReleasePullRequestOverview の新方式候補の工程（#4635）", ()
     expect(screen.getByRole("group", { name: "コンフリクトの詳細" }).textContent).not.toContain(PENDING_CONFLICT_PUBLISH_NOTE);
   });
 });
+
+describe("ReleasePullRequestOverview の本番公開の全自動", () => {
+  beforeEach(() => {
+    rcSettled = Number.POSITIVE_INFINITY;
+    rcError = null;
+    stubFetch();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const autoOverview = (autoPublish: { active: boolean; stopCode: string | null; stopReason: string | null }) =>
+    ({
+      caller: { supported: true, reasonLabel: null },
+      legacy: null,
+      candidate: { ...(candidate("review", "needs_fix") as object), autoPublish },
+      finalization: { caller: { supported: true, reasonLabel: null }, mainVersion: "1.0.0", checks: null, history: [], current: null, approval: null },
+    }) as never;
+
+  const finding = { id: "F1", severity: "high", title: "指摘A", detail: "詳細", file: null, line: null };
+
+  it("動いている間は、止める・取り直す・取り消す以外の手動操作を出さない", async () => {
+    verification = makeVerification(section("needs_check", [finding]), section("failed"));
+    rcOverview = autoOverview({ active: true, stopCode: null, stopReason: null });
+    render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-auto-publish-card").dataset.mode).toBe("running"));
+    expect(screen.getByRole("button", { name: "自動公開を止める" })).toBeTruthy();
+    expect(screen.queryByTestId("release-journey-now")).toBeNull();
+    expect(screen.queryByTestId("release-auto-proceed")).toBeNull();
+    expect(screen.queryByTestId("release-rc-finalize")).toBeNull();
+    const buttons = screen.queryAllByRole("button").map((button) => button.textContent ?? "");
+    expect(buttons.filter((text) => /公開承認|本番公開へ進む|修正を自動で続ける|修正Issueを作成|再実行|判断する|判断して/.test(text))).toEqual([]);
+  });
+
+  it("停止したら理由と再開を出す", async () => {
+    verification = makeVerification(section("passed"), section("failed"));
+    rcOverview = autoOverview({ active: false, stopCode: "integration_environment", stopReason: "実行ホストの環境不足" });
+    render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-auto-publish-card").dataset.mode).toBe("stopped"));
+    expect(screen.getByRole("button", { name: "再実行して自動公開を再開する" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "自動公開を止める" })).toBeNull();
+  });
+});

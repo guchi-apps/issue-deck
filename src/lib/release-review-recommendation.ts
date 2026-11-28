@@ -243,9 +243,10 @@ export function oneTapBlocker(rec: ReleaseReviewRecommendation): string | null {
  * 理由の出どころ。`fallback`は一括確定（#5138）で、AIの推奨を使えなかった止める指摘を安全側の「今回直す」として
  * 確定したときの固定文（`RELEASE_REVIEW_BULK_FALLBACK_REASON`）。手入力とは区別して残す
  */
-export type ReasonSource = "ai" | "ai_edited" | "manual" | "fallback";
+export type ReasonSource = "ai" | "ai_edited" | "manual" | "fallback" | "autopilot";
 
 export const REASON_SOURCE_LABEL: Record<ReasonSource, string> = {
+  autopilot: "自動で確定（AIの推奨）",
   ai: "AIの理由案のまま",
   ai_edited: "AIの理由案を編集",
   manual: "手入力",
@@ -272,11 +273,11 @@ export function describeAdoption(record: {
 }): { label: string; tone: "adopted" | "edited" | "differs" } | null {
   if (!record.recommendedDecision || record.decision === "withdrawn") return null;
   if (record.decision !== record.recommendedDecision) return { label: "AI推奨と異なる判断", tone: "differs" };
-  return record.reasonSource === "ai" ? { label: "AI推奨を採用", tone: "adopted" } : { label: "推奨を編集して採用", tone: "edited" };
+  return record.reasonSource === "ai" || record.reasonSource === "autopilot" ? { label: "AI推奨を採用", tone: "adopted" } : { label: "推奨を編集して採用", tone: "edited" };
 }
 
 export function parseReasonSource(value: unknown): ReasonSource | null {
-  return value === "ai" || value === "ai_edited" || value === "manual" || value === "fallback" ? value : null;
+  return value === "ai" || value === "ai_edited" || value === "manual" || value === "fallback" || value === "autopilot" ? value : null;
 }
 
 /** DBの`drafts`列（JSON）を読む。形が違えばnull */

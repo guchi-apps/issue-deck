@@ -616,7 +616,6 @@ model AppSetting {
 
   // RCの公開承認の自動化（#5629）。ONのとき、Claude以外の別系統が全体レビューを指摘なしで合格させた候補を、
   // 人が押さなくても巡回が公開承認する。**既定はOFF**——本番公開に進む承認の代行なので、人が納得してから有効にする
-  releaseAutoApprovalEnabled           Boolean @default(false)
 
   // 次枠実行（#2995）。「次の5時間枠」に積んだIssueを、**いまの5時間枠の残りが
   // `nextWindowRunLeadMinutes`分を切ってから**サブPCへ1件ずつ起動する。
@@ -3058,6 +3057,14 @@ model ReleaseCandidate {
   cancelReason         String?   @db.Text
   cancelledByUserId    String?   @db.VarChar(40)
   cancelledAt          DateTime?
+  // 「本番公開を開始」した人（#公開の全自動）。入っていれば巡回が指摘の確定・自動修正・公開承認を代わりに進める。
+  // 記録が無い候補（旧方式からの移行・列を足す前の候補）は従来どおり人が進める
+  autoPublishUserId     String?   @db.VarChar(40)
+  // 自動公開を最後に開始・再開した時刻（期限と、それより前の系列・承認を見ないための起点）。nullは作成時刻
+  autoPublishStartedAt  DateTime?
+  autoPublishStopCode   String?   @db.VarChar(40)
+  autoPublishStoppedAt  DateTime?
+  autoPublishStopReason String?   @db.Text
   // 本番の稼働確認が止まった理由（#4712。`ProductionStopReason`）と詳細。確認中・完了ではnull。
   // 証拠そのもの・完了の方式は#4713の`ReleaseProductionCheck`が持つ
   productionStopReason String?   @db.VarChar(40)

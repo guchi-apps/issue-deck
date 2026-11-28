@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useReleaseReadOnly } from "@/components/dashboard/release-read-only";
 import { toJstParts } from "@/lib/format-date-time";
 import {
   REVIEW_NOTE_BODY_MAX,
@@ -44,6 +45,7 @@ export function ReviewNoteControl({
   onSaved?: () => void;
 }) {
   const records = notesForTarget(notes, noteTarget);
+  const readOnly = useReleaseReadOnly();
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState("");
   const [followUp, setFollowUp] = useState("");
@@ -142,7 +144,7 @@ export function ReviewNoteControl({
             </button>
           </div>
         </div>
-      ) : (
+      ) : readOnly ? null : (
         <button type="button" onClick={() => setOpen(true)} className="self-start text-sky-700 underline dark:text-sky-400">
           判断メモを書く
         </button>

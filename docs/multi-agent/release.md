@@ -1208,16 +1208,20 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - **競合（GitHubの`mergeable`）が「確認中」でも公開承認は止めない**（#5178・#5361。#5305で一度「判定が出るまで押せない」にしたが、GitHubの遅延計算で承認が押せない時間だけが生じ、安全性は増えていなかったため戻した）。止めるのは`false`（競合ありと確定）のときだけ（`decideConflictBlock`）。判定中を止めなくてよい根拠は3つ——統合検証が`scripts/run-release-verify.sh`でmain先端（base SHA）へheadを実際に`git merge`して合格していること、承認時にmain・headが検証時と一致することを確かめていること、そして承認後の本番mainへのマージは`decideCompletionMerge`がマージ直前に取り直した候補で判定し、`null`（GitHubが計算中）なら`mergeable_unknown`で待ち、`false`なら止めること（マージAPIにもHEADのSHAを渡す）。本番PR詳細「現在候補の検証」の競合セルは、確認中のとき理由欄でこの関係を案内する。競合の確認自体は残す（base SHA一致の検査は候補作成後のmainの前進しか捕まえず、本番復旧PRのようにdevelopを経由せずmainへ入った変更との競合はGitHubの判定でしか分からないため）
 - PR詳細API（`/api/pull-requests/detail`）は、openなPRの`mergeable`が未判定なら1秒おきに最大2回取り直してから返す（`settlePullRequestMergeable`）。GitHubは単体取得を契機に非同期で計算するため初回はnullになりやすく、詳細はポーリングしないので「確認中」が再読み込みまで残っていた
 
-### 公開承認の自動化（#5629）
+### 本番公開の全自動
 
-公開承認が「ほぼ確認せず押される」形だけの操作になっていたため、**作った側（Claude）とは別系統のエージェントが全体レビューを指摘なしで合格させた**ことを根拠に、巡回が代わりに承認する。判断は純関数`src/lib/release-auto-approval.ts`の`decideAutoApproval`、巡回は`release-auto-approval-run.ts`（`deploy-recovery-series/sweep`へ相乗り）。
+「本番公開を開始」（旧「候補を作成して検証」）は、候補の作成から検証・指摘の扱い・公開承認・mainマージ・稼働確認までを自動で進める。**この開始の操作が公開承認を兼ねる**（確認ダイアログに明記する）。新規に作る候補は常に対象で、旧方式からの移行で作った候補と、列を足す前の候補は対象外（`ReleaseCandidate.autoPublishUserId`がnull）。
 
-- **設定は`AppSetting.releaseAutoApprovalEnabled`（既定OFF）。** `GET/PATCH /api/settings/release-auto-approval`で切り替える。OFFなら候補も読まない
-- **承認する条件（全て）**: `review`段階で公開準備の契約が出ている（CI・統合検証・Mac検証が合格）／全体レビューが合格している（`requiresAiReviewWaiver: false`。承知で進む明示が要る候補は自動承認しない）／現在のbase/headに対する`ai_review`の担当（`ReleaseVerification.agent`）が**Claude以外**／候補PRに`22.merge-confirm-required`・`00.check-user`が無い
-- **独立性の置き方**: トグルをONにすると、全体レビューの担当（`resolveReleaseReviewAssignee`）が**設定にかかわらずCodexになる**（モデルはローカルセッション用の`codexModel`）。「アプリ内AI：原因診断・新規アプリ相談」など他の設定は書き換えない。OFFへ戻せば従来の設定に従う。担当を切り替えただけでは、実行できるCodex対応ホストが無いときは全体レビューが`no_host`で失敗し承認は出ない（人が押す従来の流れ）
-- **承認の作成経路は増やさない。** 既存の`requestRcFinalize`を、候補の作成者を承認者・上げ幅自動判定・要求キー`auto-<候補>-<head>`（人の承認と区別できる）で呼ぶ。押した時点のhead・mainの先端・契約が一致するときだけ受け付ける検査も同じ。再送しても公開準備を二重に作らない
-- **自動マージ不可カテゴリは再判定しない**（認証・DBスキーマ・Secrets等は各PRの作成・マージ時に確認済みの前提）。人の確認ラベルだけは、正式バンプへ進む前に止める
-- **マージ操作は従来のまま**。承認後の自動公開の系列（`decideCompletionMerge`）・失効・取消・期限（24時間）も変えない。マージ操作を持つ場所は増やさない（[gates.md](gates.md)）
+判断は純関数`src/lib/release-autopilot.ts`の`decideAutopilot`、巡回は`release-autopilot-run.ts`（`deploy-recovery-series/sweep`へ相乗り）。**新しい実行経路は作らず**、人がボタンを押したときと同じ関数を開始者の名義で呼ぶ。
+
+- 未判断の指摘は、AIの推奨で確定する（`applyReleaseReviewDecision`。「公開後に対応」の推奨はIssueも作る）。推奨が1件でも作れなければ確定せず止める
+- 直すものがあれば完了系列（`until_ready`）を始める。修正・取り込み・再検証の反復は系列が持つ
+- 合格した契約が出たら`requestRcFinalize`で公開承認する。**全体レビューの担当は問わない**（別系統の合格を条件にしていた公開承認の自動化#5629と、その設定は廃止した）。`requiresAiReviewWaiver`の契約（全体レビュー未合格）は自動では承認しない
+- **止める条件**: 系列の停止（利用者の停止を含む）、公開承認の取消・失効、`22.merge-confirm-required`・`00.check-user`、統合検証の環境不足、解消できない未確認範囲、推奨を作れない指摘、公開承認の失敗（mainの前進など）、開始から24時間。止めたら`autoPublishStoppedAt`・`autoPublishStopCode`・`autoPublishStopReason`を残し、自動では再開しない。系列が知らせた停止は重ねて通知しない。公開準備・承認待ちの段階も巡回し、系列が止まったことを停止として記録する
+- **再開**（`action=resume_auto`）はmainマージ前の候補だけ。押した人を指示者として記録し直し、`autoPublishStartedAt`を今にする。期限と、系列・公開承認の読み取りはこの時刻より後だけを見る（前回の停止で止まり直さない）。公開準備より後は、有効な公開承認が残っているときに系列を作り直す
+- **画面の表示**は`describeAutoPublishView`（`src/lib/release-autopilot-view.ts`）が1か所で決める。工程は「作成・検証と修正・最終検証・mainマージ・本番反映・稼働確認」の6つで、公開承認は工程に出さない。mainマージ前に動いている間は手動の操作（修正・判断・再実行・公開承認・取り込み）を出さない（`ReleaseReadOnlyContext`）
+- 画面（本番PR詳細・スマホのリリースシート）は「自動公開を止める」を出す（`POST /api/repositories/release/rc` action=`stop_auto`。全自動を外し、公開承認と系列も止める。本番マージを確保した後は取り消せない）。動いている間は「おまかせで公開承認まで進める」を出さず、工程の表示も指摘・公開承認を利用者の番にしない（`ReleaseRcFacts.autoPublishActive`）
+- マージの関門（`decideCompletionMerge`）・承認の失効条件は変えていない
 
 ### 全体レビューは公開の必須条件ではない（#4807）
 

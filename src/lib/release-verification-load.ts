@@ -47,7 +47,7 @@ export async function loadReleaseVerificationSummary(
 ): Promise<ReleaseVerificationSummary> {
   const setting = await db.appSetting.findUnique({
     where: { id: 1 },
-    select: { appAiModelReasoning: true, aiExecutionProvider: true, releaseAutoApprovalEnabled: true, codexModel: true },
+    select: { appAiModelReasoning: true, aiExecutionProvider: true },
   });
   const summary = summarizeReleaseVerification({
     current,
