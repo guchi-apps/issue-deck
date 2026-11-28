@@ -235,7 +235,7 @@ export const MODEL_ENTRIES: readonly ModelEntry[] = (["fable", "opus", "sonnet"]
 
 /**
  * Codexの選択肢（#3192）。**Claude Codeと同じ形・同じ並び順（重い順）で、選ぶ3つだけ。**
- * `auto`（`-m`を付けない起動）と`auto`は入れない——理由は`CODEX_LOCAL_MODEL_VALUES`。
+ * `auto`（`-m`を付けない起動）と`pick`は入れない——理由は`CODEX_LOCAL_MODEL_VALUES`。
  */
 export const CODEX_MODEL_ENTRIES: readonly ModelEntry[] = CODEX_LOCAL_MODEL_VALUES.map((model) => ({
   model,

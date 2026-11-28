@@ -17,11 +17,12 @@ while [[ $# -gt 0 ]]; do [[ "$1" != --data-binary ]] || body="$2"; shift; done
 if [[ "$url" == */review-fix ]]; then
   n=0; [[ ! -f "$TEST_DIR/count" ]] || n="$(cat "$TEST_DIR/count")"; n=$((n+1)); echo "$n" > "$TEST_DIR/count"
   if [[ "\${TEST_STALE:-0}" == 1 && "$n" -gt 1 ]]; then echo '{"error":"HEAD changed"}'; else echo '{"review":"safe finding"}'; fi
-elif [[ "$url" == */claude-model ]]; then echo '{}'
+elif [[ "$url" == */claude-model ]]; then if [[ -n "\${TEST_MODEL:-}" ]]; then printf '{"workflowCodexModel":"%s"}\\n' "$TEST_MODEL"; else echo '{}'; fi
 else echo "$body" >> "$TEST_DIR/reports"
 fi
 `);
- stub("codex",`out=''; work=''
+ stub("codex",`printf '%s\\n' "$@" > "$TEST_DIR/codex-args"
+out=''; work=''
 while [[ $# -gt 0 ]]; do [[ "$1" != --output-last-message ]] || out="$2"; [[ "$1" != -C ]] || work="$2"; shift; done
 cat >/dev/null
 touch "$TEST_DIR/codex-called"
@@ -47,3 +48,6 @@ function run(env={}){
 }
 it("検証後に同じブランチへpushし、完了を報告する",()=>{const r=run();expect(r.status,r.stderr).toBe(0);expect(r.head).not.toBe(sha);expect(r.reports.at(-1).status).toBe("succeeded");expect(existsSync(`${dir}/codex-called`)).toBe(true);});
 it.each([{TEST_STALE:"1"},{TEST_VERIFY_FAIL:"1"},{TEST_CODEX_FAIL:"1"},{TEST_NO_DIFF:"1"}])("HEAD変化・検証失敗・Codex失敗・未修正はpushしない %j",(env)=>{const r=run(env);expect(r.status).not.toBe(0);expect(r.head).toBe(sha);expect(r.reports.at(-1).status).toBe("failed");});
+const codexArgs=()=>readFileSync(`${dir}/codex-args`,"utf8").split('\n');
+it("知っているモデル名は--modelで渡す",()=>{const r=run({TEST_MODEL:"gpt-6.1-terra"});expect(r.status,r.stderr).toBe(0);const args=codexArgs();expect(args[args.indexOf("--model")+1]).toBe("gpt-6.1-terra");});
+it("知らないモデル名は失敗せず、--modelを付けずに警告を残す",()=>{const r=run({TEST_MODEL:"gpt-99-unknown"});expect(r.status,r.stderr).toBe(0);expect(r.reports.at(-1).status).toBe("succeeded");expect(codexArgs()).toContain("exec");expect(codexArgs()).not.toContain("--model");expect(r.stderr).toContain("gpt-99-unknown");});

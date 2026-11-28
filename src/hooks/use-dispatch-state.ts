@@ -298,7 +298,7 @@ export function useDispatchState(enabled: boolean) {
       /**
        * このIssueだけに使うモデル（#2717・#3192）。省略・`null`は「設定の既定に従う」。
        * **実装セッション（`LAUNCH`）でだけ意味があり、`agent`に合う語（Claudeなら
-       * `fable`・`opus`・`sonnet`、Codexなら`gpt-5.6-*`）でなければAPIが400で断る。**
+       * `fable`・`opus`・`sonnet`、Codexなら`CODEX_LOCAL_MODEL_VALUES`）でなければAPIが400で断る。**
        */
       model?: ClaudeModel | CodexLocalModel | null;
       /**

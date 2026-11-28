@@ -434,7 +434,7 @@ export async function POST(request: NextRequest) {
   // Sonnetが立つ方が、その場で断られるより分かりにくい
   //
   // **`model`の語は`agent`で決まる**（#3192）。Claude Codeなら`fable`・`opus`・`sonnet`、Codexなら
-  // `gpt-5.6-*`で、もう一方の語（Codexへ`opus`を送る等）は選んだつもりのないモデルで立つより
+  // `CODEX_LOCAL_MODEL_VALUES`の語で、もう一方の語（Codexへ`opus`を送る等）は選んだつもりのないモデルで立つより
   // その場で断る方がよいので400にする
   let claudeModel: ReturnType<typeof parseClaudeLocalModel> = null;
   let codexModel: ReturnType<typeof parseCodexLocalModel> = null;

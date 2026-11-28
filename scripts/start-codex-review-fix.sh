@@ -77,7 +77,9 @@ settings="$(curl -fsS --max-time 10 "${APP_BASE_URL%/}/api/settings/claude-model
 model="$(jq -r '.workflowCodexModel // "auto"' <<<"$settings")"
 effort="$(jq -r '.workflowCodexReasoningEffort // "default"' <<<"$settings")"
 args=()
-case "$model" in auto) ;; gpt-6.2-astra|gpt-6.2-sol|gpt-6.1-terra|gpt-6-luna|gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-5.5|gpt-5.4) args+=(--model "$model");; *) exit 1;; esac
+# 知らないモデル名は失敗にせず、--modelを付けない（CLIの既定。PRレビューと同じ。#5678）。
+# ホストのチェックアウトがサーバーより古いと、世代交代で足された名前が届く。
+case "$model" in auto) ;; gpt-6.2-astra|gpt-6.2-sol|gpt-6.1-terra|gpt-6-luna|gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-5.5|gpt-5.4) args+=(--model "$model");; *) printf 'Warning: 知らないCodexモデルのため、CLIの既定モデルで修正します: %q\n' "$model" >&2;; esac
 case "$effort" in default) ;; low|medium|high|xhigh) args+=(-c "model_reasoning_effort=\"$effort\"");; *) exit 1;; esac
 output="$(mktemp)"
 # 書込みは隔離worktree内のみ。GitHubへの書込みはCodexに任せない。
