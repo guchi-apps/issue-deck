@@ -11,16 +11,16 @@ import {
 const settings = {
   claudeModel: "sonnet",
   githubActionsAgent: "claude",
-  githubActionsCodexModel: "gpt-5.6-terra",
+  githubActionsCodexModel: "gpt-6.1-terra",
   claudeModelAssist: "haiku",
   claudeLocalModel: "pick",
   codexModel: "pick",
   planReviewAgentForClaude: "codex",
   planReviewAgentForCodex: "claude",
   planReviewClaudeModel: "opus",
-  planReviewCodexModel: "gpt-6-sol",
-  appAiModel: "claude-haiku-4-5",
-  appAiModelReasoning: "gpt-6-sol",
+  planReviewCodexModel: "gpt-6.2-sol",
+  appAiModel: "claude-haiku-5-5",
+  appAiModelReasoning: "gpt-6.2-sol",
   modelPickEngine: "jev",
 } as const;
 
@@ -39,7 +39,7 @@ describe("resolveExecutionFlows", () => {
         name: "自動計画レビュー（Claude Codeで開始後）",
         location: "DeskMini",
         agent: "Codex CLI",
-        model: "GPT-6 Sol",
+        model: "GPT-6.2 Sol",
       }),
       expect.objectContaining({
         name: "おまかせのモデル選択・Issueラベル判定",
@@ -56,7 +56,7 @@ describe("resolveExecutionFlows", () => {
 
     expect(claude?.model).toBe("おまかせ（実装開始時に判定）");
     expect(claude?.note).toContain("Sonnet 5.5 にフォールバック");
-    expect(codex?.note).toContain("GPT-5.6 Terra にフォールバック");
+    expect(codex?.note).toContain("GPT-6.1 Terra にフォールバック");
   });
 });
 
@@ -64,7 +64,7 @@ describe("原因診断の実行基盤表示（#4143）", () => {
   const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
 
   it("GPT系はアプリ内AIの各機能をDeskMiniのCodex CLIで実行すると表示する（#5067）", () => {
-    const flows = resolveExecutionFlows({ ...settings, appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra", modelPickEngine: "app-ai" });
+    const flows = resolveExecutionFlows({ ...settings, appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-6.1-terra", modelPickEngine: "app-ai" });
     for (const name of [
       "原因診断（チャット調査）",
       "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨",
@@ -92,11 +92,11 @@ describe("resolveProviderFlowRows", () => {
   const resolved = {
     ...settings,
     claudeLocalModel: "sonnet",
-    codexModel: "gpt-5.6-terra",
+    codexModel: "gpt-6.1-terra",
     defaultDispatchAgent: "claude",
     planReviewAgentForClaude: "claude",
     planReviewAgentForCodex: "claude",
-    appAiModel: "claude-haiku-4-5",
+    appAiModel: "claude-haiku-5-5",
     appAiModelReasoning: "claude-sonnet-5-5",
     modelPickEngine: "app-ai",
   } as const;
@@ -113,12 +113,12 @@ describe("resolveProviderFlowRows", () => {
     const plan = rows.find((row) => row.step === "計画")!;
 
     expect(plan.entries).toEqual([
-      expect.objectContaining({ label: "DeskMini", agent: "Codex CLI", model: "GPT-5.6 Terra", binding: "provider" }),
-      expect.objectContaining({ label: "GitHub Actions", agent: "Codex Action", model: "GPT-5.6 Terra", binding: "provider" }),
+      expect.objectContaining({ label: "DeskMini", agent: "Codex CLI", model: "GPT-6.1 Terra", binding: "provider" }),
+      expect.objectContaining({ label: "GitHub Actions", agent: "Codex Action", model: "GPT-6.1 Terra", binding: "provider" }),
     ]);
     expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
       // 計画レビューは全体プロバイダーに追従せず、開始元（Claude Code）の反対側になる（#5648）
-      expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "opposite" }),
+      expect.objectContaining({ agent: "Codex CLI", model: "GPT-6.2 Sol", binding: "opposite" }),
     );
     const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
     expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));

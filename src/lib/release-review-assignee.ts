@@ -31,11 +31,11 @@ export type ReleaseReviewAssignee = {
 };
 
 const CLAUDE_ALIASES: Readonly<Record<string, ClaudeLocalModel>> = {
-  "claude-fable-5-1": "fable",
+  "claude-fable-5-2": "fable",
   "claude-opus-5-5": "opus",
   "claude-sonnet-5-5": "sonnet",
   // Haikuはローカルセッションのauto modeで動かないため、全体レビューではSonnetへ読み替える
-  "claude-haiku-4-5": "sonnet",
+  "claude-haiku-5-5": "sonnet",
 };
 
 export function resolveReleaseReviewAssignee(

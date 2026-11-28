@@ -19,6 +19,7 @@ import {
   parseClaudeLocalModel,
   parseCodexLocalModel,
   parseCodexModel,
+  toPreGpt61CodexModel,
 } from "@/lib/app-settings";
 import { db } from "@/lib/db";
 
@@ -75,6 +76,10 @@ export async function POST(request: NextRequest) {
     requestedPlanReviews >= 0
       ? Math.min(requestedPlanReviews, 10)
       : undefined;
+
+  // 新世代のCodexモデルID（#5668）を受け付けるpollerだけが申告する（#5674）。申告の無いpollerへは
+  // 起動・計画レビューのジョブを同格の旧世代IDで払い出す
+  const supportsGpt61CodexModels = payload?.gpt61CodexModels === true;
 
   // 確認待ちのPush通知（#838）を、この取りに来るついでに1歩進める。
   // **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。ここを選ぶのは
@@ -194,14 +199,23 @@ export async function POST(request: NextRequest) {
       // **ジョブに指定があればそれを`claudeLocalModel`として載せる**（#2717）。pollerは
       // 従来どおりこのキーだけを読むので、Issueごとの指定を届けるのに**poller側の変更は要らない**。
       // 指定が無いジョブ（従来の積み方・「設定に従う」）は設定の既定がそのまま載る。
-      jobs: jobs.map((job) => ({
-        ...job,
-        ...(initialPrompts.has(job.id) ? { initialPrompt: initialPrompts.get(job.id) } : {}),
-        claudeLocalModel: job.claudeModel ?? claudeLocalModel,
+      jobs: jobs.map((job) => {
         // Codexも同じ（#3192）。ジョブに指定があればそれを`codexModel`として載せ直すので、
         // pollerは従来どおりこのキーだけを読む。指定が無いジョブは設定の既定がそのまま載る
-        codexModel: parseCodexLocalModel(job.codexModel) ?? codexModel,
-      })),
+        const requestedCodexModel = parseCodexLocalModel(job.codexModel) ?? codexModel;
+        // **読み替えるのは旧世代側で新IDを弾く種別だけ**（#5674）。全体レビューなどは旧pollerでも
+        // IDをそのまま通すので、記録した担当と実行が食い違わないよう変えない
+        const needsPreGpt61 =
+          !supportsGpt61CodexModels && (job.kind === "LAUNCH" || job.kind === "PLAN_REVIEW");
+        return {
+          ...job,
+          ...(initialPrompts.has(job.id) ? { initialPrompt: initialPrompts.get(job.id) } : {}),
+          claudeLocalModel: job.claudeModel ?? claudeLocalModel,
+          codexModel: needsPreGpt61
+            ? toPreGpt61CodexModel(requestedCodexModel)
+            : requestedCodexModel,
+        };
+      }),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

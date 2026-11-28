@@ -112,10 +112,10 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
   const workflowCodexModel = settings.workflowCodexModel ?? "auto";
   const workflowCodexReasoningEffort = settings.workflowCodexReasoningEffort ?? "default";
   const localClaudeNote = settings.claudeLocalModel === MODEL_PICK_SETTING
-    ? `候補: Sonnet 5.5 / Opus 5.5 / Fable 5.1。ダイアログを経由しない起動は ${describeClaudeModel("sonnet")} にフォールバックします。`
+    ? `候補: Sonnet 5.5 / Opus 5.5 / Fable 5.2。ダイアログを経由しない起動は ${describeClaudeModel("sonnet")} にフォールバックします。`
     : undefined;
   const localCodexNote = settings.codexModel === MODEL_PICK_SETTING
-    ? `候補: GPT-6 Astra / GPT-6 Sol / GPT-5.6 Terra / GPT-6 Luna。ダイアログを経由しない起動は ${describeCodexModel(CODEX_MODEL_DEFAULT)} にフォールバックします。`
+    ? `候補: GPT-6.2 Astra / GPT-6.2 Sol / GPT-6.1 Terra / GPT-6 Luna。ダイアログを経由しない起動は ${describeCodexModel(CODEX_MODEL_DEFAULT)} にフォールバックします。`
     : undefined;
   const actionFlow = (name: string): ExecutionFlow => ({
     group: "計画",

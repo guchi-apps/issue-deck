@@ -4649,7 +4649,7 @@ run_job() {
       ;;
   esac
   case "$codex_model" in
-    auto | gpt-6-astra | gpt-6-sol | gpt-5.6-terra | gpt-6-luna | gpt-5.5 | gpt-5.4) ;;
+    auto | gpt-6.2-astra | gpt-6.2-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-astra | gpt-6-sol | gpt-5.6-terra | gpt-5.5 | gpt-5.4) ;;
     *)
       report_job "$job_id" failed "受け取ったCodexモデルが不正です: $codex_model"
       return 0
@@ -5144,9 +5144,11 @@ run_once() {
   if [[ "$ios_sweep_ok" -eq 1 ]]; then sweep_ios_prechecks; fi
 
   local claim_payload jobs_json job_count job
+  # `gpt61CodexModels`は、下の`run_job`の許可リストと各ランチャーが新世代のCodexモデルIDを受け付ける
+  # という申告（#5674）。送らないpollerへは、issue-deckが旧世代の同格IDで払い出す
   claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$claim_max_jobs" \
     --argjson planReviewMaxJobs "$claim_plan_reviews" \
-    '{host: $host, maxJobs: $maxJobs, planReviewMaxJobs: $planReviewMaxJobs}')"
+    '{host: $host, maxJobs: $maxJobs, planReviewMaxJobs: $planReviewMaxJobs, gpt61CodexModels: true}')"
   if ! api_call POST /api/dispatch/claim "$claim_payload"; then
     report_api_failure "ジョブの取得に失敗しました"
     return 1

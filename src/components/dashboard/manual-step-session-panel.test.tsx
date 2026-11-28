@@ -184,12 +184,12 @@ describe("ManualStepSessionPanel（#2771）", () => {
       />,
     );
     fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
-    fireEvent.click(screen.getByRole("radio", { name: /GPT-6 Sol/, checked: false }));
+    fireEvent.click(screen.getByRole("radio", { name: /GPT-6.2 Sol/, checked: false }));
     fireEvent.click(screen.getByRole("button", { name: START_BUTTON }));
 
     await waitFor(() =>
       expect(startManualStepSession).toHaveBeenCalledWith(
-        expect.objectContaining({ agent: "codex", model: "gpt-6-sol" }),
+        expect.objectContaining({ agent: "codex", model: "gpt-6.2-sol" }),
       ),
     );
     expect(screen.getByText(/Remote Controlのリンクは出ません/)).toBeTruthy();

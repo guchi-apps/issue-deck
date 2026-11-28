@@ -84,7 +84,7 @@
 - **`required`と`additionalProperties: false`は必須条件**で、どちらかを欠くとAPIがスキーマを
   受け付けない。まだ決まっていない項目は`anyOf`で`null`を許して表す（`type`の配列は使えない）
 - `CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`）で`/v1/messages`を直接叩く経路でも効く。
-  対応モデルはClaude Haiku 4.5を含む（`lib/claude/`が使っているのはこれ）
+  対応モデルはClaude Haiku 5.5を含む（`lib/claude/`が使っているのはこれ）
 - **`max_tokens`は2048**。返事＋仕様案で1024を超えると途中で切れ、切れた応答は必ず壊れたJSONに
   なる。`stop_reason`が`max_tokens`のときだけは「長すぎて途中で切れました」と原因の分かる
   文言で返す（「解析できませんでした」では短く言い直せばよいと分からない）

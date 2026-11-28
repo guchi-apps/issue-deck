@@ -68,7 +68,7 @@ describe("postSessionPlan の計画レビュー起動", () => {
       agent: "codex",
       fallbackAgent: "claude",
       claudeModel: "sonnet",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
       // 人が押したわけではないので、積んだユーザーは残らない
       requestedByUserId: null,
     });
@@ -100,7 +100,7 @@ describe("postSessionPlan の計画レビュー起動", () => {
       planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "opus",
-      planReviewCodexModel: "gpt-6-sol",
+      planReviewCodexModel: "gpt-6.2-sol",
     });
 
     await postSessionPlan(PLAN);
@@ -108,7 +108,7 @@ describe("postSessionPlan の計画レビュー起動", () => {
 
     expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ agent: "codex", codexModel: "gpt-6-sol" }),
+      expect.objectContaining({ agent: "codex", codexModel: "gpt-6.2-sol" }),
     );
     expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
       2,

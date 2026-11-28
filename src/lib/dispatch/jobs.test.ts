@@ -430,13 +430,13 @@ describe("enqueueDispatchJob のモデル", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1311,
       hostName: "subpc",
-      codexModel: "gpt-6-sol",
+      codexModel: "gpt-6.2-sol",
       requestedByUserId: null,
       now: NOW,
     });
     expect(withModel.ok).toBe(true);
-    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBe("gpt-6-sol");
-    if (withModel.ok) expect(withModel.job.codexModel).toBe("gpt-6-sol");
+    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBe("gpt-6.2-sol");
+    if (withModel.ok) expect(withModel.job.codexModel).toBe("gpt-6.2-sol");
 
     dispatchJobCreate.mockClear();
     await enqueue();
@@ -873,14 +873,14 @@ describe("enqueuePlanReviewJob", () => {
       issueNumber: 1855,
       hostName: "subpc",
       agent: "codex",
-      codexModel: "gpt-6-sol",
+      codexModel: "gpt-6.2-sol",
       requestedByUserId: null,
       now: NOW,
     });
 
     expect(dispatchJobCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ agent: "codex", codexModel: "gpt-6-sol" }),
+        data: expect.objectContaining({ agent: "codex", codexModel: "gpt-6.2-sol" }),
       }),
     );
   });
@@ -2238,7 +2238,7 @@ describe("enqueueManualStepSessionJob", () => {
       issueNumber: 2771,
       hostName: "subpc",
       agent: "codex",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
       requestedByUserId: "user-1",
       now: NOW,
     });
@@ -2249,7 +2249,7 @@ describe("enqueueManualStepSessionJob", () => {
         data: expect.objectContaining({
           kind: "MANUAL_STEP_SESSION",
           agent: "codex",
-          codexModel: "gpt-5.6-terra",
+          codexModel: "gpt-6.1-terra",
         }),
       }),
     );

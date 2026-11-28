@@ -26,11 +26,14 @@ export const CACHE_WRITE_5M_MULTIPLIER = 1.25;
 export const CACHE_WRITE_1H_MULTIPLIER = 2.0;
 
 /**
- * モデルID → 単価。claude-apiスキルの料金表（2026-09時点）とOpenAIの料金表による。
+ * モデルID → 単価。AnthropicとOpenAIの公式料金表（2026-11時点）による。
+ * 長文の割増料金（Haiku 5.5は10万トークン超、GPTは27.2万超）は持たず、安い側の単価で換算する。
  *
  * 日付サフィックス付きのID（`claude-haiku-4-5-20251001`）は前方一致で拾う（`resolveModelRate`）。
  */
 export const MODEL_RATES: Readonly<Record<string, ModelRate>> = {
+  "claude-fable-5-2": { input: 8.0, output: 40.0, cacheRead: 0.2 },
+  "claude-mythos-5-2": { input: 8.0, output: 40.0, cacheRead: 0.2 },
   "claude-fable-5-1": { input: 10.0, output: 50.0, cacheRead: 0.25 },
   "claude-mythos-5-1": { input: 10.0, output: 50.0, cacheRead: 0.25 },
   "claude-fable-5": { input: 10.0, output: 50.0, cacheRead: 1.0 },
@@ -40,11 +43,16 @@ export const MODEL_RATES: Readonly<Record<string, ModelRate>> = {
   "claude-opus-4-8": { input: 5.0, output: 25.0, cacheRead: 0.5 },
   "claude-opus-4-7": { input: 5.0, output: 25.0, cacheRead: 0.5 },
   "claude-opus-4-6": { input: 5.0, output: 25.0, cacheRead: 0.5 },
-  "claude-sonnet-5-5": { input: 2.0, output: 10.0, cacheRead: 0.2 },
+  "claude-sonnet-5-5": { input: 2.0, output: 10.0, cacheRead: 0.1 },
   "claude-sonnet-5": { input: 2.0, output: 10.0, cacheRead: 0.2 },
   "claude-sonnet-4-6": { input: 3.0, output: 15.0, cacheRead: 0.3 },
   "claude-sonnet-4-5": { input: 3.0, output: 15.0, cacheRead: 0.3 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
   "claude-haiku-4-5": { input: 1.0, output: 5.0, cacheRead: 0.1 },
+  "gpt-6.2-astra": { input: 8.0, output: 40.0, cacheRead: 0.4 },
+  "gpt-6.2-sol": { input: 2.0, output: 10.0, cacheRead: 0.1 },
+  "gpt-6.1-sol": { input: 2.0, output: 10.0, cacheRead: 0.1 },
+  "gpt-6.1-terra": { input: 1.0, output: 5.0, cacheRead: 0.05 },
   "gpt-6-astra": { input: 10.0, output: 50.0, cacheRead: 1.0 },
   "gpt-6-sol": { input: 2.0, output: 10.0, cacheRead: 0.2 },
   "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01 },

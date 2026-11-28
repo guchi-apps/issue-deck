@@ -143,6 +143,8 @@ from datetime import datetime, timezone
 #
 # 同じ単価表が`src/lib/ai-model-pricing.ts`（画面が読む側）にもある。**料金が変わったら両方直す。**
 PRICES = {
+    "claude-fable-5-2": (8.0, 40.0, 0.2),
+    "claude-mythos-5-2": (8.0, 40.0, 0.2),
     "claude-fable-5-1": (10.0, 50.0, 0.25),
     "claude-mythos-5-1": (10.0, 50.0, 0.25),
     "claude-fable-5": (10.0, 50.0, 1.0),
@@ -152,10 +154,11 @@ PRICES = {
     "claude-opus-4-8": (5.0, 25.0, 0.5),
     "claude-opus-4-7": (5.0, 25.0, 0.5),
     "claude-opus-4-6": (5.0, 25.0, 0.5),
-    "claude-sonnet-5-5": (2.0, 10.0, 0.2),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.1),
     "claude-sonnet-5": (2.0, 10.0, 0.2),
     "claude-sonnet-4-6": (3.0, 15.0, 0.3),
     "claude-sonnet-4-5": (3.0, 15.0, 0.3),
+    "claude-haiku-5-5": (0.1, 0.5, 0.01),
     "claude-haiku-4-5": (1.0, 5.0, 0.1),
 }
 
@@ -942,7 +945,7 @@ PY
 # Pythonの断片として持ち、各スクリプトの先頭へ連結する。単価は1M tokensあたりのUSDで
 # (入力, キャッシュ読み出し, 出力)。
 _CODEX_USAGE_PRICING_PY="$(cat <<'PY'
-PRICES={"gpt-6-astra":(10,1,50),"gpt-6-sol":(2,.2,10),"gpt-6-luna":(.1,.01,.5),"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
+PRICES={"gpt-6.2-astra":(8,.4,40),"gpt-6.2-sol":(2,.1,10),"gpt-6.1-sol":(2,.1,10),"gpt-6.1-terra":(1,.05,5),"gpt-6-astra":(10,1,50),"gpt-6-sol":(2,.2,10),"gpt-6-luna":(.1,.01,.5),"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
 # キャッシュ書き込みの倍率。CodexはTTLの内訳を持たないので、Claude側の5分TTLと同じ1.25倍で数える。
 CACHE_WRITE_5M=1.25
 

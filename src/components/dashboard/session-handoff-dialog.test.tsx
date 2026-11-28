@@ -96,7 +96,7 @@ function renderButton({
       comments={[]}
       // 「おまかせ」以外にしておく（判定APIを呼ばせない）
       claudeLocalModel="sonnet"
-      codexModel="gpt-5.6-terra"
+      codexModel="gpt-6.1-terra"
       onCommentCreated={onCommentCreated}
     />,
   );
@@ -127,7 +127,7 @@ describe("SessionHandoffButton", () => {
       dispatch: makeDispatch(),
       comments: [],
       claudeLocalModel: "sonnet" as const,
-      codexModel: "gpt-5.6-terra" as const,
+      codexModel: "gpt-6.1-terra" as const,
       onCommentCreated: vi.fn(),
       onOpenChange: vi.fn(),
     };
@@ -167,7 +167,7 @@ describe("SessionHandoffButton", () => {
       issueNumber: 3496,
       hostName: "subpc",
       agent: "codex",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-terra",
       handoffFrom: "claude",
       handoffTranscript: false,
     });

@@ -2441,6 +2441,8 @@ function RepositorySummaryRow({
   repository,
   branchesFailed,
   loaded,
+  pullRequestsLoaded,
+  branchesLoaded,
   releaseTriggerPending,
   isOpen,
   showSelectionMarker = false,
@@ -2449,10 +2451,14 @@ function RepositorySummaryRow({
   repository: BranchFlowRepository;
   branchesFailed: boolean;
   /**
-   * 行に出す件数・状態を組み立てる材料（Issue・マージ済みPR・ブランチ状況）が揃ったか（#4913）。
-   * 揃うまでは件数を出さず、回るアイコン付きの「読み込み中」だけを出す
+   * 行に出す件数・状態を組み立てる材料（Issue・マージ済みPR・ブランチ状況）が全部揃ったか（#4913）。
+   * 揃うまでは回るアイコン付きの「読み込み中」を出し、「動きなし」と言い切らない
    */
   loaded: boolean;
+  /** マージ済みを含むPR一覧が届いたか。PRだけで決まる表示はこの時点で出す（#5666） */
+  pullRequestsLoaded: boolean;
+  /** ブランチ状況が届いたか。ブランチ状況だけで決まる表示はこの時点で出す（#5666） */
+  branchesLoaded: boolean;
   /** この端末からリリースworkflowを起こした直後で、まだバンプPRが現れていない（#1955） */
   releaseTriggerPending: boolean;
   isOpen: boolean;
@@ -2467,6 +2473,12 @@ function RepositorySummaryRow({
   const { summary } = repository;
   const unreleased = repositoryUnreleasedSummary(repository);
   const candidateSplit = splitUnreleasedByReleaseCandidate(repository);
+  // 材料が届いた表示から順に出す（#5666）。ブランチ状況を取得できなかった行はこれ以上届かないので全部出す
+  const allReady = loaded || branchesFailed;
+  const pullRequestsReady = pullRequestsLoaded || allReady;
+  const branchesReady = branchesLoaded || allReady;
+  // PRが届く前は本番候補の内外を分けられないので、未リリースの合計だけを出す
+  const showCandidateSplit = pullRequestsReady && candidateSplit.hasCandidate;
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -2486,15 +2498,16 @@ function RepositorySummaryRow({
   // 開いているリリース候補の検証の進行・問題（#4357・#4390）。見出しと同じ値を読む
   const verification = candidateVerificationOf(repository);
   // 状態バッジが1つでもあるか。無いときは2行目を作らない（#4032）
-  // 揃う前のバッジは途中の材料から組み立てた値なので出さない（#4913。件数と一緒に一度に出す）
-  const hasBadges = loaded && (
+  // 揃う前のバッジは途中の材料から組み立てた値なので出さない（#4913）。
+  // リリースPR・バンプPRの問題チップだけはPRで決まるので、PRが届いた時点で出す（#5666）
+  const hasHealthChips = pullRequestsReady && hasPullRequestHealthChips(summary.pullRequestHealth);
+  const hasBadges = hasHealthChips || (loaded && (
     verification !== null ||
-    hasPullRequestHealthChips(summary.pullRequestHealth) ||
     summary.releaseInProgress ||
     summary.releaseJourney !== null ||
     releaseLaunching ||
     iosDistribution.running ||
-    deploy !== null);
+    deploy !== null));
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
@@ -2563,21 +2576,20 @@ function RepositorySummaryRow({
       <span className="min-w-0 flex-1" />
 
       <span className="flex shrink-0 items-center gap-2">
-      {/* 材料が揃うまでは件数を1つも出さない（#4913）。Issue・PRとブランチ状況は別々に届くため、
-          揃った分から出すと「読み込み中」→「動きなし」→件数のように行の表示が何度も変わっていた。
+      {/* 届いた材料だけで決まる件数から順に出す（#5666）。途中の材料では値が変わりうる件数と
+          「動きなし」は全部揃うまで出さず（#4913）、残りがある間は左端に「読み込み中」を添える。
           一度揃った後の取り直しでは`loaded`は真のままで、件数を出したまま更新アイコンだけが回る */}
-      {!loaded && !branchesFailed ? (
+      {!allReady && (
         <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
           <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
           読み込み中
         </span>
-      ) : (
-      <>
+      )}
       {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする。
           **他の件数と同じアイコン＋数字で出す**（#2243）。琥珀のピルだけ形が違ったため、
           右端に件数が並んでも手作業だけ縦位置と字送りがそろわず、スマホ幅ではそのぶん
           行が折り返していた。色はオレンジのまま残して「あなたの番」であることは失わない */}
-      {summary.openManualStepCount > 0 && (
+      {allReady && summary.openManualStepCount > 0 && (
         <SummaryCount
           icon={Wrench}
           label={`手作業 ${summary.openManualStepCount}件`}
@@ -2589,7 +2601,7 @@ function RepositorySummaryRow({
           着手中より薄い色にして目立たせない。破線の丸は流れ図の着手中ノードと同じ描き方で、
           「まだブランチが無い」ことを形で出す（未着手も着手中もブランチは無い）。
           「動きなし」の判定（`hasAnything`）には入れない——動いているものが無いことは変わらない */}
-      {summary.readyIssueCount > 0 && (
+      {pullRequestsReady && summary.readyIssueCount > 0 && (
         <SummaryCount
           icon={CircleDashed}
           label={`未着手 ${summary.readyIssueCount}件`}
@@ -2600,14 +2612,14 @@ function RepositorySummaryRow({
       {/* 開かなくても、実行ボタンを押したものが何本走っているかが分かるようにする（#1704・#2386）。
           破線の丸は未着手へ譲り（#3163）、実行中を表す再生マークの丸にする。
           ブランチが上がったぶんは右隣の「進行中」が数えるので、2つを足すと総数になる */}
-      {summary.startedIssueCount > 0 && (
+      {allReady && summary.startedIssueCount > 0 && (
         <SummaryCount
           icon={CirclePlay}
           label={`着手中 ${summary.startedIssueCount}件`}
           count={summary.startedIssueCount}
         />
       )}
-      {summary.activeLaneCount > 0 && (
+      {allReady && summary.activeLaneCount > 0 && (
         <SummaryCount
           icon={GitBranch}
           label={`進行中 ${summary.activeLaneCount}件`}
@@ -2619,7 +2631,7 @@ function RepositorySummaryRow({
           リリース候補・バンプPRが開いている間も出す（#4897）。新方式の候補は検証・公開承認待ちで
           長く開いたままになり、そのあいだ隠すと本番反映待ちの件数がほとんど見えなくなっていた */}
       {/* 本番候補ができているときは、候補に入っていない件数（左・破線）と入っている件数（右）に分ける（#5489） */}
-      {unreleased.count > 0 && candidateSplit.hasCandidate && candidateSplit.outsideCount > 0 && (
+      {branchesReady && unreleased.count > 0 && showCandidateSplit && candidateSplit.outsideCount > 0 && (
         <span
           title={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
           aria-label={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
@@ -2628,20 +2640,20 @@ function RepositorySummaryRow({
           +{candidateSplit.outsideCount}
         </span>
       )}
-      {unreleased.count > 0 && (!candidateSplit.hasCandidate || candidateSplit.insideCount > 0) && (
+      {branchesReady && unreleased.count > 0 && (!showCandidateSplit || candidateSplit.insideCount > 0) && (
         <SummaryCount
           icon={ArrowUpToLine}
           label={
-            candidateSplit.hasCandidate
+            showCandidateSplit
               ? `本番候補に入っている ${candidateSplit.insideCount}件`
               : `未リリース ${formatUnreleasedSummary(unreleased)}`
           }
-          count={candidateSplit.hasCandidate ? candidateSplit.insideCount : unreleased.count}
+          count={showCandidateSplit ? candidateSplit.insideCount : unreleased.count}
           className="text-purple-600 dark:text-purple-400"
         />
       )}
       {/* 公開停止中（#5353）。未リリース件数の代わりに出し、本番へ出さない理由を行で分かるようにする */}
-      {repository.productionSuspension !== null && (
+      {allReady && repository.productionSuspension !== null && (
         <span className="shrink-0 text-xs text-muted-foreground" title={repository.productionSuspension}>
           公開停止中
         </span>
@@ -2649,11 +2661,9 @@ function RepositorySummaryRow({
       {branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>
       )}
-      {/* 取得が済むまで「動きなし」と言い切らない（#1711）。揃っていない間は上の「読み込み中」が出る */}
-      {!hasAnything && !branchesFailed && (
+      {/* 取得が済むまで「動きなし」と言い切らない（#1711）。揃っていない間は左端の「読み込み中」が出る */}
+      {allReady && !hasAnything && !branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">動きなし</span>
-      )}
-      </>
       )}
       </span>
       </span>
@@ -2663,7 +2673,10 @@ function RepositorySummaryRow({
       <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
       {/* 問題と進行状況を並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
           自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
-      <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
+      {hasHealthChips && <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />}
+      {/* 残りの工程・導線はPRとブランチ状況の両方から組み立てるので、揃ってから出す */}
+      {loaded && (
+      <>
       {repository.deviceBuild && summary.releaseInProgress ? (
         // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ「実機未反映」を出す
         <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
@@ -2684,6 +2697,8 @@ function RepositorySummaryRow({
         <DeployStateBadge deploy={deploy} compact linkToRun={false} />
       )}
       {guidance.attention && <AttentionGuidance next={guidance.next} kind={guidance.kind} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
+      </>
+      )}
       </span>
       )}
       {/* 手が要らないときの状態文言（未リリース・開発中など）と導線は出さない（#4848）。
@@ -2760,6 +2775,7 @@ function RepositorySection({
   branchesFailed,
   mergedPullRequestsLoaded,
   rowLoaded,
+  rowBranchesLoaded,
   isOpen,
   selectionMode = false,
   detailHost = null,
@@ -2772,6 +2788,8 @@ function RepositorySection({
   mergedPullRequestsLoaded: boolean;
   /** 畳んだ行の件数を出してよいか（#4913。`RepositorySummaryRow`の`loaded`） */
   rowLoaded: boolean;
+  /** ブランチ状況の初回取得が済んだか（#5666） */
+  rowBranchesLoaded: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
   selectionMode?: boolean;
@@ -2816,6 +2834,8 @@ function RepositorySection({
         repository={repository}
         branchesFailed={branchesFailed}
         loaded={rowLoaded}
+        pullRequestsLoaded={mergedPullRequestsLoaded}
+        branchesLoaded={rowBranchesLoaded}
         releaseTriggerPending={isPending}
         isOpen={isOpen}
         showSelectionMarker={selectionMode}
@@ -2840,8 +2860,7 @@ function RepositorySection({
  * **リリース中・デプロイ中は、人が押す番になったときだけ数える**（#2038）。#1510・#1579では
  * リリースが動いていること自体を数えていたが、そのせいで「手が要るもの6件」の中身がCIの完了を
  * 待つだけのものばかりになり、件数を見ても押す番かどうかが分からなかった。自動で進んでいる
- * ぶんは`isProgressing`が「待てば進むもの◯件」として同じヘッダーに残すので、mainへマージして
- * から本番へ出るまでを見に来る手掛かり（#1579）は消えない。
+ * ぶんはヘッダーでは数えず（#5664）、畳んだ行の工程表示で分かる。
  *
  * **「リリース起動中」（#1955）だけはどちらにも含めない。** 押す操作の有無ではなく、判断の材料が
  * 端末ローカルの記録（起動時刻をlocalStorageへ置き、10分で失効する）でしかないため——
@@ -2852,7 +2871,7 @@ function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
   return (
     // 数えるのは本番リリース工程（バンプPR・リリースPR・候補の検証・デプロイ）だけ（#4540）。
-    // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
+    // 自動修正が走っている問題は`isProgressing`側へ回る（`pullRequestHealth.autoCount`）。
     // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
     summary.pullRequestHealth.humanCount > 0 ||
     // 本番リリースは工程の担当が人のときだけ数える（#5076）。畳んだ行・カード・PR一覧と同じ判定。
@@ -2898,13 +2917,8 @@ function candidateVerificationOf(repository: BranchFlowRepository): ReleaseCandi
 }
 
 /**
- * 待っていれば次へ進むリポジトリか。ヘッダーの「待てば進むもの◯件」に数える（#2038）。
- *
- * **「手が要るもの」と重ねて数えない**（呼び出し側で`needsAttention`を除く）。同じリポジトリが
- * 両方に出ると、2つの件数を足しても画面に並ぶ行数と合わなくなる。
- *
- * **畳んだ1行の「進行中 N件」とは別物。** あちらは作業レーンの本数（`activeLaneCount`）で、
- * こちらはリポジトリの件数。同じ画面で同じ言葉が2つの意味を持たないよう、言い回しを分けている。
+ * 待っていれば次へ進むリポジトリか。「動きがある時だけ表示」の判定（`hasBranchActivity`）で使う。
+ * ヘッダーの件数には出さない（#5664）。
  */
 function isProgressing(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
@@ -3065,7 +3079,8 @@ export function BranchFlowView({
   // 畳んだ行の件数は、マージ済みPRに加えてブランチ状況（`fetchedAt`）の初回取得も待つ（#4913）。
   // 行はIssue・PRから先に組み立てられ、ブランチ状況だけが遅れて届くため、PRだけで判定すると
   // その間に「動きなし」が出てから件数へ変わっていた。`fetchedAt`は取り直し中も残るので、
-  // 2回目以降の更新で「読み込み中」へ戻ることはない
+  // 2回目以降の更新で「読み込み中」へ戻ることはない。
+  // 片方だけで決まる表示は、行が自分で先に出す（#5666）
   const rowsLoaded = (mergedPullRequestsLoaded && fetchedAt !== null) || error !== null;
 
   // ブランチ画面でのリポジトリ表示（#5087）。**並べるときだけ**絞り、`flow.repositories`の全件は
@@ -3085,15 +3100,11 @@ export function BranchFlowView({
     isLoading: !rowsLoaded,
     showAll: false,
   });
-  // 読み込み中は「設定で省略」と言い切らない（#5494。動きの有無が分かってから数える）
+  // 全件を省いたときの本文の案内で使う。読み込み中は「設定で省略」と言い切らない（#5494）
   const branchViewHiddenCount = rowsLoaded ? branchViewSelection.hidden.length : 0;
   const shownRepositories = branchViewSelection.visible;
   // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
   const attentionRepositories = shownRepositories.filter(needsAttention);
-  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
-  const progressingRepositories = shownRepositories.filter(
-    (repository) => !needsAttention(repository) && isProgressing(repository),
-  );
 
   // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
   // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
@@ -3175,11 +3186,6 @@ export function BranchFlowView({
             </h1>
             <p className="truncate text-xs text-muted-foreground">
               <span>{shownRepositories.length}リポジトリ</span>
-              {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
-                  左メニューの「すべて表示する」（Issue一覧の絞り込み）とも関係しない */}
-              {branchViewHiddenCount > 0 && (
-                <span>{` ・ 設定で${branchViewHiddenCount}件を省略中`}</span>
-              )}
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
                   出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
                   **2ペインでは同時に1件しか出せないので言い方を変える**（#2157）。
@@ -3193,11 +3199,6 @@ export function BranchFlowView({
               )}
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>
-              )}
-              {/* 自動で進んでいるぶんは別に数える（#2038）。「手が要るもの」へ混ぜていたころは、
-                  件数を見ても押す番があるのかが分からなかった */}
-              {progressingRepositories.length > 0 && (
-                <span>{` ・ 待てば進むもの${progressingRepositories.length}件`}</span>
               )}
               {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
@@ -3340,6 +3341,7 @@ export function BranchFlowView({
               branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
               mergedPullRequestsLoaded={releasesLoaded}
               rowLoaded={rowsLoaded}
+              rowBranchesLoaded={fetchedAt !== null}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}

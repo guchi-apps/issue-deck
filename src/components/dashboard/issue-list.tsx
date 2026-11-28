@@ -1246,7 +1246,9 @@ export function IssueList({
               trailing={issueSession ? <IssueSessionRuntime session={issueSession} /> : null}
             />
           )}
-          {planReviewState && (
+          {/* 状態ピルが計画レビューを言っている行では出さない（#5667）。ピルを別の状態
+              （権限待ち・計画の承認待ちなど）が占める行だけ、このバッジで補う */}
+          {planReviewState && !attention?.kind.startsWith("plan-review-") && (
             <div>
               <PlanReviewStateBadge state={planReviewState} />
             </div>

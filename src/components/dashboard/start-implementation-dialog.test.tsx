@@ -219,7 +219,7 @@ function renderDialog(
       includeDispatchTargets={props.includeDispatchTargets}
       localSessionCommand={props.localSessionCommand ?? null}
       claudeLocalModel={props.claudeLocalModel ?? "sonnet"}
-      codexModel={props.codexModel ?? "gpt-5.6-terra"}
+      codexModel={props.codexModel ?? "gpt-6.1-terra"}
       defaultDispatchAgent={props.defaultDispatchAgent}
       dispatchFailoverEnabled={props.dispatchFailoverEnabled}
       dispatchFailoverThresholdPercent={props.dispatchFailoverThresholdPercent}
@@ -740,14 +740,14 @@ describe("StartImplementationDialog", () => {
         screen.getByRole("radio", { name }).getAttribute("aria-checked");
 
       it("Codexを選ぶと、おまかせ・Astra・Sol・Terra・Lunaの5つに切り替わり、設定の値が選ばれている", () => {
-        openCodex({ codexModel: "gpt-6-sol" });
+        openCodex({ codexModel: "gpt-6.2-sol" });
 
         const group = screen.getByRole("radiogroup", { name: "モデル" });
         expect(within(group).getAllByRole("radio")).toHaveLength(5);
         expect(screen.queryByRole("radio", { name: /^Opus/ })).toBeNull();
-        expect(checked(/^GPT-6 Astra/)).toBe("false");
-        expect(checked(/^GPT-6 Sol/)).toBe("true");
-        expect(checked(/^GPT-5.6 Terra/)).toBe("false");
+        expect(checked(/^GPT-6.2 Astra/)).toBe("false");
+        expect(checked(/^GPT-6.2 Sol/)).toBe("true");
+        expect(checked(/^GPT-6.1 Terra/)).toBe("false");
       });
 
       it("選んだモデルを積む（Claude Codeの選択は付いていかない）", async () => {
@@ -760,26 +760,26 @@ describe("StartImplementationDialog", () => {
       });
 
       // 旧世代・`auto`はダイアログの候補に無く、選択なしで開くと何で立つか分からなくなる
-      it("設定が旧世代（GPT-5.5）のときは、Terraが選ばれた状態で開く", () => {
-        openCodex({ codexModel: "gpt-5.5" });
+      it("設定が候補に無い旧世代（GPT-5.5）のときは、Terraが選ばれた状態で開く", () => {
+        openCodex({ codexModel: "gpt-5.5" as never });
 
-        expect(checked(/^GPT-5.6 Terra/)).toBe("true");
+        expect(checked(/^GPT-6.1 Terra/)).toBe("true");
       });
 
       it("エージェントを行き来しても、それぞれの選択が残る", () => {
         openCodex({ claudeLocalModel: "opus" });
-        fireEvent.click(screen.getByRole("radio", { name: /^GPT-6 Sol/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^GPT-6.2 Sol/ }));
         fireEvent.click(screen.getByRole("radio", { name: /^Claude Code/ }));
         expect(checked(/^Opus/)).toBe("true");
         fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
-        expect(checked(/^GPT-6 Sol/)).toBe("true");
+        expect(checked(/^GPT-6.2 Sol/)).toBe("true");
       });
 
       it("おまかせを押すとCodex向けに判定し、選ばれたモデルで積む", async () => {
         modelPickFetch.mockResolvedValue({
           ok: true,
           json: async () => ({
-            model: "gpt-5.6-terra",
+            model: "gpt-6.1-terra",
             reason: "通常の実装だと読めるためです。",
             source: "ai",
           }),
@@ -794,13 +794,13 @@ describe("StartImplementationDialog", () => {
 
         clickStart();
         await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
-        expect(enqueue.mock.calls[0][0].model).toBe("gpt-5.6-terra");
+        expect(enqueue.mock.calls[0][0].model).toBe("gpt-6.1-terra");
       });
 
       it("設定がおまかせなら、Codexを選んだ時点で自動判定する（Claude Code側の判定とは別に1回）", async () => {
         modelPickFetch.mockResolvedValue({
           ok: true,
-          json: async () => ({ model: "gpt-6-sol", reason: "調査が要るためです。", source: "ai" }),
+          json: async () => ({ model: "gpt-6.2-sol", reason: "調査が要るためです。", source: "ai" }),
         });
         openCodex({ codexModel: "pick" });
 

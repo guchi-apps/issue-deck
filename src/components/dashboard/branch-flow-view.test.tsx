@@ -2114,20 +2114,19 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
       expect(screen.queryByText("リリース中")).toBeNull();
       expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
-      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
     });
 
-    it("CI実行中は工程バッジのままで、件数も「待てば進むもの」に入れる", () => {
+    it("CI実行中は工程バッジのままで、見出しの件数には数えない（#5664）", () => {
       renderRelease("pending");
 
       expect(screen.getByText("リリース候補のCI実行中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
-      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
 
     // CI通過後の自動マージ可否の判定中も、押せる操作は無い＝人の番ではない（#2326）
-    it("Claudeがレビュー中は「マージ判定中」のままで、件数も「待てば進むもの」に入れる（#2326）", () => {
+    it("Claudeがレビュー中は「マージ判定中」のままで、「手が要るもの」に数えない（#2326）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -2148,7 +2147,7 @@ describe("BranchFlowView", () => {
 
       expect(screen.getAllByText("リリース候補のマージ判定中").length).toBeGreaterThan(0);
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
-      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
 
@@ -2169,7 +2168,7 @@ describe("BranchFlowView", () => {
       });
     }
 
-    it("全体レビューの実行中は「全体レビュー中」で、マージ待ちを出さず「待てば進むもの」に数える（#4390）", () => {
+    it("全体レビューの実行中は「全体レビュー中」で、マージ待ちを出さず「手が要るもの」に数えない（#4390）", () => {
       renderCandidate({
         aiReview: "running",
         integration: "not_applicable",
@@ -2180,7 +2179,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("全体レビュー中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.queryByText("リリース中")).toBeNull();
-      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
 
@@ -2251,8 +2250,8 @@ describe("BranchFlowView", () => {
       expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
     });
 
-    // 押す操作は無いが、本番へ出るまでを見に来る手掛かりは残す（#1579の意図）
-    it("デプロイ中は「待てば進むもの」に数える", () => {
+    // 押す操作は無いので、見出しの件数には出さない（#5664）
+    it("デプロイ中は「手が要るもの」に数えない", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -2281,7 +2280,7 @@ describe("BranchFlowView", () => {
         now: new Date("2026-08-15T10:01:00Z").getTime(),
       });
 
-      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/待てば進むもの/)).toBeNull();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
   });
@@ -2347,14 +2346,14 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("動きなし")).toBeNull();
     });
 
-    describe("畳んだ行は材料が揃ってから件数を一度に出す（#4913）", () => {
+    describe("畳んだ行は届いた材料の表示から順に出す（#4913・#5666）", () => {
       const activeLane = {
         pullRequests: [makePullRequest({ number: 940 })],
         issues: [],
         branchStatuses: [branchStatus()],
       };
 
-      it("PRが揃ってもブランチ状況が未着の間は「動きなし」も件数も出さない", () => {
+      it("PRが揃ってもブランチ状況が未着の間は「動きなし」も進行中も出さない", () => {
         renderFlow({ ...activeLane, fetchedAt: null });
 
         const row = screen.getByText(REPO_SHORT).closest("button")!;
@@ -2362,6 +2361,35 @@ describe("BranchFlowView", () => {
         expect(row.querySelector(".animate-spin")).not.toBeNull();
         expect(screen.queryByText("動きなし")).toBeNull();
         expect(screen.queryByLabelText(/進行中 \d+件/)).toBeNull();
+      });
+
+      const readyIssue = {
+        number: 1,
+        title: "未着手のもの",
+        repositoryFullName: REPO,
+        state: "open" as const,
+        projectStatus: "Ready",
+      };
+      const unreleasedStatus = branchStatus({
+        developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
+      });
+
+      it("PRだけ届いた時点で未着手を出し、「読み込み中」を残す（#5666）", () => {
+        renderFlow({ issues: [readyIssue], fetchedAt: null });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(screen.getByLabelText("未着手 1件")).toBeTruthy();
+        expect(row.textContent).toContain("読み込み中");
+        expect(screen.queryByText("動きなし")).toBeNull();
+      });
+
+      it("ブランチ状況だけ届いた時点で未リリースを出し、未着手は待つ（#5666）", () => {
+        renderFlow({ issues: [readyIssue], branchStatuses: [unreleasedStatus], mergedPullRequestsLoaded: false });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(screen.getByLabelText(/^未リリース /)).toBeTruthy();
+        expect(screen.queryByLabelText("未着手 1件")).toBeNull();
+        expect(row.textContent).toContain("読み込み中");
       });
 
       it("ブランチ状況が届けば件数に切り替わる", () => {
@@ -2921,13 +2949,13 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.queryByText(/一時表示/)).toBeNull();
   });
 
-  it("「動きがある時だけ表示」で動きが無ければ省き、件数を出す", () => {
+  it("「動きがある時だけ表示」で動きが無ければ省き、見出しに省略件数を出さない（#5664）", () => {
     renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" } });
 
     expect(screen.getByText(REPO_SHORT)).toBeTruthy();
     expect(screen.queryByText(REPO2_SHORT)).toBeNull();
     expect(screen.getByText(/1リポジトリ/)).toBeTruthy();
-    expect(screen.getByText(/設定で1件を省略中/)).toBeTruthy();
+    expect(screen.queryByText(/省略中/)).toBeNull();
   });
 
   it("「動きがある時だけ表示」でも進行中のレーンがあれば表示する", () => {
@@ -2942,7 +2970,6 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
       ],
     });
     expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
-    expect(screen.queryByText(/設定で.*件を省略中/)).toBeNull();
   });
 
   it("「表示しない」は、動きがあっても並べない", () => {
@@ -2965,10 +2992,9 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
   });
 
-  it("「動きがある時だけ表示」は行の数が揃う前（読み込み中）は出さず、省略件数にも数えない（#5494）", () => {
+  it("「動きがある時だけ表示」は行の数が揃う前（読み込み中）は出さない（#5494）", () => {
     renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" }, fetchedAt: null });
     expect(screen.queryByText(REPO2_SHORT)).toBeNull();
-    expect(screen.queryByText(/設定で\d+件を省略中/)).toBeNull();
   });
 
   it("左メニューで選んだリポジトリは、設定にかかわらず並べる", () => {

@@ -887,7 +887,7 @@ ManualStepRun（1 Issueにつき1行）
 失敗（終了コード != 0）
   ↓ POST /api/manual-steps/fix（送るのは**ジョブのidだけ**）
   ↓ サーバーがDispatchJobとIssueキャッシュからコマンド・出力・手順を読み直す
-  ↓ Claude API（claude-haiku-4-5）→ {kind, cause, command, advice}
+  ↓ Claude API（claude-haiku-5-5）→ {kind, cause, command, advice}
 画面に差分（いまの本文 → 修正案）を出す
   ↓ 人が「修正を適用して実行」を押す
   ↓ PATCH /api/issues（**本文のコードブロックだけを差し替える**）
