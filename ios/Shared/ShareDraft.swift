@@ -270,8 +270,6 @@ enum ShareSessionStore {
 struct ShareRepository: Decodable, Identifiable, Equatable {
     var fullName: String
     var `private`: Bool
-    /// nilなら選べる。理由があるときは選べない
-    var disabledReason: String?
 
     var id: String { fullName }
 }
