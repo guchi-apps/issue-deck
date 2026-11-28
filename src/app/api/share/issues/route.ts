@@ -2,7 +2,7 @@ import { after, NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { createIssueForUser, fillIssueTitleByAi } from "@/lib/github/issue-create-service";
+import { createIssueForUser, fillSharedIssueByAi } from "@/lib/github/issue-create-service";
 import {
   completeIssueCreate,
   parseIdempotencyKey,
@@ -20,8 +20,9 @@ const MAX_BODY_LENGTH = 60_000;
  *
  * 作成は`POST /api/issues`と同じ経路（`createIssueForUser`）。冪等キーは必須で、連打・結果不明からの
  * 再送で二重に作らない（同じキーの再送は作成済みの結果を返し、作成中なら409）。タイトルが空なら
- * 仮タイトルで作り、応答後にAIでタイトルを書き換える（AI未設定・失敗なら仮タイトルのまま）。
- * 対象リポジトリは利用者の連携リポジトリに限り、「Issue作成の対象外」は拒否する。
+ * 仮タイトルで作る。応答後にAIがラベルを付け、空欄だったタイトルを書き換える（#5673。AI未設定・失敗なら
+ * 仮タイトル・ラベル無しのまま）。対象リポジトリは利用者の連携リポジトリに限り、「Issue作成の対象外」と
+ * 非表示のリポジトリは拒否する。
  */
 export function POST(request: NextRequest) {
   const guard = previewModeGuard();
@@ -63,10 +64,12 @@ async function handlePOST(request: NextRequest) {
     include: { installation: true },
   });
   if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  const excluded = await db.issueCreationExcludedRepository.findUnique({
-    where: { userId_repositoryId: { userId: user.id, repositoryId: repository.id } },
-  });
-  if (excluded) return NextResponse.json({ error: "repository_excluded" }, { status: 403 });
+  const target = { userId_repositoryId: { userId: user.id, repositoryId: repository.id } };
+  const [excluded, hidden] = await Promise.all([
+    db.issueCreationExcludedRepository.findUnique({ where: target }),
+    db.hiddenRepository.findUnique({ where: target }),
+  ]);
+  if (excluded || hidden) return NextResponse.json({ error: "repository_excluded" }, { status: 403 });
 
   const reservation = await reserveIssueCreate(user.id, idempotencyKey);
   if (reservation.kind === "done") return NextResponse.json({ issue: reservation.result });
@@ -92,8 +95,6 @@ async function handlePOST(request: NextRequest) {
   }
   await completeIssueCreate(user.id, idempotencyKey, result.value).catch(() => undefined);
 
-  if (!title) {
-    after(() => fillIssueTitleByAi(user, repository, result.value, body));
-  }
+  after(() => fillSharedIssueByAi(user, repository, result.value, { title, body }));
   return NextResponse.json({ issue: result.value });
 }
