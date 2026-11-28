@@ -23,6 +23,7 @@ export type IssueAttentionKind =
   | "plan"
   | "merge"
   | "plan-review-creating"
+  | "plan-review-queued"
   | "error"
   | "stalled"
   | "responded"
@@ -146,6 +147,17 @@ export function resolveIssueAttention(input: IssueAttentionInput): IssueAttentio
     };
   }
   if (isPlanReviewListStateHolding(input.planReviewState)) {
+    // 起動待ちはまだ何も動いていないので、作成中と言わない（#5667）
+    if (input.planReviewState === "queued") {
+      return {
+        kind: "plan-review-queued",
+        tone: "idle",
+        label: "計画レビュー起動待ち",
+        nextAction: "操作は不要です（レビューの開始を待っています）",
+        needsUser: false,
+        openButtonLabel: null,
+      };
+    }
     return {
       kind: "plan-review-creating",
       tone: "running",

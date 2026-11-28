@@ -35,6 +35,7 @@ const ICONS: Record<IssueAttentionKind, typeof Lock> = {
   plan: ScrollText,
   merge: GitMerge,
   "plan-review-creating": Loader2,
+  "plan-review-queued": Hourglass,
   error: AlertTriangle,
   stalled: OctagonPause,
   responded: CircleCheck,

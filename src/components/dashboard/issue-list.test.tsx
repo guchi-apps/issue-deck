@@ -610,7 +610,8 @@ describe("計画レビュー中の詳細状態（#3941）", () => {
     });
 
     expect(rowOf(1).textContent).toContain("計画レビュー中");
-    expect(rowOf(1).textContent).toContain("計画レビュー作成中");
+    // #5667: 同じ状態を行の中で2回出さない
+    expect(rowOf(1).textContent?.match(/計画レビュー作成中/g)).toHaveLength(1);
   });
 
   // #4869: 起動待ちの間も「計画を確認」が出ていた。詳細画面と同じく、猶予内だけ伏せる
@@ -633,7 +634,8 @@ describe("計画レビュー中の詳細状態（#3941）", () => {
     });
 
     expect(screen.queryByRole("button", { name: "#1の計画を確認する" })).toBeNull();
-    expect(rowOf(1).textContent).toContain("計画レビュー作成中");
+    expect(rowOf(1).textContent?.match(/計画レビュー起動待ち/g)).toHaveLength(1);
+    expect(rowOf(1).textContent).not.toContain("計画レビュー作成中");
   });
 
   it("起動待ちが猶予を超えたら「計画を確認」を出す", () => {
