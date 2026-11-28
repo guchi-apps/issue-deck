@@ -2346,14 +2346,14 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("動きなし")).toBeNull();
     });
 
-    describe("畳んだ行は材料が揃ってから件数を一度に出す（#4913）", () => {
+    describe("畳んだ行は届いた材料の表示から順に出す（#4913・#5666）", () => {
       const activeLane = {
         pullRequests: [makePullRequest({ number: 940 })],
         issues: [],
         branchStatuses: [branchStatus()],
       };
 
-      it("PRが揃ってもブランチ状況が未着の間は「動きなし」も件数も出さない", () => {
+      it("PRが揃ってもブランチ状況が未着の間は「動きなし」も進行中も出さない", () => {
         renderFlow({ ...activeLane, fetchedAt: null });
 
         const row = screen.getByText(REPO_SHORT).closest("button")!;
@@ -2361,6 +2361,35 @@ describe("BranchFlowView", () => {
         expect(row.querySelector(".animate-spin")).not.toBeNull();
         expect(screen.queryByText("動きなし")).toBeNull();
         expect(screen.queryByLabelText(/進行中 \d+件/)).toBeNull();
+      });
+
+      const readyIssue = {
+        number: 1,
+        title: "未着手のもの",
+        repositoryFullName: REPO,
+        state: "open" as const,
+        projectStatus: "Ready",
+      };
+      const unreleasedStatus = branchStatus({
+        developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
+      });
+
+      it("PRだけ届いた時点で未着手を出し、「読み込み中」を残す（#5666）", () => {
+        renderFlow({ issues: [readyIssue], fetchedAt: null });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(screen.getByLabelText("未着手 1件")).toBeTruthy();
+        expect(row.textContent).toContain("読み込み中");
+        expect(screen.queryByText("動きなし")).toBeNull();
+      });
+
+      it("ブランチ状況だけ届いた時点で未リリースを出し、未着手は待つ（#5666）", () => {
+        renderFlow({ issues: [readyIssue], branchStatuses: [unreleasedStatus], mergedPullRequestsLoaded: false });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(screen.getByLabelText(/^未リリース /)).toBeTruthy();
+        expect(screen.queryByLabelText("未着手 1件")).toBeNull();
+        expect(row.textContent).toContain("読み込み中");
       });
 
       it("ブランチ状況が届けば件数に切り替わる", () => {
