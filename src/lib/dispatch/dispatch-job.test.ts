@@ -20,6 +20,7 @@ import {
   isSessionReportedJobKind,
   resolveManualStepSessionRejection,
   isIssueExecutionPending,
+  isLaunchAwaitingSessionReport,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
   parseDispatchHostName,
@@ -598,6 +599,85 @@ describe("isIssueExecutionPending", () => {
     expect(
       isIssueExecutionPending({ job: null, blockingSession: null, actionsRun: undefined }),
     ).toBe(false);
+  });
+});
+
+// #5656。起動ジョブは「起動しました」で終わり、セッションは次の報告まで画面に出ない。
+// その隙間に「DeskMiniで開始」が出し直され、起動していないように見えていた
+describe("isLaunchAwaitingSessionReport", () => {
+  const NOW = new Date("2026-11-27T23:26:00.000Z");
+  const FINISHED_AT = "2026-11-27T23:25:36.000Z";
+  const job = {
+    kind: "LAUNCH" as const,
+    status: "SUCCEEDED" as const,
+    finishedAt: FINISHED_AT,
+    targetHost: "macmini",
+    repositoryFullName: "guchi-apps/morrow",
+    issueNumber: 1219,
+  };
+  const reportedSession = (lastReportedAt: string, host = "macmini") => ({
+    host,
+    repositoryFullName: "guchi-apps/morrow",
+    issueNumber: 1219,
+    lastReportedAt,
+  });
+
+  it("起動しました直後で、起動後の報告が無ければ待っているとみなす", () => {
+    expect(isLaunchAwaitingSessionReport({ job, sessions: [], now: NOW })).toBe(true);
+  });
+
+  // 計画レビューの指摘。同じtmux名で過去に終わった`EXITED`の行は、今回も`EXITED`で報告されても
+  // `firstSeenAt`が更新されない。`lastReportedAt`で見るので、状態を問わず報告が届けば解除する
+  it("起動後に報告が届けば（既存の行・すぐ終わったセッションでも）待たない", () => {
+    expect(
+      isLaunchAwaitingSessionReport({
+        job,
+        sessions: [reportedSession("2026-11-27T23:25:40.000Z")],
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it("起動より前の報告・別ホストの報告では解除しない", () => {
+    expect(
+      isLaunchAwaitingSessionReport({
+        job,
+        sessions: [
+          reportedSession("2026-11-27T23:20:00.000Z"),
+          reportedSession("2026-11-27T23:25:50.000Z", "subpc"),
+        ],
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it("上限（3分）を過ぎれば、報告が無くても立て直しの導線を戻す", () => {
+    expect(
+      isLaunchAwaitingSessionReport({
+        job,
+        sessions: [],
+        now: new Date(Date.parse(FINISHED_AT) + 3 * 60 * 1000),
+      }),
+    ).toBe(false);
+  });
+
+  it("起動しました以外のジョブ・ジョブが無いときは対象外", () => {
+    expect(isLaunchAwaitingSessionReport({ job: null, sessions: [], now: NOW })).toBe(false);
+    for (const status of ["QUEUED", "RUNNING", "FAILED", "SKIPPED"] as const) {
+      expect(
+        isLaunchAwaitingSessionReport({ job: { ...job, status }, sessions: [], now: NOW }),
+      ).toBe(false);
+    }
+  });
+
+  it("isIssueExecutionPendingは待っている間を走っているとみなす", () => {
+    expect(
+      isIssueExecutionPending({
+        job: { status: "SUCCEEDED" },
+        blockingSession: null,
+        awaitingSessionReport: true,
+      }),
+    ).toBe(true);
   });
 });
 

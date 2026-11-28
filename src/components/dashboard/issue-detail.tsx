@@ -61,6 +61,7 @@ import {
   findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
+  isLaunchAwaitingSessionReport,
   isPlanReviewAttentionHeld,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
@@ -670,9 +671,18 @@ export function IssueDetail({
   // **GitHub Actionsの実行中も同じく出さない**（#2032）。ジョブもセッションも無いまま
   // 「サブPCで開始」だけが残り、Actionsと同じブランチをサブPCが別に進めてしまっていた。
   // 実行状況は既にこの画面が持っている（`useIssueWorkflowRun`）ので、取得口は増やさない
+  // 起動直後でセッションの報告がまだ届いていない間も「実行中」として扱う（#5656）。ジョブは
+  // 「起動しました」で終わり、セッションは次の報告まで見えないため、その間「DeskMiniで開始」が
+  // 出し直されて起動していないように見えていた（押せば二重に起動する）
+  const awaitingSessionReport = isLaunchAwaitingSessionReport({
+    job: dispatchJob,
+    sessions: dispatch.sessions,
+    now: new Date(),
+  });
   const executionPending = isIssueExecutionPending({
     job: dispatchJob,
     blockingSession,
+    awaitingSessionReport,
     actionsRun: workflowRun,
   });
   // 主導線（塗りつぶしの「実装を開始」）は`11.local`でも引っ込める（#1815）。ジョブ・セッションが
@@ -680,6 +690,7 @@ export function IssueDetail({
   const executionStarted = isIssueExecutionStarted({
     job: dispatchJob,
     blockingSession,
+    awaitingSessionReport,
     labels: issue.labels,
   });
   // 開始の主導線を出すか。`StartLocalSessionButton`の起動ボタンは、これが出ていないときだけ出す

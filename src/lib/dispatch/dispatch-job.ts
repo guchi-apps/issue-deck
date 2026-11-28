@@ -1092,6 +1092,9 @@ export type DispatchEnqueueRejection =
   | "repository_not_runnable"
   | "already_queued"
   | "session_alive"
+  // 起動した直後で、起動したセッションの報告がまだ届いていない（#5656）。
+  // 判定は`isLaunchAwaitingSessionReport`と同じ
+  | "launch_awaiting_session"
   // 既定以外のエージェントを、対応を申告していないホストへ積もうとした（#2505）。
   // **理由の文言は`resolveDispatchAgentRejection`が持つ**（画面と同じものを使う）ので、
   // ここでは受け取った文言をそのまま返す経路になる
@@ -1128,6 +1131,9 @@ export function describeDispatchEnqueueRejection(
       return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
     case "already_queued":
       return "このIssueには実行中または待機中のジョブが既にあります。";
+    case "launch_awaiting_session":
+      // 起動した先は積み先と違うことがある（別ホストで起動した直後）ので、ホスト名は出さない
+      return "このIssueは起動した直後で、セッションの報告を待っています。1分ほどで様子が表示されます。";
     case "session_alive": {
       // **セッション名まで出す。** 畳むにはサブPCでその名前を指す必要があり、名前が無いと
       // 「押せないが、どうすれば押せるようになるか分からない」で終わる
@@ -1908,6 +1914,11 @@ export function isIssueExecutionPending(params: {
   /** 動いているセッション（`findBlockingSession`の結果） */
   blockingSession: DispatchSessionView | null;
   /**
+   * 起動直後でセッションの報告がまだ届いていないか（`isLaunchAwaitingSessionReport`の結果。#5656）。
+   * **省略できる**（セッション一覧を持っていない呼び出し元は従来どおりの判定になる）。
+   */
+  awaitingSessionReport?: boolean;
+  /**
    * そのIssueで走っているGitHub Actionsの実行（`useIssueWorkflowRun`の`run`）。#2032。
    *
    * **省略できる。** 実行状況を持っていない画面（取得口を増やしたくない場所）からは渡さず、
@@ -1917,7 +1928,57 @@ export function isIssueExecutionPending(params: {
 }): boolean {
   if (params.job !== null && isActiveDispatchJobStatus(params.job.status)) return true;
   if (params.blockingSession !== null) return true;
+  if (params.awaitingSessionReport) return true;
   return isActionsRunInProgress(params.actionsRun);
+}
+
+/**
+ * 起動ジョブが「起動しました」になってから、セッションの報告を待つ上限（#5656）。
+ *
+ * 報告はpollerの巡回（既定30秒＋巡回本体の所要時間）に載るため、通常は数秒〜1分強で届く。
+ * 報告が来ないまま（起動直後にtmuxごと消えた等）でも、この時間を過ぎれば立て直しの導線を戻す。
+ */
+export const LAUNCH_SESSION_REPORT_GRACE_MS = 3 * 60 * 1000;
+
+/**
+ * 起動直後で、起動したセッションの報告がまだ届いていないか（#5656）。
+ *
+ * 起動ジョブは「tmuxセッションが立った」時点で`SUCCEEDED`（終了扱い）になる一方、
+ * セッションが画面へ届くのはpollerの次の報告から。**その間はジョブも生きているセッションも
+ * 見えず、Issue詳細が「DeskMiniで開始」を出し直して起動していないように見えていた**
+ * （押せば同じIssueを二重に起動する）。この隙間を「実行中」として扱うための判定。
+ *
+ * **起動後の報告は`lastReportedAt`で見分ける**（`firstSeenAt`ではない）。行は
+ * `host + tmuxSessionName`でupsertされ、`firstSeenAt`は作成時と`ALIVE`へ戻ったときにしか
+ * 更新されない。過去に同じ名前で終わった`EXITED`の行へ今回も`EXITED`が報告された場合、
+ * `firstSeenAt`では今回の報告を見分けられない。報告は巡ごとに全行の`lastReportedAt`を
+ * 更新するので、ジョブの`finishedAt`以降なら起動後の報告と分かる。**状態は問わない**
+ * （すぐ落ちたセッションも、報告が届けば立て直しの導線を戻す）。
+ */
+export function isLaunchAwaitingSessionReport(params: {
+  job: Pick<
+    DispatchJobView,
+    "kind" | "status" | "finishedAt" | "targetHost" | "repositoryFullName" | "issueNumber"
+  > | null;
+  sessions: readonly Pick<
+    DispatchSessionView,
+    "host" | "repositoryFullName" | "issueNumber" | "lastReportedAt"
+  >[];
+  now: Date;
+}): boolean {
+  const { job } = params;
+  if (!job || job.kind !== "LAUNCH" || job.status !== "SUCCEEDED" || !job.finishedAt) return false;
+  const finishedAt = Date.parse(job.finishedAt);
+  if (Number.isNaN(finishedAt)) return false;
+  if (params.now.getTime() - finishedAt >= LAUNCH_SESSION_REPORT_GRACE_MS) return false;
+  const reported = params.sessions.some(
+    (session) =>
+      session.host === job.targetHost &&
+      session.repositoryFullName === job.repositoryFullName &&
+      session.issueNumber === job.issueNumber &&
+      Date.parse(session.lastReportedAt) >= finishedAt,
+  );
+  return !reported;
 }
 
 /**

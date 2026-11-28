@@ -4870,6 +4870,12 @@ run_remote_session_job() {
   fi
 }
 
+# この巡でセッションを1つ以上起動できたか（#5656）。`run_once`がジョブの処理後に見て、
+# 立ったばかりのセッションをその場で報告し直す。報告は巡の冒頭（取得より前）にしか無いため、
+# 立てただけだと次の巡まで（実測で約1分）画面にセッションが出ず、「起動しました」なのに
+# 何も動いていないように見えていた
+SESSION_LAUNCHED_IN_SWEEP=0
+
 launch_and_report() {
   local job_id="$1" expected_session="$2" running_message="$3"
   shift 3
@@ -4938,6 +4944,8 @@ launch_and_report() {
     local session
     session="$(printf '%s\n' "$new_sessions" | head -1)"
     report_job "$job_id" succeeded "tmuxセッション $session を起動しました" "$session"
+    # 起動したセッションを、次の巡回を待たずにこの巡の終わりで報告する（#5656）
+    SESSION_LAUNCHED_IN_SWEEP=1
   else
     # 起動の出力をそのまま返す。受け口は「何を直せばよいか」まで書いて止まるため、
     # 画面にそのまま出せば原因が分かる。
@@ -5152,12 +5160,27 @@ run_once() {
   fi
 
   echo "$job_count 件のジョブを取得しました。"
+  run_claimed_jobs "$jobs_json"
+  exec_pending_self_update
+  return 0
+}
+
+# 重い巡回で取得したジョブを順に実行する。**セッションを1つでも起動できたら、その場で
+# セッションを報告し直す**（#5656）。報告は巡の冒頭（取得より前）にしか無く、立てただけだと
+# 次の巡まで（実測で約1分）画面にセッションが出ない。その間ジョブは「起動しました」で終わって
+# いるため、Issue詳細が開始ボタンを出し直し、起動していないように見えていた。
+# 報告に失敗しても巡回は止めない（次の巡で報告される）
+run_claimed_jobs() {
+  local jobs_json="$1" job
+  SESSION_LAUNCHED_IN_SWEEP=0
   while IFS= read -r job; do
     [[ -n "$job" ]] || continue
     run_job "$job"
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
-  exec_pending_self_update
-  return 0
+  if [[ "$SESSION_LAUNCHED_IN_SWEEP" -eq 1 ]]; then
+    SESSION_LAUNCHED_IN_SWEEP=0
+    report_sessions || true
+  fi
 }
 
 # --- 軽い巡回（#2413）----------------------------------------------------------

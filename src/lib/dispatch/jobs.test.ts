@@ -556,6 +556,60 @@ describe("enqueueDispatchJob のセッション生存ガード", () => {
     expect(result.rejection).toBe("session_alive");
   });
 
+  // #5656。起動ジョブは「起動しました」で終わり、セッションは次の報告まで`ALIVE`にならない。
+  // その間に積めると、同じIssueを二重に起動する
+  describe("起動直後でセッションの報告待ち", () => {
+    const finishedAt = new Date(NOW.getTime() - 30 * 1000);
+
+    beforeEach(() => {
+      dispatchJobFindFirst.mockImplementation(async ({ where }: { where: { status?: string } }) =>
+        where.status === "SUCCEEDED"
+          ? { targetHost: "macmini", finishedAt }
+          : null,
+      );
+    });
+
+    it("起動後の報告がまだ無ければ積まない", async () => {
+      const result = await enqueue();
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.rejection).toBe("launch_awaiting_session");
+      expect(dispatchJobCreate).not.toHaveBeenCalled();
+      // 起動したホスト・起動以降の報告で探す（状態は問わない）
+      expect(dispatchSessionFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            host: "macmini",
+            repositoryFullName: REPOSITORY,
+            issueNumber: 1311,
+            lastReportedAt: { gte: finishedAt },
+          },
+        }),
+      );
+    });
+
+    it("起動後の報告が届いていれば（すぐ終わった`EXITED`でも）積める", async () => {
+      dispatchSessionFindFirst.mockImplementation(async ({ where }: { where: { state?: string } }) =>
+        where.state === "ALIVE" ? null : { id: "s1" },
+      );
+      const result = await enqueue();
+      expect(result.ok).toBe(true);
+    });
+
+    // 引き継ぎ起動・付け替えは生きているセッションを承知で積むので、ここでも止めない
+    it("引き継ぎ（handoffFrom）なら止めない", async () => {
+      const result = await enqueueDispatchJob({
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        hostName: "subpc",
+        handoffFrom: "claude",
+        requestedByUserId: null,
+        now: NOW,
+      });
+      expect(result.ok).toBe(true);
+    });
+  });
+
   // 申告が無い・応答していないホストの判定は従来どおり先に出す
   it("ホストの状態の判定はセッションより先", async () => {
     dispatchHostFindUnique.mockResolvedValue(

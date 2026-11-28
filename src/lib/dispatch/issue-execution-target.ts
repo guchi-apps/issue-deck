@@ -101,6 +101,8 @@ export function isIssueExecutionStarted(params: {
   job: Pick<DispatchJobView, "status"> | null;
   /** 動いているセッション（`findBlockingSession`の結果） */
   blockingSession: DispatchSessionView | null;
+  /** 起動直後でセッションの報告待ちか（`isLaunchAwaitingSessionReport`の結果。#5656） */
+  awaitingSessionReport?: boolean;
   /** Issueに付いているラベル */
   labels: readonly { name: string }[];
 }): boolean {
