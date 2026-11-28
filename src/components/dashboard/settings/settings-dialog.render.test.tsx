@@ -180,8 +180,6 @@ describe("SettingsDialog", () => {
     expect(localActive?.textContent).toContain("Claude Code のとき");
     // GitHub ActionsのCodexモデルは、エージェントがClaudeでも常に表示する
     expect(screen.getByLabelText("計画・実装・レビュー", { selector: "#github-actions-codex-model" })).toBeTruthy();
-    // 即時保存の欄だけに印を付ける
-    expect(within(screen.getByTestId("release-auto-approval-field")).getByText("すぐ保存")).toBeTruthy();
   });
 
   it("保存バーに未保存の項目名を出し、元に戻すで編集前へ戻す（#5643）", () => {

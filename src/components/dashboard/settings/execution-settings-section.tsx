@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GitBranch, Laptop, Sparkles } from "lucide-react";
 
-import { ReleaseAutoApprovalField } from "@/components/dashboard/settings/release-auto-approval-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -802,7 +801,6 @@ export function ExecutionSettingsSection({
               </SettingField>
             </div>
 
-            <ReleaseAutoApprovalField />
           </div>
         </SettingsCard>
 

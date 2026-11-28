@@ -93,8 +93,8 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     expect(screen.queryByRole("button", { name: "起動する" })).toBeNull();
     modeState.mode = { mode: "candidate", label: "候補" };
     rerender(<MobileReleaseSheet {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
-    expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "本番公開を開始" }));
+    expect(screen.getByText("本番公開を開始しますか？")).toBeTruthy();
   });
 
   it("aide-iosではMacの手順を出し、リリース開始ボタンは出さない", () => {
@@ -107,7 +107,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     );
 
     expect(screen.getByText("AIDE-iosを実機へ反映する手順")).not.toBeNull();
-    expect(screen.queryByText("候補を作成して検証")).toBeNull();
+    expect(screen.queryByText("本番公開を開始")).toBeNull();
   });
 
   it("myroomではWeb/iOS本体の2種類の手順を出し、リリース開始ボタンは通常どおり出す", () => {
@@ -123,7 +123,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     expect(
       screen.getByText("アプリ本体の入れ直し（ios/・アプリアイコンの変更）"),
     ).not.toBeNull();
-    expect(screen.getByText("候補を作成して検証")).not.toBeNull();
+    expect(screen.getByText("本番公開を開始")).not.toBeNull();
   });
 
   it("iOSアプリを持たないリポジトリでは、どちらの案内も出さない（完了条件）", () => {
@@ -137,7 +137,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
 
     expect(screen.queryByText("AIDE-iosを実機へ反映する手順")).toBeNull();
     expect(screen.queryByText(/Webだけ更新/)).toBeNull();
-    expect(screen.getByText("候補を作成して検証")).not.toBeNull();
+    expect(screen.getByText("本番公開を開始")).not.toBeNull();
   });
 
   it("本番デプロイ失敗中は確認チェックを付けたときだけ手動上書きを渡す", () => {

@@ -3,6 +3,7 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { useReleaseReadOnly } from "@/components/dashboard/release-read-only";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RcImportPanel } from "@/components/dashboard/release-rc-import-panel";
 import { ReleaseCompletionPanel, useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
@@ -62,6 +63,7 @@ export function ReleaseFixStartButton({
   /** 作成直後（#4956）。修正Issueが一覧へ取り込まれるまでボタンを無効にして待つ */
   waitForIssue?: boolean;
 }) {
+  const readOnly = useReleaseReadOnly();
   const openStart = useContext(ReleaseFixStartContext);
   const { openIssue } = useReferenceNavigation();
   const [busy, setBusy] = useState(false);
@@ -129,6 +131,7 @@ export function ReleaseFixStartButton({
 
   const started = startState !== "none";
   const syncing = syncState !== "ready";
+  if (readOnly) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="release-fix-start">
       {started && (
@@ -199,6 +202,7 @@ export function ReleaseFixCreate({
   suggestionsFrom?: number;
   onDone?: () => void;
 }) {
+  const readOnly = useReleaseReadOnly();
   const excluded = (finding: ReleaseReviewFinding) => Boolean(finding.id && excludedFindingIds?.includes(finding.id));
   const [selected, setSelected] = useState<number[]>(() =>
     (findings ?? []).flatMap((finding, i) => (excluded(finding) ? [] : [i])),
@@ -260,6 +264,7 @@ export function ReleaseFixCreate({
   );
 
   const canSubmit = !busy && (sourceKind === "integration_failure" || selected.length > 0) && (!needsDecision || question.trim() !== "");
+  if (readOnly) return null;
   return (
     <div id="release-fix-create" className="flex flex-col gap-1.5 rounded border border-dashed px-2 py-1.5" data-testid="release-fix-create">
       <p className="font-medium">修正Issueを作成（このリリースへの修正として追跡します）</p>
@@ -910,6 +915,7 @@ export function ReleaseContentsList({
   onRcChanged?: () => void;
 }) {
   const { contents, repositoryFullName } = state;
+  const readOnly = useReleaseReadOnly();
   const [importOpen, setImportOpen] = useState(false);
   const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
   return (
@@ -967,7 +973,7 @@ export function ReleaseContentsList({
           {contents.truncated && (
             <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
           )}
-          {state.rcCandidate && rcPhase === "review" && (
+          {!readOnly && state.rcCandidate && rcPhase === "review" && (
             <details className="mt-1" data-testid="release-contents-import" onToggle={(e) => setImportOpen(e.currentTarget.open)}>
               <summary className="w-fit cursor-pointer text-primary hover:underline">＋ 取り込むPRを追加</summary>
               {importOpen && (
@@ -977,7 +983,7 @@ export function ReleaseContentsList({
               )}
             </details>
           )}
-          {state.rcCandidate && (rcPhase === "preparing" || rcPhase === "awaiting_approval") && (
+          {!readOnly && state.rcCandidate && (rcPhase === "preparing" || rcPhase === "awaiting_approval") && (
             <p className="text-muted-foreground" data-testid="release-contents-locked">
               公開準備以降は取り込むPRを追加できません。変えるときは候補を取り消して、新しい候補を作り直してください。
             </p>

@@ -53,7 +53,7 @@ describe("リリース準備の状態（#4421）", () => {
     );
     expect(screen.getByText(/操作せずお待ちください/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "リリース準備中" }));
-    const action = screen.getByRole("button", { name: "候補を作成する" });
+    const action = screen.getByRole("button", { name: "本番公開を開始する" });
     expect(action.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(action);
@@ -88,29 +88,29 @@ describe("開始方式（#4604）", () => {
     expect(requestRelease).not.toHaveBeenCalled();
     startMode = { mode: "candidate" };
     rerender(<RepositoryReleaseButton {...base} />);
-    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
-    expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "本番公開を開始" }));
+    expect(screen.getByText("本番公開を開始しますか？")).toBeTruthy();
   });
 
-  it("新方式に対応したrepoでは「候補を作成して検証」と出し、上げ幅の選択を出さない", () => {
+  it("新方式に対応したrepoでは「本番公開を開始」と出し、上げ幅の選択を出さない", () => {
     startMode = { mode: "candidate" };
     render(<RepositoryReleaseButton {...base} />);
-    fireEvent.click(screen.getByRole("button", { name: /候補を作成して検証/ }));
-    expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /本番公開を開始/ }));
+    expect(screen.getByText("本番公開を開始しますか？")).toBeTruthy();
     expect(screen.queryByText(/上げ幅/)).toBeNull();
   });
 
   it("判定できないrepoでは押せず、理由を出す", () => {
     startMode = { mode: "unknown", label: "判定できません" };
     render(<RepositoryReleaseButton {...base} />);
-    expect((screen.getByRole("button", { name: /候補を作成して検証/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /本番公開を開始/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("判定できません")).toBeTruthy();
   });
 
   it("未対応repoは旧方式へ落とさず、押せずに更新手順を出す（#4623）", () => {
     startMode = { mode: "legacy", label: "callerを更新してください" };
     render(<RepositoryReleaseButton {...base} />);
-    expect((screen.getByRole("button", { name: /候補を作成して検証/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /本番公開を開始/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("callerを更新してください")).toBeTruthy();
     expect(requestRelease).not.toHaveBeenCalled();
   });
@@ -121,8 +121,8 @@ describe("送信中でも閉じられる（#5514）", () => {
     startMode = { mode: "candidate" };
     requestRelease.mockImplementationOnce(() => new Promise(() => {}));
     render(<RepositoryReleaseButton repositoryFullName="o/r" isPending={false} onTriggered={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
-    fireEvent.click(screen.getByRole("button", { name: "候補を作成する" }));
+    fireEvent.click(screen.getByRole("button", { name: "本番公開を開始" }));
+    fireEvent.click(screen.getByRole("button", { name: "本番公開を開始する" }));
     expect(await screen.findByTestId("release-start-pending")).toBeTruthy();
     const close = screen.getByRole("button", { name: "閉じる" });
     expect(close.hasAttribute("disabled")).toBe(false);

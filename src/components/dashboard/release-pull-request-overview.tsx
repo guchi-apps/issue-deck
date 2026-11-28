@@ -7,6 +7,8 @@ import { formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
+import { autoPublishViewOf, ReleaseAutoPublishCard } from "@/components/dashboard/release-auto-publish-card";
+import { ReleaseReadOnlyContext } from "@/components/dashboard/release-read-only";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { canShowRcCancel, ReleaseRcCancel } from "@/components/dashboard/release-rc-cancel";
 import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
@@ -254,15 +256,18 @@ export function ReleasePullRequestOverview({
     setRefresh({ token: reloadToken + 1, before: snapshot });
     reload();
   };
+  // 本番公開の全自動の候補は、工程と操作をカードにまとめる。動いている間（mainマージ前）は手動の操作を出さない
+  const autoView = autoPublishViewOf(rcCandidate, state.previousResults ? null : verification);
+  const hideManual = autoView?.hideManual === true;
   // 新方式の候補では、修正の自動継続の入口を「おまかせで公開承認まで進める」1つにする（#5138・#5369）。
   // 自動修正で解消できない要確認（指摘0件）のときは、ボタンでなく再実行・判断への案内を出す
   const autoProceedMode =
-    rcCandidate !== null && !state.previousResults && verification !== null
+    rcCandidate !== null && autoView === null && !state.previousResults && verification !== null
       ? decideAutoProceedMode(verification, state.completionRun?.active ?? false)
       : null;
   const autoProceed = autoProceedMode === "table" || autoProceedMode === "start";
   // 新方式の候補で工程が出ている間は、状態・次の手を「いま・担当・次」に一本化する（#5290）
-  const unified = rcCandidate !== null && journey !== null;
+  const unified = rcCandidate !== null && journey !== null && autoView === null;
   const finalization = rc.overview?.finalization ?? null;
   // 全体レビューが合格していない候補の「結果を承知で公開へ進む」は、主操作ではないので「その他の操作」へ置く（#5290）
   const waiverStart =
@@ -275,6 +280,7 @@ export function ReleasePullRequestOverview({
   const moreCount = (manualPublish ? 1 : 0) + (waiverStart ? 1 : 0) + (cancelInMore ? 1 : 0);
 
   return (
+    <ReleaseReadOnlyContext.Provider value={hideManual}>
     <div className="-mx-4 flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
       {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
       {rcCandidate ? (
@@ -296,7 +302,7 @@ export function ReleasePullRequestOverview({
       <section aria-label="現在の状態と次の操作" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 text-xs">
         {/* 新方式の候補は、ブランチ画面・PR一覧と同じ工程と「いま・担当・次」を先頭に出す（#5076）。主操作は1つで、
             承認を経ない手動の公開は「その他の操作」へ下げる（承認そのもののボタンは下の「公開準備」にある） */}
-        {journey && (
+        {journey && autoView === null && (
           <div className="flex flex-col gap-2 text-xs" data-testid="release-pull-request-journey">
             <ReleaseJourneySteps journey={journey} hideChecks={rcCandidate !== null} />
             <ReleaseJourneyNow
@@ -348,6 +354,15 @@ export function ReleasePullRequestOverview({
             />
           </div>
         )}
+        {rcCandidate && autoView && (
+          <>
+            <ReleaseAutoPublishCard candidate={rcCandidate} repositoryFullName={repositoryFullName} verification={verification} onChanged={rc.reload} />
+            <Button type="button" variant="outline" size="sm" className="w-fit" disabled={refreshing} aria-busy={refreshing} onClick={startRefresh}>
+              {refreshing ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+              {refreshing ? "取得中…" : "状態を取り直す"}
+            </Button>
+          </>
+        )}
         {autoProceedMode !== null && verification && (
           <ReleaseAutoProceedPanel
             repositoryFullName={repositoryFullName}
@@ -358,13 +373,14 @@ export function ReleasePullRequestOverview({
             manualHref="#release-candidate-verification"
           />
         )}
+        {!hideManual && (
         <ReleaseFixSummary
           state={state}
           showPhases
-          primaryAsSecondary={autoProceed}
+          primaryAsSecondary={autoProceed || autoView !== null}
           hideSummary={unified}
           hideFixEntry={unified && autoProceed}
-          completionAsSecondary={autoProceed || (journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user"))}
+          completionAsSecondary={autoView !== null || autoProceed || (journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user"))}
           extraAction={
             journey ? null : (
               <div className="pt-1">
@@ -373,11 +389,12 @@ export function ReleasePullRequestOverview({
             )
           }
         />
+        )}
       </section>
 
       {/* 公開準備は状態と主操作の直後に置く（合格後の主操作は「公開準備へ進む」。#4635） */}
       {/* 結果を承知で進む開始だけの間は「その他の操作」に置いたので、ここには出さない（#5290） */}
-      {rcCandidate && finalization && !waiverStart && (
+      {rcCandidate && finalization && !waiverStart && !hideManual && (
         <ReleaseRcFinalizePanel
           candidate={rcCandidate}
           finalization={finalization}
@@ -447,5 +464,6 @@ export function ReleasePullRequestOverview({
         </section>
       )}
     </div>
+    </ReleaseReadOnlyContext.Provider>
   );
 }

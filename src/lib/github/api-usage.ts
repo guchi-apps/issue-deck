@@ -128,7 +128,7 @@ export const GITHUB_API_FEATURES = [
   { key: "release_fix_sweep", label: "リリース候補の修正系列の巡回" },
   { key: "deploy_recovery_sweep", label: "本番復旧系列の巡回" },
   { key: "release_completion_sweep", label: "リリース完了系列の巡回" },
-  { key: "release_auto_approval_sweep", label: "RCの公開承認の自動化の巡回" },
+  { key: "release_autopilot_sweep", label: "本番公開の全自動の巡回" },
   { key: "develop_sync_sweep", label: "本番公開後のdevelop同期の巡回" },
   { key: "rc_production_sweep", label: "リリース候補の稼働確認の巡回" },
   { key: "rebuild_history_sweep", label: "リリース作り直し履歴の掃除" },

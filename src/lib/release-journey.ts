@@ -448,6 +448,20 @@ export function resolveReleaseJourney({
     }
   }
 
+  // 本番公開の全自動（承認の工程は出さない）。動いている間は利用者の番にせず、止まったらいまの工程を利用者の番にする
+  if (rc?.autoPublish && rank !== null && rank < 4) {
+    const current = (["create", "verify", "final", "merge"] as const).find((key) => d[key].state !== "done") ?? "merge";
+    if (rc.autoPublishActive) {
+      if (rc.phase === "review" && (d.verify.state === "user" || d.verify.state === "failed")) {
+        d.verify = draft("fixing", d.verify.status, "指摘の確定と修正は自動で行います。操作は不要です");
+      } else if (rc.phase === "review" && d.verify.state === "done") {
+        d.final = draft("waiting", "自動で公開準備へ進みます", "操作は不要です");
+      }
+    } else {
+      d[current] = draft("user", "自動公開を停止", rc.autoPublishStopReason ?? null);
+    }
+  }
+
   // 画面の取得に失敗している間は、動いている区切りを「取得不能」にする（古い進行を現在の進行に見せない）
   const stale = snapshot?.failed === true;
   if (stale) {
@@ -456,7 +470,12 @@ export function resolveReleaseJourney({
     }
   }
 
-  const steps: JourneyStep[] = ORDER.map((key) => ({ key, label: JOURNEY_STEP_LABEL[key], at: null, ...d[key] }));
+  const steps: JourneyStep[] = ORDER.filter((key) => !(rc?.autoPublish && key === "approve")).map((key) => ({
+    key,
+    label: rc?.autoPublish && key === "verify" ? "検証と修正" : JOURNEY_STEP_LABEL[key],
+    at: null,
+    ...d[key],
+  }));
   const active = steps
     .filter((step): step is JourneyStep & { state: JourneyTone; status: string } => step.status !== null && step.state in TONE_RANK)
     // 同じ重さなら工程の順を保つ（sortは安定）
@@ -473,7 +492,7 @@ export function resolveReleaseJourney({
     headline,
     owner: ownerOf(headline?.tone ?? null),
     attention: headline?.tone === "user" ? journeyAttentionOf(headline.key) : null,
-    next: headline ? nextOf(headline.key, headline.tone, legacy, approval?.status ?? null) : null,
+    next: headline ? nextOf(headline.key, headline.tone, legacy, approval?.status ?? null, rc?.autoPublishActive === true) : null,
     // RC検証の中で並行して進む・止まっている検証も隠さない（区切りの見出しに選ばれたもの以外）
     others: [
       ...rest.map((step) => step.status),
@@ -531,9 +550,12 @@ export function journeyAttentionOf(key: JourneyStepKey): JourneyAttention {
 }
 
 /** いまの工程から、次に起きること・必要な操作を1文で */
-function nextOf(key: JourneyStepKey, tone: JourneyTone, legacy: boolean, approvalStatus: string | null): string {
+function nextOf(key: JourneyStepKey, tone: JourneyTone, legacy: boolean, approvalStatus: string | null, autoPublish: boolean): string {
   if (tone === "unknown") return "通信が戻ると自動で取り直します。急ぐときは更新してください";
   const auto = tone === "running" || tone === "waiting" || tone === "fixing";
+  if (autoPublish && auto && (key === "verify" || key === "final")) {
+    return "操作は不要です。検証に合格すると、本番公開まで自動で進みます";
+  }
   switch (key) {
     case "create":
       if (tone === "user") return "バージョンバンプのPRをdevelopへマージしてください";

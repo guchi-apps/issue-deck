@@ -180,7 +180,7 @@ export function RepositoryReleaseButton({
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || startMode?.mode === "develop_sync" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || startMode?.mode === "develop_sync" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "本番公開を開始"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
       {(startUnknown || (startMode?.mode === "candidate" && (startMode.successorOf || productionKindNotice(startMode.productionKind)))) && (
@@ -205,10 +205,10 @@ export function RepositoryReleaseButton({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "本番公開を開始しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
               {candidateMode
-                ? `${repositoryFullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は、合格後の「公開準備」で初めて上げます。`
+                ? `${repositoryFullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証から本番mainへのマージ・稼働確認まで自動で進めます。この操作が公開承認になります。指摘はAIの推奨で確定して自動で修正し、進められないときは止めて通知します。`
                 : `${repositoryFullName}のdevelopをmainへ反映する修正リリースを起動します（本番デプロイ失敗中の例外操作）。`}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -267,7 +267,7 @@ export function RepositoryReleaseButton({
                 void handleTrigger();
               }}
             >
-              {isTriggering ? "起動中..." : candidateMode ? "候補を作成する" : "起動する"}
+              {isTriggering ? "起動中..." : candidateMode ? "本番公開を開始する" : "起動する"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -7,6 +7,9 @@ import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice"
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
 import { ReleaseRcNextStep } from "@/components/dashboard/release-rc-next-step";
 import { ConnectedReleaseAutoProceedPanel } from "@/components/dashboard/release-auto-proceed-panel";
+import { autoPublishViewOf, ReleaseAutoPublishCard } from "@/components/dashboard/release-auto-publish-card";
+import { ReleaseReadOnlyContext } from "@/components/dashboard/release-read-only";
+import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
@@ -89,6 +92,10 @@ export function MobileReleaseSheet({
   const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
   const rc = useReleaseRc(repository.fullName, releasePr?.number ?? 0, open && releasePr !== null);
   const rcCandidate = releasePr && isRcReleaseCandidateHeadRef(releasePr.headRef ?? "") ? (rc.overview?.candidate ?? null) : null;
+  // 本番公開の全自動の候補は、工程と操作をカードにまとめる（PCの本番PR詳細と同じ判定）
+  const autoVerification = useReleaseVerification(repository.fullName, releasePr?.number ?? 0, open && Boolean(rcCandidate?.autoPublish), 0).verification;
+  const autoView = autoPublishViewOf(rcCandidate, autoVerification);
+  const hideManual = autoView?.hideManual === true;
   const rcLegacy = releasePr && rc.overview?.legacy?.prNumber === releasePr.number ? rc.overview.legacy : null;
   const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
   const deployFailed = deployRun?.status === "completed" &&
@@ -135,15 +142,18 @@ export function MobileReleaseSheet({
           {releaseStatus?.available && (
             <div className="flex flex-col gap-3">
               {rcCandidate && <ReleaseRcIdentity candidate={rcCandidate} />}
-              {rcCandidate && <ReleaseRcNextStep candidate={rcCandidate} />}
+              {rcCandidate && !autoView && <ReleaseRcNextStep candidate={rcCandidate} />}
               {/* 未判断の止める指摘があるときの一括判定と「おまかせで公開承認まで進める」（#5138） */}
-              {rcCandidate && releaseStatus.phase === "release_pr_open" && releaseStatus.releasePullRequest && (
+              {rcCandidate && autoView && (
+                <ReleaseAutoPublishCard candidate={rcCandidate} repositoryFullName={repository.fullName} verification={autoVerification} onChanged={rc.reload} />
+              )}
+              {rcCandidate && !autoView && releaseStatus.phase === "release_pr_open" && releaseStatus.releasePullRequest && (
                 <ConnectedReleaseAutoProceedPanel
                   repositoryFullName={repository.fullName}
                   pullRequestNumber={releaseStatus.releasePullRequest.number}
                 />
               )}
-              {rcCandidate && rc.overview?.finalization && (
+              {rcCandidate && !hideManual && rc.overview?.finalization && (
                 <ReleaseRcFinalizePanel
                   candidate={rcCandidate}
                   finalization={rc.overview.finalization}
@@ -163,11 +173,13 @@ export function MobileReleaseSheet({
               {/* リリースPRの3区分（全体レビュー／統合検証／個別PRレビュー。#4238・#4277）。進捗を追うため
                   シートのポーリングとは別に、区分の状態は部品自身が短い間隔で取り直す */}
               {releaseStatus.phase === "release_pr_open" && releaseStatus.releasePullRequest?.headRef && (
+                <ReleaseReadOnlyContext.Provider value={hideManual}>
                 <ConnectedReleaseReviewSections
                   repositoryFullName={repository.fullName}
                   pullRequestNumber={releaseStatus.releasePullRequest.number}
                   headRef={releaseStatus.releasePullRequest.headRef}
                 />
+                </ReleaseReadOnlyContext.Provider>
               )}
               {rcCandidate && (
                 <ReleaseRcVerificationEvidence candidate={rcCandidate} finalization={rc.overview?.finalization?.current ?? null} />
@@ -206,7 +218,7 @@ export function MobileReleaseSheet({
                         ? "準備に失敗"
                         : deployFailed
                           ? "修正リリース"
-                          : "候補を作成して検証"}
+                          : "本番公開を開始"}
                 </Button>
               )}
               {!deviceBuild && (startUnknown || (startMode?.mode === "candidate" && (startMode.successorOf || productionKindNotice(startMode.productionKind)))) && (
@@ -266,10 +278,10 @@ export function MobileReleaseSheet({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "本番公開を開始しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
               {candidateMode
-                ? `${repository.fullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は合格後の「公開準備」で初めて上げます。`
+                ? `${repository.fullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証から本番mainへのマージ・稼働確認まで自動で進めます。この操作が公開承認になります。指摘はAIの推奨で確定して自動で修正し、進められないときは止めて通知します。`
                 : `${repository.fullName}のdevelopをmainへ反映する修正リリースを起動します（本番デプロイ失敗中の例外操作）。`}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -344,7 +356,7 @@ export function MobileReleaseSheet({
                   if (!ok) refreshStartMode();
                 })
               }
-            >{candidateMode ? "候補を作成する" : "起動する"}</AlertDialogAction>
+            >{candidateMode ? "本番公開を開始する" : "起動する"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

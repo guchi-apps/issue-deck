@@ -79,6 +79,9 @@ async function buildFacts(rows: CandidateRow[], options: { keyWithoutPullRequest
         ? { status: finalization.status, failureReason: finalization.failureReason, updatedAt: finalization.updatedAt.toISOString() }
         : null,
       productionStopLabel: stopReason ? PRODUCTION_STOP_TEXT[stopReason].label : null,
+      autoPublishActive: row.autoPublishUserId !== null && row.autoPublishStoppedAt === null,
+      autoPublish: row.autoPublishUserId !== null,
+      autoPublishStopReason: row.autoPublishStoppedAt ? row.autoPublishStopReason : null,
       predecessor: predecessor ? { sequence: predecessor.sequence, cancelReason: predecessor.cancelReason } : null,
       importedPrs: appliedRevisions.flatMap((r) =>
         (Array.isArray(r.importedPrs) ? (r.importedPrs as { number?: unknown }[]) : []).flatMap((p) =>
