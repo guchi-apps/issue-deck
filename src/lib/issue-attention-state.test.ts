@@ -68,8 +68,8 @@ describe("resolveIssueAttention", () => {
     expect(a?.needsUser).toBe(false);
   });
 
-  it("猶予内の起動待ちは作成中と同じ、超過した起動待ちは作成中にしない（#4869）", () => {
-    expect(resolveIssueAttention({ ...base, planReviewState: "queued" })?.kind).toBe("plan-review-creating");
+  it("猶予内の起動待ちは起動待ちと言い、超過した起動待ちは伏せない（#4869・#5667）", () => {
+    expect(resolveIssueAttention({ ...base, planReviewState: "queued" })?.kind).toBe("plan-review-queued");
     expect(resolveIssueAttention({ ...base, planReviewState: "queued_overdue" })).toBeNull();
   });
 
