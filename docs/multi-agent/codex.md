@@ -135,6 +135,18 @@ pollerがclaimで`gpt61CodexModels: true`を申告しないホストへは、サ
 順序は問わない。読み替えている間、画面のジョブの表示は選んだ新世代のままになる。次の世代交代でも、
 新IDを足すときは同じ形で申告と読み替えを足す。
 
+**pollerが新IDを受け付けても、ホストのCodex CLIが古いと起動できない（#5677）。** CLIは0.162.1の
+Mac miniで`gpt-6.2-astra`・`gpt-6.2-sol`が`model_not_found`（`model_not_in_accessible_catalog`・
+`not supported when using Codex with a ChatGPT account`）になり、0.172.0へ上げると通った。
+`gpt-6.1-terra`は0.162.1でも通ったため、**既定モデルだけの確認では気付けない**。文面はアカウントの
+権限の問題に読めるが、まずCLIの版を他のホストと比べる。CLIは自動では上がらないので、世代交代の
+ときは各ホストで新IDを1つずつ試す。
+
+```bash
+codex --version
+codex exec --skip-git-repo-check -s read-only -m <モデルID> "Reply with only: OK" </dev/null
+```
+
 ### 計画承認後のモデル切替
 
 `21.plan-required`の**Codex**計画承認パネルでは、現在の会話を続けるか、同じCLIの別モデルへ引き継ぐかを
