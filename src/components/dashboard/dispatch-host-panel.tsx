@@ -698,47 +698,70 @@ function RebootRow({
 /**
  * カードの1行目（ホスト名とセッション本数）。**縮めた版と従来の版で同じものを出す**——
  * ここだけ別々に書くと、片方の上限の色や応答なしの文言が古いまま残る。
+ *
+ * **縮めた版は左から詰めて折り返す**（#5675）。ホスト名・本数（「稼働 n/m」）・件数の印を
+ * 右寄せの1行（縮まない）に並べると、種類が重なった時点で画面外へはみ出した。
  */
 function HostHeading({
   host,
   atCapacity,
   hasSessionCount,
+  compact,
+  badges,
   trailing,
 }: {
   host: DispatchHostView;
   atCapacity: boolean;
   hasSessionCount: boolean;
-  /** 右端に足すもの（縮めた版の入力待ちの印と山括弧） */
+  compact?: boolean;
+  /** 本数の後ろに並べる件数の印（縮めた版だけ） */
+  badges?: ReactNode;
+  /** 右端に固定するもの（縮めた版の山括弧）。折り返しても右に残る */
   trailing?: ReactNode;
 }) {
+  const name = (
+    <span className="flex items-center gap-1.5 text-xs font-medium">
+      <span
+        aria-hidden
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          host.online ? "bg-primary" : "bg-muted-foreground",
+        )}
+      />
+      {formatDispatchHostName(host.name)}
+    </span>
+  );
+  const status = host.online ? (
+    hasSessionCount && (
+      <span className={cn("text-[11px] text-muted-foreground", atCapacity && "text-destructive")}>
+        {compact ? "稼働" : "セッション"} {host.liveSessions}/{host.maxSessions}
+      </span>
+    )
+  ) : (
+    // 応答していないホストは本数も使用率も出さない。最後の申告の時刻だけを出して、
+    // 「動いていない」と「見えていない」を取り違えないようにする
+    <span className="text-[11px] text-muted-foreground">
+      応答していません・{formatRelativeDate(host.lastSeenAt)}
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <div className="flex items-start justify-between gap-1.5">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 whitespace-nowrap">
+          {name}
+          {status}
+          {badges}
+        </span>
+        {trailing}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="flex items-center gap-1.5 text-xs font-medium">
-        <span
-          aria-hidden
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            host.online ? "bg-primary" : "bg-muted-foreground",
-          )}
-        />
-        {formatDispatchHostName(host.name)}
-      </span>
-      <span className="flex shrink-0 items-center gap-1.5">
-        {host.online ? (
-          hasSessionCount && (
-            <span className={cn("text-[11px] text-muted-foreground", atCapacity && "text-destructive")}>
-              セッション {host.liveSessions}/{host.maxSessions}
-            </span>
-          )
-        ) : (
-          // 応答していないホストは本数も使用率も出さない。最後の申告の時刻だけを出して、
-          // 「動いていない」と「見えていない」を取り違えないようにする
-          <span className="text-[11px] text-muted-foreground">
-            応答していません・{formatRelativeDate(host.lastSeenAt)}
-          </span>
-        )}
-        {trailing}
-      </span>
+      {name}
+      <span className="flex shrink-0 items-center gap-1.5">{status}</span>
     </div>
   );
 }
@@ -746,7 +769,7 @@ function HostHeading({
 /**
  * 人の入力を待っているセッションの本数（#1933）。**縮めた版の見出しに残す唯一のセッションの
  * 情報**で、これが無いと変更後のホームには「シートを開くべきとき」を示すものが何も無くなる
- * （「セッション 6/12」は本数でしかなく、ホームの「実行中」はIssueの進捗の件数）。
+ * （「稼働 6/12」は本数でしかなく、ホームの「実行中」はIssueの進捗の件数）。
  *
  * 数えるのは`summarizeIssueSession`の`waiting`で、入力待ち（`WAITING_INPUT`）とまだ開始して
  * いない（`NOT_STARTED`）の両方が入る。**どちらも人が答えるまで進まない**ので、ホームでは
@@ -805,11 +828,12 @@ function CompactHostCard({
         host={host}
         atCapacity={atCapacity}
         hasSessionCount={hasSessionCount}
-        trailing={
+        compact
+        badges={
           <>
             {planReviewCount > 0 && (
               <span className="text-[11px] text-violet-700 dark:text-violet-400">
-                計画レビュー {planReviewCount}
+                レビュー {planReviewCount}
               </span>
             )}
             {remoteCount > 0 && (
@@ -818,17 +842,19 @@ function CompactHostCard({
               </span>
             )}
             {queuedCount > 0 && (
-              <span className="text-[11px] text-muted-foreground">順番待ち {queuedCount}</span>
+              <span className="text-[11px] text-muted-foreground">順番 {queuedCount}</span>
             )}
             {waitingCount > 0 && (
               <span className="text-[11px] text-amber-700 dark:text-amber-400">
-                入力待ち {waitingCount}
+                入力 {waitingCount}
               </span>
             )}
-            {onOpenDetail && (
-              <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
           </>
+        }
+        trailing={
+          onOpenDetail && (
+            <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+          )
         }
       />
 
@@ -843,7 +869,7 @@ function CompactHostCard({
 
       {metrics && (
         <div
-          className={cn("mt-2 grid gap-2", metrics.length === 4 ? "grid-cols-4" : "grid-cols-3")}
+          className={cn("mt-1 grid gap-2", metrics.length === 4 ? "grid-cols-4" : "grid-cols-3")}
         >
           {metrics.map((metric) => (
             <CompactMetric key={metric.label} {...metric} />
@@ -909,7 +935,7 @@ function LaunchHoldRow({ message }: { message: string }) {
  *   `behindCount`が0以外か`null`なら`tone`を`normal`以外にするため、developが進んで
  *   「更新して再起動」を押すまでの間はこちら
  * - 応答していない: `describeDispatchHostMetrics`が`null`を返して使用率ごと消え、見出しだけの
- *   カードになる（約51px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
+ *   カードになる（約27px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
  * - メモリ・SWAPの逼迫で起動を見送っている（#2095）: 使用率の下に1行増える。逼迫している
  *   間だけなので、遅れているときと同じく差ぶんだけ動くのを許す
  */
@@ -932,25 +958,27 @@ function CompactHostCardSkeletonItem() {
   return (
     <div className="rounded-md border p-2" data-testid="dispatch-host-skeleton">
       <div aria-hidden>
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-xs font-medium">
-            <Skeleton className="size-1.5 shrink-0 rounded-full" />
-            <Skeleton className="rounded-sm text-transparent">DeskMini</Skeleton>
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            <Skeleton className="rounded-sm text-[11px] text-transparent">セッション 0/0</Skeleton>
+        <div className="flex items-start justify-between gap-1.5">
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 whitespace-nowrap">
+            <span className="flex items-center gap-1.5 text-xs font-medium">
+              <Skeleton className="size-1.5 shrink-0 rounded-full" />
+              <Skeleton className="rounded-sm text-transparent">DeskMini</Skeleton>
+            </span>
+            <Skeleton className="rounded-sm text-[11px] text-transparent">稼働 0/0</Skeleton>
           </span>
         </div>
 
-        <div className="mt-2 grid grid-cols-4 gap-2">
+        <div className="mt-1 grid grid-cols-4 gap-2">
           {SKELETON_METRIC_LABELS.map((label) => (
             <span key={label} className="flex min-w-0 flex-col gap-0.5">
-              <Skeleton className="truncate rounded-sm text-[10px] text-transparent">
-                {label}
-              </Skeleton>
-              <Skeleton className="rounded-sm text-[13px] font-semibold text-transparent tabular-nums">
-                00%
-              </Skeleton>
+              <span className="flex items-baseline justify-between gap-0.5 whitespace-nowrap">
+                <Skeleton className="truncate rounded-sm text-[10px] text-transparent">
+                  {label}
+                </Skeleton>
+                <Skeleton className="rounded-sm text-[11px] font-semibold text-transparent tabular-nums">
+                  00%
+                </Skeleton>
+              </span>
               <Skeleton className="h-1 rounded-full" />
             </span>
           ))}
@@ -966,14 +994,16 @@ function CompactHostCardSkeletonItem() {
  */
 const SKELETON_METRIC_LABELS = ["CPU", "メモリ", "SWAP", "ディスク"] as const;
 
-/** 縮めた版の1つぶん。割合を主役にして、目盛りはその下に細く敷く */
+/** 縮めた版の1つぶん。見出しと割合を1行に並べ（#5675）、目盛りはその下に細く敷く */
 function CompactMetric({ label, percent, tone }: DispatchHostMetricRow) {
   const toneClass = METRIC_TONE_CLASS[tone];
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="truncate text-[10px] text-muted-foreground">{label}</span>
-      <span className={cn("text-[13px] font-semibold tabular-nums", toneClass.text)}>
-        {formatHostMetricPercent(percent)}
+      <span className="flex items-baseline justify-between gap-0.5 whitespace-nowrap">
+        <span className="truncate text-[10px] text-muted-foreground">{label}</span>
+        <span className={cn("text-[11px] font-semibold tabular-nums", toneClass.text)}>
+          {formatHostMetricPercent(percent)}
+        </span>
       </span>
       <span className="h-1 rounded-full bg-muted" aria-hidden>
         <span
