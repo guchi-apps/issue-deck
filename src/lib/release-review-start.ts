@@ -46,7 +46,7 @@ export type ReviewStartInput = {
 
 /**
  * 全体レビューを今開始するか。開始するときは、統合検証を実行したホスト（証跡があるホスト）を優先先として返す。
- * 優先先が不適格なら、呼び出し側は従来の選び方（名前順の先頭）へフォールバックする
+ * 優先先が不適格なら、呼び出し側は既定の選び方（DeskMini優先、次いで名前順）へフォールバックする
  */
 export function decideReleaseReviewStart(input: ReviewStartInput): ReviewStartDecision {
   const { integration, lastVerifyJob, now } = input;

@@ -835,7 +835,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ——別の場所の「実装」を拾って偽陰性になる）。**部分一致の`getByText`/`queryByText`で日本語の
   短いラベルを使うテストは、将来同じラベルを出す要素が増える前提で書く**。件数だけを見るなら
   `getAllByText(...).length`、特定の1箇所を狙うなら結合されたテキスト全体（例:
-  `"計画 $1.20・実装 $3.80"`）やその要素にしか出ない値（セッションの開始・終了日時など）で絞る。
+  複数要素をまとめた文字列）やその要素にしか出ない値（セッションの開始・終了日時など）で絞る。
 - **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
   Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
   実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
@@ -3611,12 +3611,14 @@ export function POST(request: NextRequest) {
   られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
   Controlが無いため答える出口が消える）。
   **`question.question`はMarkdownとして描画しないプレーンテキスト**（`QuestionBlock`の
-  `<p>`）。`AskUserQuestion`の質問文にコマンド確認のため```bash```フェンスを埋め込むと、
-  バッククォートが文字どおり表示され複数コマンドが1行に潰れていた（#2818）。埋め込まれた
-  フェンスだけは`lib/session-question-commands.ts`の`extractQuestionCommandBlocks`が
-  取り出し、`&&`・改行の分割（`lib/shell-command-lines.ts`）を経て独立したコマンド一覧
-  として描く——地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は
-  従来どおり素通りする。
+  `<p>`）。埋め込まれたコマンドだけは`lib/session-question-commands.ts`の
+  `extractQuestionCommandBlocks`が取り出し、`question-command-card.tsx`の枠（実行先の見出し・
+  折り返し表示・全幅のコピーボタン）で描く（#2818・#5652）。対象は```` ```bash VPS ````の
+  ようなフェンス（言語指定の後が実行先。1フェンス＝1枠で、改行や`&&`で分けない）と、1個の
+  バッククォートのうち引数付きのコマンド。**実行先は書かれた語だけを読み**、無ければ`ssh`始まりを
+  「手元の端末」とする以外は「指定なし」。書き方は`scripts/prompts/`の各プロンプトにある。
+  地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は素通りする。
+  質問文は回答の照合キーなので、加工は表示（と回答コメント）だけで行い、保存値は変えない。
   **手作業Issue（`71.manual-step`）では、質問が指している手順の中身も同じパネルに出す**
   （#2820。当て方は`lib/manual-step-question.ts`＝引用された手順名で本文の手順を引き、
   質問文の`手順N`は食い違いを弾くのにだけ使う。描くのは手順のMarkdown・実行する端末・
@@ -3812,7 +3814,9 @@ export function POST(request: NextRequest) {
   「実装」として振り分ける（計画の修正で複数回呼ばれても最後の1回だけを境に使う）。
   Plan modeを使っていないセッション・Codexの行は`planCostUsd`/`implementationCostUsd`が
   両方nullになり、画面は「区分なし」として合算のみ出す（`inputCostUsd`/`outputCostUsd`の
-  内訳・#2626と同じ「集計側で割ってnullable列で運ぶ」形）。モデル名（`models`列）は
+  内訳・#2626と同じ「集計側で割ってnullable列で運ぶ」形）。
+  明細のカードは、区分のあるセッションを「計画立案」と「実装」の2枚に分けて「種別別」と同じ順に
+  並べる（#5654。`sessionUsageDetailRows`。金額以外は金額比の按分で、時刻・モデルは2枚とも同じ）。モデル名（`models`列）は
   以前から集計・保存されていたが、画面（`session-usage-panel.tsx`）には出していなかった。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは

@@ -60,6 +60,7 @@ import {
   buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
+  LAUNCH_SESSION_REPORT_GRACE_MS,
   describeCodeReviewRejection,
   describeManualStepAbortRejection,
   describeManualStepSessionRejection,
@@ -812,6 +813,35 @@ async function checkLaunchTarget(params: {
         : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } });
     if (sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)) {
       return reject("session_alive", aliveSession);
+    }
+  }
+
+  // 起動した直後で、そのセッションの報告がまだ届いていなければ積ませない（#5656）。
+  // 起動ジョブは`SUCCEEDED`で終わり、セッションは次の報告まで`ALIVE`の行にならないため、
+  // 上の判定をすり抜けて同じIssueを二重に起動できてしまう。判定は画面の
+  // `isLaunchAwaitingSessionReport`と同じ（`lastReportedAt`が起動以降の行があれば報告済み）
+  if (!params.skipAliveSessionCheck) {
+    const recentLaunch = await db.dispatchJob.findFirst({
+      where: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        kind: "LAUNCH",
+        status: "SUCCEEDED",
+        finishedAt: { gt: new Date(now.getTime() - LAUNCH_SESSION_REPORT_GRACE_MS) },
+      },
+      orderBy: { finishedAt: "desc" },
+    });
+    if (recentLaunch?.finishedAt) {
+      const reported = await db.dispatchSession.findFirst({
+        where: {
+          host: recentLaunch.targetHost,
+          repositoryFullName: params.repositoryFullName,
+          issueNumber: params.issueNumber,
+          lastReportedAt: { gte: recentLaunch.finishedAt },
+        },
+        select: { id: true },
+      });
+      if (!reported) return reject("launch_awaiting_session");
     }
   }
 

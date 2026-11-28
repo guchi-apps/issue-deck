@@ -294,13 +294,13 @@ describe("QuestionAnswerPanel", () => {
     expect(screen.queryByText("この質問の前提")).toBeNull();
   });
 
-  // #2818: 質問文に埋め込まれたコマンドは、地の文から切り離して独立表示・個別コピーできる
-  it("質問文に埋め込まれたコマンドを地の文から切り離し、個別にコピーできる", () => {
+  // #2818・#5652: 質問文に埋め込まれたコマンドは、地の文から切り離した枠でまとめてコピーできる
+  it("質問文に埋め込まれたコマンドを地の文から切り離し、実行先を添えて丸ごとコピーできる", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
     const questionWithCommand =
-      "次の読み取り専用コマンドを実行してよいですか？ ```bash\n" +
+      "次の読み取り専用コマンドを実行してよいですか？ ```bash VPS\n" +
       "gh api repos/guchi-apps/aide/pulls/231 --jq '.number'\n" +
       "git fetch origin develop --quiet && git status\n" +
       "```";
@@ -328,13 +328,12 @@ describe("QuestionAnswerPanel", () => {
     expect(screen.getByText("次の読み取り専用コマンドを実行してよいですか？")).toBeTruthy();
     expect(screen.queryByText(/```/)).toBeNull();
 
-    // &&で繋がっていたコマンドも1行ずつ表示される
-    expect(screen.getByText("gh api repos/guchi-apps/aide/pulls/231 --jq '.number'")).toBeTruthy();
-    expect(screen.getByText("git fetch origin develop --quiet")).toBeTruthy();
-    expect(screen.getByText("git status")).toBeTruthy();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "この行をコピー" })[0]);
-    expect(writeText).toHaveBeenCalledWith("gh api repos/guchi-apps/aide/pulls/231 --jq '.number'");
+    expect(screen.getByText("VPSで実行")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "コマンドをコピー" }));
+    expect(writeText).toHaveBeenCalledWith(
+      "gh api repos/guchi-apps/aide/pulls/231 --jq '.number'\n" +
+        "git fetch origin develop --quiet && git status",
+    );
   });
 
   it("セッションが終了していたら、届かないことを出して押させない", () => {

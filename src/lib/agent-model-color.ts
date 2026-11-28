@@ -47,8 +47,8 @@ export const AGENT_BASE_COLORS: Readonly<Record<IssueImplementationAgent, string
  * 最重色一色に見せていた）。
  *
  * **同じ画面で別の意味を持つ既存のグレーとは別の色にする**（計画レビュー#3572での指摘）。
- * `session-usage-panel.tsx`の`PHASE_COLORS.implementation`・`KIND_ROW_COLORS.question`は
- * どちらも`#a8a29e`（暖色寄りのグレー）で、行頭の点として別の意味に使っている。棒の内側（未使用部分）も
+ * `session-usage-panel.tsx`の`KIND_ROW_COLORS.question`は
+ * `#a8a29e`（暖色寄りのグレー）で、行頭の点として別の意味に使っている。棒の内側（未使用部分）も
  * `bg-muted`のグレーのため、暖色寄りのグレーを再利用すると「未確定の金額」「地の色」「行頭の点」が
  * 互いに紛れる。そこで彩度は抑えつつ寒色寄り（青灰）にして、色相の向きで見分けられるようにする。
  */

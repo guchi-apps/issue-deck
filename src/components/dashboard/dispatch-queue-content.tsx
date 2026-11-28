@@ -18,6 +18,7 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { selectPlanReviewsWithoutHost } from "@/lib/dispatch/plan-review-host-rows";
 import {
   describeDispatchJobWaitReason,
   resolveJobReassignOptions,
@@ -99,6 +100,8 @@ export function DispatchQueueContent({
 }) {
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
   const orphanQueued = selectQueuedJobsWithoutHost(summary.queued, dispatch.hosts);
+  // 計画レビューは宛先ホストのカードの中に出す（#5655）。ここに残すのはカードに載らないものだけ
+  const orphanPlanReviews = selectPlanReviewsWithoutHost(summary.planReviews, dispatch.hosts);
   const cancelable = cancelableDispatchJobs(summary);
 
   async function cancelAll() {
@@ -155,6 +158,7 @@ export function DispatchQueueContent({
         }
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
         onRequestReboot={dispatch.requestReboot}
+        onCancelPlanReview={dispatch.cancel}
         renderHostQueue={(host) => {
           const queued = selectHostQueuedJobs(summary.queued, host.name);
           if (queued.length === 0) return null;
@@ -230,12 +234,13 @@ export function DispatchQueueContent({
       />
       {/*
         計画レビュー（#3785）。**セッション上限（既定12本）に数えないジョブ**なので、実装の
-        順番待ちと分ける。「まとめて取り消す」の対象にも入らず、消せるのは行ごとの×だけ
+        順番待ちと分ける。「まとめて取り消す」の対象にも入らず、消せるのは行ごとの×だけ。
+        宛先ホストがあるものはそのホストのカードに出すので、ここは載らないものだけ（#5655）
       */}
       <QueueSection
         title="計画レビュー"
         note="セッション上限には数えません。まとめて取り消しの対象外です。"
-        jobs={summary.planReviews}
+        jobs={orphanPlanReviews}
         onCancel={dispatch.cancel}
         onOpenIssue={onOpenIssue}
         showModel

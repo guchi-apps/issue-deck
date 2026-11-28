@@ -8,6 +8,7 @@ import {
   Power,
   RefreshCw,
   TerminalSquare,
+  X,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -23,7 +24,11 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
-import type { DispatchPlanReviewSession } from "@/lib/dispatch/plan-review-session";
+import {
+  describePlanReviewWaitReason,
+  selectHostPlanReviewRows,
+  type PlanReviewHostRow,
+} from "@/lib/dispatch/plan-review-host-rows";
 import {
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
@@ -143,6 +148,7 @@ export function DispatchHostPanel({
   onOpenDetail,
   renderHostQueue,
   queuedCounts,
+  onCancelPlanReview,
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
@@ -218,6 +224,11 @@ export function DispatchHostPanel({
   renderHostQueue?: (host: DispatchHostView) => React.ReactNode;
   /** `compact`のカードに出す、ホスト別の順番待ち件数（#5589） */
   queuedCounts?: Readonly<Record<string, number>>;
+  /**
+   * 起動待ちの計画レビューを取り消す（#5655）。渡さなければ行に×を出さない
+   * （`onStopRemoteSession`と同じ形）
+   */
+  onCancelPlanReview?: (jobId: string) => void | Promise<unknown>;
 }) {
   if (hosts.length === 0) return null;
 
@@ -242,6 +253,7 @@ export function DispatchHostPanel({
           onOpenDetail={onOpenDetail}
           queueSlot={renderHostQueue?.(host) ?? null}
           queuedCount={queuedCounts?.[host.name] ?? 0}
+          onCancelPlanReview={onCancelPlanReview}
         />
       ))}
     </div>
@@ -265,10 +277,12 @@ function HostCard({
   onOpenDetail,
   queueSlot,
   queuedCount,
+  onCancelPlanReview,
 }: {
   host: DispatchHostView;
   queueSlot: React.ReactNode;
   queuedCount: number;
+  onCancelPlanReview?: (jobId: string) => void | Promise<unknown>;
   sessions: DispatchSessionView[];
   remoteSessions: RemoteSessionView[];
   selfUpdateJob: DispatchJobView | null;
@@ -297,6 +311,9 @@ function HostCard({
   // 回収スクリプト・ランチャーを動かすため、developへマージしただけでは効かない。**
   // ここに出しておかないと、効いていないことに気付く手掛かりがどこにも無い
   const checkout = describeDispatchHostCheckout(host);
+  // 計画レビュー（#5655）。**tmuxの写しだけでなくジョブの状態から組む**——写しはpollerの申告周期
+  // でしか更新されず、1分足らずで終わるレビューや起動待ちは一度も載らなかった
+  const planReviewRows = selectHostPlanReviewRows({ host, jobs, now: new Date() });
   const atCapacity = isDispatchHostAtSessionCapacity(host);
   // 申告していない古いpollerでは本数そのものが不明。0本と混ぜない（#1394）
   const hasSessionCount = host.maxSessions !== null && host.liveSessions !== null;
@@ -335,6 +352,7 @@ function HostCard({
         waitingCount={countWaitingSessions(sessions)}
         remoteCount={remoteSessions.length}
         queuedCount={queuedCount}
+        planReviewCount={planReviewRows.length}
         onOpenDetail={onOpenDetail}
       />
     );
@@ -421,17 +439,26 @@ function HostCard({
           ))}
         </ul>
       )}
-      {(host.planReviewSessions?.length ?? 0) > 0 && (
-        <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
-          {(host.planReviewSessions ?? []).map((session) => (
-            <PlanReviewSessionRow
-              key={`${session.repositoryFullName}#${session.issueNumber}`}
-              session={session}
-              job={findPlanReviewJob(jobs, session)}
-              onOpenIssue={onOpenIssue}
-            />
-          ))}
-        </ul>
+      {planReviewRows.length > 0 && (
+        <div className="mt-2 border-t pt-2">
+          {/* 実装セッションの本数上限（見出しの「セッション n/m」）には数えない別枠なので、
+              リモートセッションと同じく小見出しで分ける（#5655） */}
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground">
+            <span>計画レビュー {planReviewRows.length}</span>
+            <span className="truncate">セッション上限には数えません</span>
+          </div>
+          <ul className="flex flex-col gap-1">
+            {planReviewRows.map((row) => (
+              <PlanReviewRow
+                key={row.key}
+                row={row}
+                waitReason={row.state === "queued" ? describePlanReviewWaitReason(host) : null}
+                onOpenIssue={onOpenIssue}
+                onCancel={onCancelPlanReview}
+              />
+            ))}
+          </ul>
+        </div>
       )}
       {/* **最下段に置く**（#4836）。Issueのセッションと違い本数の上限（見出しの
           「セッション n/m」）には数えない別枠なので、小見出しで分けて上限も別に出す */}
@@ -755,10 +782,13 @@ function CompactHostCard({
   waitingCount,
   remoteCount,
   queuedCount,
+  planReviewCount,
   onOpenDetail,
 }: {
   host: DispatchHostView;
   queuedCount: number;
+  /** そのホストの計画レビュー（起動待ち・レビュー中。#5655）の件数。0なら出さない */
+  planReviewCount: number;
   metrics: DispatchHostMetricRow[] | null;
   checkout: DispatchHostCheckoutRow | null;
   launchHold: string | null;
@@ -777,6 +807,11 @@ function CompactHostCard({
         hasSessionCount={hasSessionCount}
         trailing={
           <>
+            {planReviewCount > 0 && (
+              <span className="text-[11px] text-violet-700 dark:text-violet-400">
+                計画レビュー {planReviewCount}
+              </span>
+            )}
             {remoteCount > 0 && (
               <span className="text-[11px] text-teal-700 dark:text-teal-400">
                 リモート {remoteCount}
@@ -1119,22 +1154,57 @@ function SessionRow({
   );
 }
 
-/** 実装セッションと別枠で動く計画レビュー（G1）の、実行状況用の1行。 */
-function PlanReviewSessionRow({
-  session,
-  job,
+/**
+ * 実装セッションと別枠で動く計画レビュー（G1）の、実行状況用の1行（#3924・#5655）。
+ * 起動待ちは中抜きの点と待ち時間・理由、レビュー中は担当エージェントの色の点で出す。
+ */
+function PlanReviewRow({
+  row,
+  waitReason,
   onOpenIssue,
+  onCancel,
 }: {
-  session: DispatchPlanReviewSession;
-  /** 同じIssueの計画レビューのジョブ。担当エージェントとモデルはここから読む（#5648）。見つからなければ従来の表示 */
-  job?: DispatchJobView;
+  row: PlanReviewHostRow;
+  /** 起動待ちの行が進まない理由（`describePlanReviewWaitReason`）。分からなければ`null` */
+  waitReason: string | null;
   onOpenIssue?: (issueId: string) => void;
+  onCancel?: (jobId: string) => void | Promise<unknown>;
 }) {
-  const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+  const [canceling, setCanceling] = useState(false);
+  const repoName = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
+  const job = row.job;
   const model = job ? (job.agent === "codex" ? job.codexModel : job.claudeModel) : null;
+  const queued = row.state === "queued";
+  const elapsed = row.since ? formatRelativeDate(row.since) : null;
+  const detail = queued
+    ? ["起動待ち", elapsed, waitReason].filter(Boolean).join("・")
+    : [
+        "計画レビュー中",
+        job ? describePlanReviewAssignee(job) : null,
+        elapsed ? `${elapsed}に起動` : null,
+      ]
+        .filter(Boolean)
+        .join("・");
+  const canCancel = queued && job !== null && onCancel !== undefined;
+
+  async function cancel() {
+    if (!job || !onCancel) return;
+    setCanceling(true);
+    try {
+      await onCancel(job.id);
+    } finally {
+      setCanceling(false);
+    }
+  }
+
   return (
     <li className="flex items-start gap-1.5 text-xs">
-      {job ? (
+      {queued ? (
+        <span
+          aria-hidden
+          className="mt-1 size-1.5 shrink-0 rounded-full border border-violet-500"
+        />
+      ) : job ? (
         // 色でエージェントを示す（他の実行状況の行と同じ`ModelDot`）
         <ModelDot agent={job.agent} model={model ?? null} className="mt-1" />
       ) : (
@@ -1142,29 +1212,37 @@ function PlanReviewSessionRow({
       )}
       <span className="min-w-0 flex-1">
         <DispatchIssueTitle
-          issueNumber={session.issueNumber}
-          issueTitle={session.issueTitle}
-          issueId={session.issueId}
+          issueNumber={row.issueNumber}
+          issueTitle={row.issueTitle}
+          issueId={row.issueId}
           onOpenIssue={onOpenIssue}
         />
-        <span className="block truncate text-muted-foreground">
-          {repoName}・計画レビュー中{job ? `・${describePlanReviewAssignee(job)}` : ""}
+        <span
+          className={cn(
+            "block truncate",
+            queued && waitReason ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+          )}
+        >
+          {repoName}・{detail}
         </span>
       </span>
+      {canCancel && (
+        <button
+          type="button"
+          aria-label={`#${row.issueNumber}の計画レビューを取り消す`}
+          title="取り消す"
+          disabled={canceling}
+          onClick={() => void cancel()}
+          className="mt-0.5 grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35"
+        >
+          {canceling ? (
+            <Loader2 aria-hidden className="size-3 animate-spin" />
+          ) : (
+            <X aria-hidden className="size-3.5" />
+          )}
+        </button>
+      )}
     </li>
-  );
-}
-
-function findPlanReviewJob(
-  jobs: readonly DispatchJobView[],
-  session: DispatchPlanReviewSession,
-): DispatchJobView | undefined {
-  return jobs.find(
-    (job) =>
-      job.kind === "PLAN_REVIEW" &&
-      job.repositoryFullName === session.repositoryFullName &&
-      job.issueNumber === session.issueNumber &&
-      isActiveDispatchJobStatus(job.status),
   );
 }
 

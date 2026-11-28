@@ -1,5 +1,7 @@
 import type { SessionQuestionRequest, SessionQuestionRequestStatus } from "@prisma/client";
 
+import { extractQuestionCommandBlocks } from "@/lib/session-question-commands";
+
 /**
  * ローカルセッションが`AskUserQuestion`で聞いた質問への、画面からの回答（#2189）の
  * **純粋な部分**。
@@ -418,13 +420,41 @@ export function buildSessionQuestionAnswerCommentBody(params: {
     lines.push("🙋 **質問に回答しました**（issue-deckの画面から）。", "");
     for (const question of params.questions) {
       const answer = params.answers?.[question.question];
-      lines.push(`- **${question.question}**`);
+      lines.push(...formatQuestionForComment(question.question));
       lines.push(`  - ${answer ?? "（回答なし）"}`);
     }
     lines.push("", "セッションはこの回答のまま作業を続けます。");
   }
   lines.push("", params.posterMarker);
   return lines.join("\n");
+}
+
+/**
+ * 回答コメントの質問1件。**フェンス入りの質問はそのまま太字で囲むと崩れる**ので（#5652）、
+ * 地の文を太字にして、コマンドは箇条書きの下のコードブロックへ分ける。
+ */
+function formatQuestionForComment(question: string): string[] {
+  if (!question.includes("```")) return [`- **${question}**`];
+
+  const { segments, commands } = extractQuestionCommandBlocks(question);
+  const text = segments
+    .map((segment) => {
+      if (segment.type === "text") return segment.value.replace(/\n/g, " ");
+      if (segment.type === "code") return `\`${segment.value}\``;
+      return `\`${commands[segment.index].command}\``;
+    })
+    .join("")
+    .trim();
+  // インラインのコマンドは地の文に残るので、コードブロックにするのはフェンスの分だけ
+  const inline = new Set(
+    segments.flatMap((segment) => (segment.type === "command" ? [segment.index] : [])),
+  );
+  const blocks = commands
+    .filter((_, index) => !inline.has(index))
+    .flatMap(({ command, info }) =>
+      ["```" + info, ...command.split("\n"), "```"].map((line) => `  ${line}`),
+    );
+  return [`- **${text || "コマンドの実行"}**`, ...blocks];
 }
 
 /** 文字列として使える値だけを、上限まで切って返す。空白だけ・空文字は`null` */
