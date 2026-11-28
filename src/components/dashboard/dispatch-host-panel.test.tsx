@@ -233,6 +233,69 @@ describe("DispatchHostPanel", () => {
     expect(container.querySelector('[data-agent="codex"]')).toBeTruthy();
   });
 
+  // #5655。写しはpollerの申告周期でしか更新されず、1分足らずで終わるレビューは一度も載らなかった
+  it("tmuxの写しに無くても、起動済みで指摘が届いていない計画レビューを出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        jobs={[
+          makeSelfUpdateJob({
+            kind: "PLAN_REVIEW",
+            status: "SUCCEEDED",
+            issueNumber: 5654,
+            issueTitle: "AI使用料画面",
+            claudeModel: "opus",
+            claimedAt: NOW.toISOString(),
+            finishedAt: NOW.toISOString(),
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("計画レビュー 1")).toBeTruthy();
+    expect(screen.getByText("#5654 AI使用料画面")).toBeTruthy();
+    expect(screen.getByText("issue-deck・計画レビュー中・Claude Code・opus・たった今に起動")).toBeTruthy();
+  });
+
+  it("起動待ちの計画レビューを待っている理由と取り消しボタン付きで出す", () => {
+    const onCancel = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({ launchHold: { reason: "CPU", percent: 99, thresholdPercent: 90 } }),
+        ]}
+        sessions={[]}
+        onCancelPlanReview={onCancel}
+        jobs={[
+          makeSelfUpdateJob({
+            id: "plan-review-1",
+            kind: "PLAN_REVIEW",
+            status: "QUEUED",
+            issueNumber: 5660,
+            issueTitle: "通知設定",
+            // 10分を超えた起動待ち（queued_overdue）でも消さない
+            createdAt: new Date(NOW.getTime() - 15 * 60_000).toISOString(),
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/^issue-deck・起動待ち・15分前・CPU 99%（上限 90%）のため$/)).toBeTruthy();
+    screen.getByRole("button", { name: "#5660の計画レビューを取り消す" }).click();
+    expect(onCancel).toHaveBeenCalledWith("plan-review-1");
+  });
+
+  it("コンパクト表示にも計画レビューの件数を出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        compact
+        jobs={[makeSelfUpdateJob({ kind: "PLAN_REVIEW", status: "QUEUED", issueNumber: 5660 })]}
+      />,
+    );
+    expect(screen.getByText("計画レビュー 1")).toBeTruthy();
+  });
+
   // #1817。Issue詳細と同じ`describeSessionReap`を通す（同じ状態が画面によって違う言い方に
   // ならないようにする）。理由の1行はここには出さない（行が2倍になるため）
   it("自動終了までの残り時間を行の末尾に足す", () => {
