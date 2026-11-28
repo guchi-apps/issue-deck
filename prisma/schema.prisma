@@ -550,7 +550,7 @@ model AppSetting {
   // GitHub Actionsの無人実行で使うCLI。"inherit"なら主系プロバイダーに追従する。
   githubActionsAgent               String  @default("inherit")
   // GitHub ActionsでCodexを使うときのモデル。サブPC用codexModelとは独立させる。
-  githubActionsCodexModel          String  @default("gpt-5.6-terra")
+  githubActionsCodexModel          String  @default("gpt-6.1-terra")
   // PRレビュー・修復workflow専用。autoはAction/CLIの既定へ委ねる。
   workflowClaudeModel              String  @default("auto")
   workflowCodexModel               String  @default("auto")
@@ -562,7 +562,7 @@ model AppSetting {
   claudeLocalModel                 String  @default("sonnet")
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
-  codexModel                       String  @default("gpt-5.6-terra")
+  codexModel                       String  @default("gpt-6.1-terra")
   // サブPCの「実装を開始」で最初に選ぶCLI。明示して選び直した値や、既存セッションの再開には影響しない。
   defaultDispatchAgent             String  @default("inherit")
   // ローカルセッションが計画を投稿した後の自動計画レビューに使うCLI。開始元ごとに別々に選べる。
@@ -572,7 +572,7 @@ model AppSetting {
   // サブPCの自動計画レビューをClaude Codeで行うときのモデル。既定は設定追加前と同じSonnet。
   planReviewClaudeModel            String  @default("sonnet")
   // サブPCの自動計画レビューをCodex CLIで行うときのモデル。既定は設定追加前と同じTerra。
-  planReviewCodexModel             String  @default("gpt-5.6-terra")
+  planReviewCodexModel             String  @default("gpt-6.1-terra")
   // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
   dispatchFailoverEnabled          Boolean @default(true)
@@ -632,7 +632,7 @@ model AppSetting {
   nextWindowRunWeeklyFloorPercent      Int     @default(0)
   // ChatGPT（Codex）には5時間枠がないため、予約実行で確認する下限は週間枠だけにする（#3859）。
   nextWindowRunCodexWeeklyFloorPercent Int     @default(0)
-  // 一括予約（#3438）の使用モデルの初期値。`<agent>:<model>`（例`codex:gpt-6-sol`）で、空は「設定に従う」
+  // 一括予約（#3438）の使用モデルの初期値。`<agent>:<model>`（例`codex:gpt-6.2-sol`）で、空は「設定に従う」
   nextWindowRunBulkModel               String  @default("")
 
   // 5時間枠を開けておく（#3032）。**指定した時間帯（日本時間の時）のあいだ、枠が止まっていれば**
@@ -950,7 +950,7 @@ model DispatchJob {
   // このIssueだけに使うCodexのモデル（#3192。`kind`が`LAUNCH`・`agent`が`codex`のときだけ意味がある）。
   //
   // **nullは「設定の既定に従う」**（`AppSetting.codexModel`）で、既存行はすべてnullになる。
-  // 入るのは`CODEX_LOCAL_MODEL_VALUES`のモデル名（`gpt-6-sol`など）だけで、`claudeModel`と
+  // 入るのは`CODEX_LOCAL_MODEL_VALUES`のモデル名（`gpt-6.2-sol`など）だけで、`claudeModel`と
   // 同じく画面・API・払い出しの3か所で既知の語だけを通す。払い出し（`POST /api/dispatch/claim`）が
   // この値をジョブごとの`codexModel`として載せ直すので、pollerは従来どおり`codexModel`だけを読む。
   codexModel            String?

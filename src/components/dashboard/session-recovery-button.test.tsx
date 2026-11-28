@@ -341,7 +341,7 @@ describe("SessionRecoveryButton", () => {
       expect(await screen.findByRole("menuitem", { name: /Sonnet 5/ })).not.toBeNull();
       expect(screen.queryByText("Codex（ChatGPT）")).toBeNull();
 
-      fireEvent.click(screen.getByRole("menuitem", { name: /Fable 5\.1/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /Fable 5\.2/ }));
       await waitFor(() => {
         expect(enqueue).toHaveBeenCalledWith({
           repositoryFullName: "guchi-apps/issue-deck",

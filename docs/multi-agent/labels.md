@@ -2091,7 +2091,7 @@ Issue詳細では、**エージェントへ送る導線を出さず、代わり�
 ## Claudeによるラベル自動付与の対象は30〜89番台に限る（#1662）
 
 issue-deckの「新しいIssueを作成」ダイアログには**「タイトル・ラベルを自動生成」**があり、
-Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推定する
+Issue本文からClaude（`claude-haiku-5-5`）がタイトルとラベルを推定する
 （`src/components/dashboard/create-issue-dialog.tsx` → `/api/issues/suggest` →
 `src/lib/claude/issue-suggest.ts`）。**Issueへラベルを推定で付ける経路はこれ1つだけ。**
 

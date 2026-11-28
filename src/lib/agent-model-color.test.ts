@@ -36,6 +36,13 @@ describe("modelWeightTier", () => {
   });
 });
 
+describe("GPT-6.1 Terraの段", () => {
+  it("値下げ後も標準の段（SonnetやSolと同じ）にする", () => {
+    expect(modelWeightTier("gpt-6.1-terra")).toBe(2);
+    expect(modelWeightTier("gpt-6-luna")).toBe(3);
+  });
+});
+
 describe("agentModelColor", () => {
   it("エージェントの系統から段の色を引く", () => {
     expect(agentModelColor("claude", "claude-opus-5")).toBe(AGENT_MODEL_TIER_COLORS.claude[1]);

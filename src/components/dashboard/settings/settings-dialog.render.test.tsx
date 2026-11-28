@@ -123,7 +123,7 @@ function renderDialog() {
       claudeModelAssist="haiku"
       claudeLocalModel="sonnet"
       codexModel="auto"
-      appAiModel="claude-haiku-4-5"
+      appAiModel="claude-haiku-5-5"
       appAiModelReasoning="claude-sonnet-5-5"
       modelPickEngine="app-ai"
       dispatchConcurrency={2}
@@ -287,7 +287,7 @@ describe("SettingsDialog", () => {
       autoRetryLimit: 5,
       claudeModel: "auto",
       githubActionsAgent: "claude",
-      githubActionsCodexModel: "gpt-5.6-terra",
+      githubActionsCodexModel: "gpt-6.1-terra",
       claudeModelAssist: "haiku",
       claudeLocalModel: "sonnet",
       codexModel: "auto",
@@ -295,10 +295,10 @@ describe("SettingsDialog", () => {
       planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
-      planReviewCodexModel: "gpt-5.6-terra",
+      planReviewCodexModel: "gpt-6.1-terra",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
-      appAiModel: "claude-haiku-4-5",
+      appAiModel: "claude-haiku-5-5",
       appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       dispatchConcurrency: 2,
@@ -347,7 +347,7 @@ describe("SettingsDialog", () => {
       aiExecutionProvider: "codex",
       githubActionsAgent: "codex",
       defaultDispatchAgent: "codex",
-      appAiModel: "gpt-5.6-terra",
+      appAiModel: "gpt-6.1-terra",
     }));
   });
 
@@ -359,7 +359,7 @@ describe("SettingsDialog", () => {
       <SettingsDialog
         open onOpenChange={() => {}} currentUser={{ login: "octocat", name: "Octo Cat", image: null }}
         autoRetryLimit={2} claudeModel="sonnet" claudeModelAssist="haiku" claudeLocalModel="sonnet"
-        codexModel="auto" appAiModel="claude-haiku-4-5" appAiModelReasoning="claude-sonnet-5-5"
+        codexModel="auto" appAiModel="claude-haiku-5-5" appAiModelReasoning="claude-sonnet-5-5"
         modelPickEngine="app-ai" dispatchConcurrency={2} repositories={repositories}
         onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden}
         onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
@@ -390,11 +390,11 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(onUpdated).toHaveBeenCalled());
 
     // 親へ通知するAI値は保存済み初期値のまま。未保存の値を保存済み扱いにしない。
-    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
+    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-5-5");
 
     // このテストの親はonUpdated後にpropsを更新しない単純なspyなので、フォーム表示値の
     // 再同期まではここで仮定しない。重要な契約は「実行の保存がAIの未保存値を保存済みとして親へ渡さない」こと。
-    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
+    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-5-5");
   });
 
   it("リポジトリの区分は「全体に表示」の分割ボタンで非表示にする（#3983・#5087）", () => {

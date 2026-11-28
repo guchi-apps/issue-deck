@@ -56,7 +56,7 @@ export const UNRESOLVED_MODEL_TIER_COLOR = "#64748b";
 
 /**
  * モデルの重さの段。**出力単価（1Mトークンあたり）で決める**ので、Claude・Codexを同じ
- * 物差しで並べられる（Opus≒GPT-5.6 Sol、Sonnet≒Terra、Haiku≒Luna）。単価表に無い
+ * 物差しで並べられる（Opus≒GPT-5.6 Sol、Sonnet≒Sol・Terra、Haiku≒Luna）。単価表に無い
  * モデル・`auto`（どのモデルで立つかCLI任せ）は`null`で、呼び出し側は「未確定」として扱う。
  */
 export function modelWeightTier(model: string | null | undefined): ModelWeightTier | null {
@@ -64,6 +64,8 @@ export function modelWeightTier(model: string | null | undefined): ModelWeightTi
   const id = CLAUDE_ALIAS_MODEL_IDS[model as Exclude<ClaudeModel, "auto">] ?? model;
   const rate = resolveModelRate(id);
   if (!rate) return null;
+  // GPT-6.1 Terraは値下げで出力単価が軽量帯に入るが、位置づけは「標準」のまま（#5668）
+  if (id.startsWith("gpt-6.1-terra")) return 2;
   if (rate.output >= 40) return 0;
   if (rate.output >= 20) return 1;
   if (rate.output >= 8) return 2;

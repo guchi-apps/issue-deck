@@ -224,12 +224,12 @@ describe("DispatchHostPanel", () => {
             status: "RUNNING",
             issueNumber: 5648,
             agent: "codex",
-            codexModel: "gpt-6-sol",
+            codexModel: "gpt-6.2-sol",
           }),
         ]}
       />,
     );
-    expect(screen.getByText("issue-deck・計画レビュー中・Codex CLI・gpt-6-sol")).toBeTruthy();
+    expect(screen.getByText("issue-deck・計画レビュー中・Codex CLI・gpt-6.2-sol")).toBeTruthy();
     expect(container.querySelector('[data-agent="codex"]')).toBeTruthy();
   });
 

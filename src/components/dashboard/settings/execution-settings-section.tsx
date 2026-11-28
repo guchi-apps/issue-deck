@@ -639,7 +639,7 @@ export function ExecutionSettingsSection({
                 changed={changedAiFieldIds.has("codex-model")}
                 help="おまかせはSol・Terra・Lunaから選び、モデルを選ばずに起動する経路ではTerraで起動します。"
                 hint={<>
-                  通常はTerra、難しいIssueはSol、単純な修正を優先する場合はLunaが適しています。旧世代（GPT-5.5・5.4）と
+                  通常はTerra、難しいIssueはSol、単純な修正を優先する場合はLunaが適しています。
                   「Codexに任せる」は、この設定でだけ選べます（「実装を開始」の初期選択はTerraになります）。
                 </>}
               >
