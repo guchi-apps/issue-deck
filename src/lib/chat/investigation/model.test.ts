@@ -24,13 +24,13 @@ describe("resolveChatExecution（#4143）", () => {
   });
 
   it("Claude主系 + GPT reasoning → Codex CLI（OPENAI_API_KEY未設定でも）", async () => {
-    setting("claude", "gpt-5.6-terra");
-    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-5.6-terra" });
+    setting("claude", "gpt-6.1-terra");
+    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-6.1-terra" });
   });
 
   it("Codex主系 + GPT reasoning → Codex CLI", async () => {
-    setting("codex", "gpt-6-sol");
-    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-6-sol" });
+    setting("codex", "gpt-6.2-sol");
+    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-6.2-sol" });
   });
 
   it("Codex主系 + Claude reasoning Override → Claude側の既存経路", async () => {
@@ -40,7 +40,7 @@ describe("resolveChatExecution（#4143）", () => {
 
   it("個別指定が無ければ主系の既定モデルに従う", async () => {
     findUnique.mockResolvedValue({ aiExecutionProvider: "codex", appAiModelReasoning: "inherit" });
-    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-5.6-terra" });
+    expect(await resolveChatExecution()).toEqual({ mode: "codex", model: "gpt-6.1-terra" });
     findUnique.mockResolvedValue({ aiExecutionProvider: "claude", appAiModelReasoning: "inherit" });
     expect(await resolveChatExecution()).toEqual({ mode: "api" });
   });

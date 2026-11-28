@@ -219,10 +219,10 @@ export function parseClaudeWindowKeepAliveHour(value: unknown): number | null {
 // バージョン番号をあわせて直す。
 export const CLAUDE_MODEL_OPTIONS = [
   { value: "auto", label: "Claude Codeに任せる" },
-  { value: "fable", label: "Claude Fable 5.1（最高精度）" },
+  { value: "fable", label: "Claude Fable 5.2（最高精度）" },
   { value: "opus", label: "Claude Opus 5.5（高精度）" },
   { value: "sonnet", label: "Claude Sonnet 5.5（標準）" },
-  { value: "haiku", label: "Claude Haiku 4.5（高速）" },
+  { value: "haiku", label: "Claude Haiku 5.5（高速）" },
 ] as const;
 
 export const CLAUDE_MODEL_VALUES = CLAUDE_MODEL_OPTIONS.map((option) => option.value);
@@ -240,10 +240,10 @@ export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
  * `CLAUDE_MODEL_SHORT_LABELS`のバージョン表記もあわせて直す。
  */
 export const CLAUDE_ALIAS_MODEL_IDS: Readonly<Record<Exclude<ClaudeModel, "auto">, string>> = {
-  fable: "claude-fable-5-1",
+  fable: "claude-fable-5-2",
   opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5-5",
-  haiku: "claude-haiku-4-5",
+  haiku: "claude-haiku-5-5",
 };
 
 /**
@@ -260,10 +260,10 @@ export const CLAUDE_ALIAS_MODEL_IDS: Readonly<Record<Exclude<ClaudeModel, "auto"
  */
 export const CLAUDE_MODEL_SHORT_LABELS: Readonly<Record<ClaudeModel, string>> = {
   auto: "CLIの既定",
-  fable: "Fable 5.1",
+  fable: "Fable 5.2",
   opus: "Opus 5.5",
   sonnet: "Sonnet 5.5",
-  haiku: "Haiku 4.5",
+  haiku: "Haiku 5.5",
 };
 
 export function describeClaudeModel(model: ClaudeModel): string {
@@ -369,15 +369,13 @@ export function parseClaudeLocalModelSetting(value: unknown): ClaudeLocalModelSe
 // Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
 export const CODEX_MODEL_OPTIONS = [
   { value: "auto", label: "Codexに任せる" },
-  { value: "gpt-6-astra", label: "GPT-6 Astra（最高精度）" },
-  { value: "gpt-6-sol", label: "GPT-6 Sol（高精度）" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
+  { value: "gpt-6.2-astra", label: "GPT-6.2 Astra（最高精度）" },
+  { value: "gpt-6.2-sol", label: "GPT-6.2 Sol（高精度）" },
+  { value: "gpt-6.1-terra", label: "GPT-6.1 Terra（標準）" },
   { value: "gpt-6-luna", label: "GPT-6 Luna（高速）" },
-  { value: "gpt-5.5", label: "GPT-5.5（旧世代）" },
-  { value: "gpt-5.4", label: "GPT-5.4（旧世代）" },
 ] as const;
 
-export const CODEX_MODEL_DEFAULT = "gpt-5.6-terra" as const;
+export const CODEX_MODEL_DEFAULT = "gpt-6.1-terra" as const;
 export const GITHUB_ACTIONS_CODEX_MODEL_DEFAULT = CODEX_MODEL_DEFAULT;
 
 /** PRレビューと修復workflowが個別指定を持たないときに使う値。 */
@@ -412,15 +410,15 @@ export function parseCodexModel(value: unknown): CodexModel | null {
  * 「実装を開始」ダイアログで選べるCodexのモデル（#3192）。**重い順。**
  * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ4つ（Astra・Sol・Terra・Luna）。
  *
- * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。どのモデルで立つか分からない
+ * `auto`（`-m`を付けない起動）は入れない。どのモデルで立つか分からない
  * 方式は、Claude側で選択肢から外したのと同じ理由（#2776）で選ばせない。設定
  * （`AppSetting.codexModel`）には従来どおり残り、ダイアログを経由しない起動が読む。
  * 値は`CODEX_MODEL_OPTIONS`の部分集合なので、選んだものはそのまま`-m`へ渡せる。
  */
 export const CODEX_LOCAL_MODEL_VALUES = [
-  "gpt-6-astra",
-  "gpt-6-sol",
-  "gpt-5.6-terra",
+  "gpt-6.2-astra",
+  "gpt-6.2-sol",
+  "gpt-6.1-terra",
   "gpt-6-luna",
 ] as const;
 
@@ -444,12 +442,10 @@ export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {
 /** 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前 */
 export const CODEX_MODEL_SHORT_LABELS: Readonly<Record<CodexModel, string>> = {
   auto: "CLIの既定",
-  "gpt-6-astra": "GPT-6 Astra",
-  "gpt-6-sol": "GPT-6 Sol",
-  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-6.2-astra": "GPT-6.2 Astra",
+  "gpt-6.2-sol": "GPT-6.2 Sol",
+  "gpt-6.1-terra": "GPT-6.1 Terra",
   "gpt-6-luna": "GPT-6 Luna",
-  "gpt-5.5": "GPT-5.5",
-  "gpt-5.4": "GPT-5.4",
 };
 
 export function describeCodexModel(model: CodexModel): string {
@@ -458,9 +454,9 @@ export function describeCodexModel(model: CodexModel): string {
 
 /** モデルごとの「向いている作業」（`CLAUDE_MODEL_FIT_LABELS`と同じ位置づけ。チップの2行目） */
 export const CODEX_MODEL_FIT_LABELS: Readonly<Record<CodexLocalModel, string>> = {
-  "gpt-6-astra": "未知の調査・設計から",
-  "gpt-6-sol": "難しい調査・実装",
-  "gpt-5.6-terra": "仕様が決まった実装",
+  "gpt-6.2-astra": "未知の調査・設計から",
+  "gpt-6.2-sol": "難しい調査・実装",
+  "gpt-6.1-terra": "仕様が決まった実装",
   "gpt-6-luna": "文言修正・定型作業",
 };
 
@@ -484,7 +480,7 @@ export function parseCodexModelSetting(value: unknown): CodexModelSetting | null
 
 /**
  * ダイアログを開いたときのCodexモデルの初期選択。設定が「おまかせ」ならそれ、選べる3つのどれかなら
- * その値、それ以外（`auto`・旧世代）は既定（Terra）。旧世代・`auto`はダイアログの候補に無く、
+ * その値、それ以外（`auto`）は既定（Terra）。`auto`はダイアログの候補に無く、
  * 選択なしのまま開くとどれで立つのかが分からなくなるため。
  */
 export function resolveCodexInitialModel(
@@ -499,24 +495,33 @@ export function resolveCodexInitialModel(
 // **選択肢名に実際の実行先を出す**（#5067）。Claude系はAnthropic API、GPT系はサブPCのCodex CLI
 // （ChatGPTサブスク枠）で動き、OpenAI API（従量課金）は使わない。`request.ts`の`routeAppAi`が正。
 export const APP_AI_MODEL_OPTIONS = [
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）・Anthropic API" },
+  { value: "claude-haiku-5-5", label: "Claude Haiku 5.5（高速）・Anthropic API" },
   { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5（標準）・Anthropic API" },
   { value: "claude-opus-5-5", label: "Claude Opus 5.5（高精度）・Anthropic API" },
-  // Fable 5.1は単価がSonnet 5.5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
+  // Fable 5.2は単価がSonnet 5.5の4倍（入力$8 / 出力$40）。**1往復で終わる要約・検索では
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）
-  { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）・Anthropic API" },
-  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）・DeskMiniのCodex CLI" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）・DeskMiniのCodex CLI" },
+  { value: "claude-fable-5-2", label: "Claude Fable 5.2（最高精度）・Anthropic API" },
+  { value: "gpt-6.2-sol", label: "GPT-6.2 Sol（最高精度）・DeskMiniのCodex CLI" },
+  { value: "gpt-6.1-terra", label: "GPT-6.1 Terra（標準）・DeskMiniのCodex CLI" },
   { value: "gpt-6-luna", label: "GPT-6 Luna（高速）・DeskMiniのCodex CLI" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
 export const APP_AI_MODEL_REASONING_DEFAULT = "claude-sonnet-5-5" as const;
-export const APP_AI_MODEL_CODEX_DEFAULT = "gpt-5.6-terra" as const;
+export const APP_AI_MODEL_CODEX_DEFAULT = "gpt-6.1-terra" as const;
 export const APP_AI_MODEL_VALUES = APP_AI_MODEL_OPTIONS.map((option) => option.value);
 export type AppAiModel = (typeof APP_AI_MODEL_VALUES)[number];
 export type AppAiProvider = "anthropic" | "openai";
+
+/** 提供元の世代交代で候補から外したID → 後継。保存済みの値を黙って「主系に従う」へ落とさない */
+const LEGACY_APP_AI_MODELS: Readonly<Record<string, AppAiModel>> = {
+  "claude-haiku-4-5": "claude-haiku-5-5",
+  "claude-sonnet-5": "claude-sonnet-5-5",
+  "claude-fable-5-1": "claude-fable-5-2",
+  "gpt-6-sol": "gpt-6.2-sol",
+  "gpt-5.6-terra": "gpt-6.1-terra",
+};
 
 export function appAiProvider(model: AppAiModel): AppAiProvider {
   return model.startsWith("gpt-") ? "openai" : "anthropic";
@@ -524,10 +529,9 @@ export function appAiProvider(model: AppAiModel): AppAiProvider {
 
 export function parseAppAiModel(value: unknown): AppAiModel | null {
   if (typeof value !== "string") return null;
-  // 旧IDで保存された設定・DBの既定値（`claude-sonnet-5`）はSonnet 5.5へ読み替える（#3612）
-  if (value === "claude-sonnet-5") return "claude-sonnet-5-5";
-  return (APP_AI_MODEL_VALUES as readonly string[]).includes(value)
-    ? (value as AppAiModel)
+  const current = LEGACY_APP_AI_MODELS[value] ?? value;
+  return (APP_AI_MODEL_VALUES as readonly string[]).includes(current)
+    ? (current as AppAiModel)
     : null;
 }
 
@@ -576,7 +580,7 @@ export function parseModelPickEngine(value: unknown): ModelPickEngine | null {
 
 /**
  * 予約実行の一括予約（#3438）で使うモデルの選択。**エージェントとモデルの組**を1つの文字列
- * `<agent>:<model>`（例: `claude:sonnet`・`codex:gpt-6-sol`）で持つ。空文字は「設定に従う」
+ * `<agent>:<model>`（例: `claude:sonnet`・`codex:gpt-6.2-sol`）で持つ。空文字は「設定に従う」
  * （`claudeLocalModel`・`codexModel`の設定値へ委ねる。`POST /api/nightly-run`が`model`を省略した扱い）。
  *
  * `AppSetting.nextWindowRunBulkModel`の値と、一括予約バーの選択値で共通。

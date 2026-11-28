@@ -40,7 +40,7 @@ beforeEach(() => {
     claudeModelAssist: update.claudeModelAssist ?? "auto",
     claudeLocalModel: update.claudeLocalModel ?? "sonnet",
     codexModel: update.codexModel ?? "auto",
-    appAiModel: update.appAiModel ?? "claude-haiku-4-5",
+    appAiModel: update.appAiModel ?? "claude-haiku-5-5",
     appAiModelReasoning: update.appAiModelReasoning ?? "claude-sonnet-5-5",
     modelPickEngine: update.modelPickEngine ?? "app-ai",
   }));
@@ -62,18 +62,18 @@ describe("GET", () => {
       claudeModel: "auto",
       aiExecutionProvider: "claude",
       githubActionsAgent: "claude",
-      githubActionsCodexModel: "gpt-5.6-terra",
+      githubActionsCodexModel: "gpt-6.1-terra",
       claudeModelAssist: "auto",
       claudeLocalModel: "sonnet",
-      codexModel: "gpt-5.6-terra",
-      appAiModel: "claude-haiku-4-5",
+      codexModel: "gpt-6.1-terra",
+      appAiModel: "claude-haiku-5-5",
       appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
-      planReviewCodexModel: "gpt-5.6-terra",
+      planReviewCodexModel: "gpt-6.1-terra",
       workflowClaudeModel: "auto",
       workflowCodexModel: "auto",
       workflowCodexReasoningEffort: "default",
@@ -87,7 +87,7 @@ describe("GET", () => {
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
       claudeLocalModel: "opus",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
       appAiModel: "claude-sonnet-5-5",
       appAiModelReasoning: "claude-opus-5-5",
     });
@@ -97,10 +97,10 @@ describe("GET", () => {
       claudeModel: "opus",
       aiExecutionProvider: "claude",
       githubActionsAgent: "claude",
-      githubActionsCodexModel: "gpt-5.6-terra",
+      githubActionsCodexModel: "gpt-6.1-terra",
       claudeModelAssist: "sonnet",
       claudeLocalModel: "opus",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
       appAiModel: "claude-sonnet-5-5",
       appAiModelReasoning: "claude-opus-5-5",
       modelPickEngine: "app-ai",
@@ -108,7 +108,7 @@ describe("GET", () => {
       planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
-      planReviewCodexModel: "gpt-5.6-terra",
+      planReviewCodexModel: "gpt-6.1-terra",
       workflowClaudeModel: "auto",
       workflowCodexModel: "auto",
       workflowCodexReasoningEffort: "default",
@@ -143,11 +143,11 @@ describe("PATCH", () => {
         claudeModel: "opus",
         claudeModelAssist: "haiku",
         claudeLocalModel: "sonnet",
-        codexModel: "gpt-6-sol",
+        codexModel: "gpt-6.2-sol",
         planReviewAgentForClaude: "codex",
         planReviewAgentForCodex: "claude",
         planReviewClaudeModel: "opus",
-        planReviewCodexModel: "gpt-6-sol",
+        planReviewCodexModel: "gpt-6.2-sol",
         appAiModel: "claude-opus-5-5",
         appAiModelReasoning: "claude-sonnet-5-5",
       }),
@@ -160,11 +160,11 @@ describe("PATCH", () => {
           claudeModel: "opus",
           claudeModelAssist: "haiku",
           claudeLocalModel: "sonnet",
-          codexModel: "gpt-6-sol",
+          codexModel: "gpt-6.2-sol",
           planReviewAgentForClaude: "codex",
           planReviewAgentForCodex: "claude",
           planReviewClaudeModel: "opus",
-          planReviewCodexModel: "gpt-6-sol",
+          planReviewCodexModel: "gpt-6.2-sol",
           appAiModel: "claude-opus-5-5",
           appAiModelReasoning: "claude-sonnet-5-5",
         },
@@ -239,7 +239,7 @@ describe("PATCH", () => {
       patchRequest({
         claudeModel: "sonnet",
         planReviewClaudeModel: "fable",
-        planReviewCodexModel: "gpt-6-astra",
+        planReviewCodexModel: "gpt-6.2-astra",
       }),
     );
 
@@ -248,7 +248,7 @@ describe("PATCH", () => {
       expect.objectContaining({
         update: expect.objectContaining({
           planReviewClaudeModel: "fable",
-          planReviewCodexModel: "gpt-6-astra",
+          planReviewCodexModel: "gpt-6.2-astra",
         }),
       }),
     );
@@ -316,7 +316,7 @@ describe("PATCH", () => {
 
   it("claudeLocalModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(
-      patchRequest({ claudeModel: "opus", claudeLocalModel: "gpt-5.6-terra" }),
+      patchRequest({ claudeModel: "opus", claudeLocalModel: "gpt-6.1-terra" }),
     );
 
     expect(res.status).toBe(400);

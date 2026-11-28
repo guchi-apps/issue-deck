@@ -342,7 +342,7 @@ else
   CODEX_MODEL_ARG=""
   if [[ -n "${ISSUE_DECK_CODEX_MODEL:-}" ]]; then
     case "$ISSUE_DECK_CODEX_MODEL" in
-      gpt-6-astra | gpt-6-sol | gpt-5.6-terra | gpt-6-luna) CODEX_MODEL_ARG=" -m $(printf '%q' "$ISSUE_DECK_CODEX_MODEL")" ;;
+      gpt-6.2-astra | gpt-6.2-sol | gpt-6.1-terra | gpt-6-luna | gpt-6-astra | gpt-6-sol | gpt-5.6-terra) CODEX_MODEL_ARG=" -m $(printf '%q' "$ISSUE_DECK_CODEX_MODEL")" ;;
       *)
         echo "Error: 計画レビュー用のCodexモデルが不正です: $ISSUE_DECK_CODEX_MODEL" >&2
         exit 1

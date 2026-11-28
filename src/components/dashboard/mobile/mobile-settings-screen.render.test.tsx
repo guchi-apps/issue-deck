@@ -91,7 +91,7 @@ function renderScreen() {
       claudeModelAssist="haiku"
       claudeLocalModel="sonnet"
       codexModel="auto"
-      appAiModel="claude-haiku-4-5"
+      appAiModel="claude-haiku-5-5"
       appAiModelReasoning="claude-sonnet-5-5"
       modelPickEngine="app-ai"
       dispatchConcurrency={2}
@@ -177,7 +177,7 @@ describe("MobileSettingsScreen", () => {
         claudeModelAssist="haiku"
         claudeLocalModel="sonnet"
         codexModel="auto"
-        appAiModel="claude-haiku-4-5"
+        appAiModel="claude-haiku-5-5"
         appAiModelReasoning="claude-sonnet-5-5"
         modelPickEngine="app-ai"
         dispatchConcurrency={2}

@@ -178,6 +178,9 @@ export async function getAppAiToken(feature: ClaudeApiFeature): Promise<string |
 /**
  * Anthropic APIへPOSTし、消費したトークンを機能別に計上する。
  *
+ * Haiku 5.5は思考が既定で有効になり、思考ぶんも`max_tokens`を消費する。各機能の上限は短い答えに
+ * 合わせてあるので、思考を切って呼ぶ（呼び出し元が`thinking`を指定すればそちらを優先する。#5668）
+ *
  * `body`は`max_tokens`・`messages`のほか、`system`や`output_config`など
  * 機能ごとの指定をそのまま渡してよい。`model`は保存済みの共通設定をここで加える。
  */
@@ -215,7 +218,12 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
       "anthropic-version": ANTHROPIC_VERSION,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ ...options.body, system: withClaudeCodeIdentity(options.body.system), model }),
+    body: JSON.stringify({
+      ...(model.startsWith("claude-haiku-5-5") ? { thinking: { type: "disabled" } } : {}),
+      ...options.body,
+      system: withClaudeCodeIdentity(options.body.system),
+      model,
+    }),
     cache: "no-store",
     ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
   });

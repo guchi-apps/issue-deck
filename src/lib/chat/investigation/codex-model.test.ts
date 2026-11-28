@@ -70,7 +70,7 @@ function setup(host: { chatCodexCapable: boolean | null; online?: boolean } | nu
   state.usage = [];
 }
 
-function model(modelName = "gpt-6-sol") {
+function model(modelName = "gpt-6.2-sol") {
   let t = 0;
   return createCodexSession({
     runId: "run1",
@@ -205,11 +205,11 @@ describe("buildCodexPrompt", () => {
 describe("recordCodexChatUsage", () => {
   it("OpenAI APIの`gpt-*`と混ざらないよう、実行先を前に付けて計上する", () => {
     setup(null);
-    recordCodexChatUsage("gpt-6-sol", { input_tokens: 100, cached_input_tokens: 40, output_tokens: 7 });
+    recordCodexChatUsage("gpt-6.2-sol", { input_tokens: 100, cached_input_tokens: 40, output_tokens: 7 });
     expect(state.usage).toEqual([
       {
         feature: "chat_investigation",
-        model: "codex-cli/gpt-6-sol",
+        model: "codex-cli/gpt-6.2-sol",
         tokens: { inputTokens: 100, outputTokens: 7, cacheReadTokens: 40, cacheCreationTokens: 0 },
       },
     ]);

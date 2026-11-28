@@ -191,12 +191,12 @@ describe("buildModelPickPrompt", () => {
 // #3192。Codexの「おまかせ」。判定を行うのはどちらもアプリ内AIで、変わるのは候補・プロンプト・ルール
 describe("Codexの候補（#3192）", () => {
   it("Codexの応答からはCodexの候補だけを採る", () => {
-    expect(parseModelPick('{"model":"gpt-6-astra","reason":"設計が必要なためです。"}', "codex")).toEqual({
-      model: "gpt-6-astra",
+    expect(parseModelPick('{"model":"gpt-6.2-astra","reason":"設計が必要なためです。"}', "codex")).toEqual({
+      model: "gpt-6.2-astra",
       reason: "設計が必要なためです。",
     });
-    expect(parseModelPick('{"model":"gpt-6-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
-      model: "gpt-6-sol",
+    expect(parseModelPick('{"model":"gpt-6.2-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
+      model: "gpt-6.2-sol",
       reason: "調査が要るためです。",
     });
     expect(parseModelPick('{"model":"gpt-6-luna","reason":"軽い修正のためです。"}', "codex")?.model).toBe(
@@ -210,15 +210,15 @@ describe("Codexの候補（#3192）", () => {
     expect(parseModelPick('{"model":"gpt-5.5","reason":"x"}', "codex")).toBeNull();
     expect(parseModelPick('{"model":"auto","reason":"x"}', "codex")).toBeNull();
     // 逆に、Claudeの欄でCodexのモデルは採らない（従来どおり）
-    expect(parseModelPick('{"model":"gpt-6-sol","reason":"x"}', "claude")).toBeNull();
+    expect(parseModelPick('{"model":"gpt-6.2-sol","reason":"x"}', "claude")).toBeNull();
   });
 
   it("プロンプトはCodex CLIとCodexの候補を案内する", () => {
     const prompt = buildModelPickPrompt(input(), "codex");
     expect(prompt).toContain("Codex CLI");
-    expect(prompt).toContain("gpt-6-astra");
-    expect(prompt).toContain("gpt-6-sol");
-    expect(prompt).toContain("gpt-5.6-terra");
+    expect(prompt).toContain("gpt-6.2-astra");
+    expect(prompt).toContain("gpt-6.2-sol");
+    expect(prompt).toContain("gpt-6.1-terra");
     expect(prompt).toContain("gpt-6-luna");
     expect(prompt).not.toContain("`opus`");
     expect(prompt).toContain("ボタンの文言を直す");
@@ -239,14 +239,14 @@ describe("Codexの候補（#3192）", () => {
         { body: "あ".repeat(800) },
         { commentCount: 10 },
       ]) {
-        expect(pickModelByRule(input(overrides), "codex").model).toBe("gpt-5.6-terra");
+        expect(pickModelByRule(input(overrides), "codex").model).toBe("gpt-6.1-terra");
       }
     });
 
     it("未解決の判断が書かれていればSol", () => {
       expect(
         pickModelByRule(input({ body: "原因が不明で切り分けが必要。" }), "codex").model,
-      ).toBe("gpt-6-sol");
+      ).toBe("gpt-6.2-sol");
     });
 
     it("文書だけの短い更新はLuna", () => {
@@ -257,7 +257,7 @@ describe("Codexの候補（#3192）", () => {
 
     it("迷ったらTerra。理由は必ず添える", () => {
       const picked = pickModelByRule(input(), "codex");
-      expect(picked.model).toBe("gpt-5.6-terra");
+      expect(picked.model).toBe("gpt-6.1-terra");
       expect(picked.reason.length).toBeGreaterThan(0);
     });
 
@@ -316,8 +316,8 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     const { criteria } = buildModelPickQuestions("codex").model as {
       criteria: Record<string, string>;
     };
-    expect(criteria["gpt-5.6-terra"]).toContain("仕様が決まった新規画面");
-    expect(criteria["gpt-6-sol"]).toContain("未確定のUI/UXの比較判断");
+    expect(criteria["gpt-6.1-terra"]).toContain("仕様が決まった新規画面");
+    expect(criteria["gpt-6.2-sol"]).toContain("未確定のUI/UXの比較判断");
     expect(buildModelPickPrompt(input(), "codex")).toContain("未解決の判断とリスク");
   });
 
@@ -331,9 +331,9 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
   it("Codexの選択肢はCodexのモデル名にする", () => {
     const questions = buildModelPickQuestions("codex");
     expect(Object.keys((questions.model as { criteria: Record<string, unknown> }).criteria)).toEqual([
-      "gpt-6-astra",
-      "gpt-5.6-terra",
-      "gpt-6-sol",
+      "gpt-6.2-astra",
+      "gpt-6.1-terra",
+      "gpt-6.2-sol",
       "gpt-6-luna",
     ]);
     expect(JSON.stringify(questions.model)).toContain("Codex CLI");
@@ -429,10 +429,10 @@ describe("pickModelByJev", () => {
           answers: {
             model: {
               type: "choice",
-              choice: "gpt-6-sol",
+              choice: "gpt-6.2-sol",
               confidence: 0.7,
               // 候補に無いラベル（Claude側のモデル）が混じっても捨てる
-              probabilities: { "gpt-6-sol": 0.7, "gpt-5.6-terra": 0.3, opus: 0.9 },
+              probabilities: { "gpt-6.2-sol": 0.7, "gpt-6.1-terra": 0.3, opus: 0.9 },
             },
           },
         }),
@@ -440,8 +440,8 @@ describe("pickModelByJev", () => {
     );
 
     const result = await pickModelByJev(input(), "codex");
-    expect(result?.model).toBe("gpt-6-sol");
-    expect(result?.probabilities).toEqual({ "gpt-6-sol": 0.7, "gpt-5.6-terra": 0.3 });
+    expect(result?.model).toBe("gpt-6.2-sol");
+    expect(result?.probabilities).toEqual({ "gpt-6.2-sol": 0.7, "gpt-6.1-terra": 0.3 });
   });
 
   // Claudeの欄でCodexのモデルが返ってきても採らない（逆も同じ）
@@ -451,7 +451,7 @@ describe("pickModelByJev", () => {
       "fetch",
       vi.fn(async () =>
         jevResponse({
-          answers: { model: { type: "choice", choice: "gpt-6-sol", confidence: 1 } },
+          answers: { model: { type: "choice", choice: "gpt-6.2-sol", confidence: 1 } },
         }),
       ),
     );

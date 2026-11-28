@@ -131,14 +131,14 @@ describe("POST /api/dispatch/claim", () => {
     claimDispatchJobs.mockResolvedValue([{ id: "job-1" }]);
     appSettingFindUnique.mockResolvedValue({
       claudeLocalModel: "opus",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
     });
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
     expect(await res.json()).toEqual({
       ok: true,
-      jobs: [{ id: "job-1", claudeLocalModel: "opus", codexModel: "gpt-5.6-terra" }],
+      jobs: [{ id: "job-1", claudeLocalModel: "opus", codexModel: "gpt-6.1-terra" }],
     });
   });
 
@@ -169,7 +169,7 @@ describe("POST /api/dispatch/claim", () => {
     ]);
     appSettingFindUnique.mockResolvedValue({
       claudeLocalModel: "sonnet",
-      codexModel: "gpt-5.6-terra",
+      codexModel: "gpt-6.1-terra",
     });
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 2 }));
@@ -181,13 +181,13 @@ describe("POST /api/dispatch/claim", () => {
           id: "job-1",
           claudeModel: "fable",
           claudeLocalModel: "fable",
-          codexModel: "gpt-5.6-terra",
+          codexModel: "gpt-6.1-terra",
         },
         {
           id: "job-2",
           claudeModel: null,
           claudeLocalModel: "sonnet",
-          codexModel: "gpt-5.6-terra",
+          codexModel: "gpt-6.1-terra",
         },
       ],
     });
@@ -196,20 +196,20 @@ describe("POST /api/dispatch/claim", () => {
   // 差し替えて届ける
   it("ジョブにCodexのモデルの指定があれば、設定の既定より優先して払い出す", async () => {
     claimDispatchJobs.mockResolvedValue([
-      { id: "job-1", agent: "codex", codexModel: "gpt-6-astra" },
+      { id: "job-1", agent: "codex", codexModel: "gpt-6.2-astra" },
       { id: "job-2", agent: "codex", codexModel: null },
     ]);
     appSettingFindUnique.mockResolvedValue({
       claudeLocalModel: "sonnet",
-      codexModel: "gpt-5.5",
+      codexModel: "gpt-6.2-sol",
     });
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 2 }));
 
     const body = await res.json();
     expect(body.jobs.map((job: { codexModel: string }) => job.codexModel)).toEqual([
-      "gpt-6-astra",
-      "gpt-5.5",
+      "gpt-6.2-astra",
+      "gpt-6.2-sol",
     ]);
   });
 
@@ -220,7 +220,7 @@ describe("POST /api/dispatch/claim", () => {
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
-    expect((await res.json()).jobs[0].codexModel).toBe("gpt-5.6-terra");
+    expect((await res.json()).jobs[0].codexModel).toBe("gpt-6.1-terra");
   });
 
   // ジョブの列を手で書き換えられても、pollerへ届く語は既知のものだけ

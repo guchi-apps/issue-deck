@@ -218,7 +218,7 @@ function detailElement(issue: Issue, overrides: Partial<ComponentProps<typeof Is
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       claudeLocalModel="sonnet"
-      codexModel="gpt-5.6-terra"
+      codexModel="gpt-6.1-terra"
       {...overrides}
     />
   );
@@ -239,7 +239,7 @@ function mobileDetailElement(
       repositories={[repository]}
       currentUserLogin="guchi"
       claudeLocalModel="sonnet"
-      codexModel="gpt-5.6-terra"
+      codexModel="gpt-6.1-terra"
       onBack={vi.fn()}
       onEdit={vi.fn()}
       onIssueMoved={vi.fn()}

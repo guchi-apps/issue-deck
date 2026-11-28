@@ -95,7 +95,7 @@ run_review() {
       reasoning_effort="$(jq -r '.workflowCodexReasoningEffort // "default"' <<<"$settings_json" 2>/dev/null || printf 'default')"
     fi
   fi
-  case "$codex_model" in auto|gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-6-luna|gpt-5.5|gpt-5.4) ;; *) codex_model=auto ;; esac
+  case "$codex_model" in auto|gpt-6.2-astra|gpt-6.2-sol|gpt-6.1-terra|gpt-6-luna|gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-5.5|gpt-5.4) ;; *) codex_model=auto ;; esac
   case "$reasoning_effort" in default|low|medium|high|xhigh) ;; *) reasoning_effort=default ;; esac
   [[ -f "$SCRIPT_DIR/prompts/codex-pr-review-agent.md" ]] || {
     echo "Error: Codex PRレビュー用プロンプトがありません。" >&2

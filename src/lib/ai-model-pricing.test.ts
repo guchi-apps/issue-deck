@@ -13,7 +13,15 @@ describe("resolveModelRate", () => {
   });
 
   it("Sonnet 5.5はSonnet 5と同じ単価で、Sonnet 5に前方一致しない", () => {
-    expect(resolveModelRate("claude-sonnet-5-5")).toEqual({ input: 2.0, output: 10.0, cacheRead: 0.2 });
+    expect(resolveModelRate("claude-sonnet-5-5")).toEqual({ input: 2.0, output: 10.0, cacheRead: 0.1 });
+  });
+
+  it("最新世代の単価を返す", () => {
+    expect(resolveModelRate("claude-fable-5-2")).toEqual({ input: 8.0, output: 40.0, cacheRead: 0.2 });
+    expect(resolveModelRate("claude-haiku-5-5")).toEqual({ input: 0.1, output: 0.5, cacheRead: 0.01 });
+    expect(resolveModelRate("gpt-6.2-astra")).toEqual({ input: 8.0, output: 40.0, cacheRead: 0.4 });
+    expect(resolveModelRate("gpt-6.2-sol")).toEqual({ input: 2.0, output: 10.0, cacheRead: 0.1 });
+    expect(resolveModelRate("gpt-6.1-terra")).toEqual({ input: 1.0, output: 5.0, cacheRead: 0.05 });
   });
 
   it("Mythos 5.1のキャッシュ読み出しはMythos 5ではなくFable 5.1と同じ$0.25", () => {

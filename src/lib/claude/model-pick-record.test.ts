@@ -78,12 +78,12 @@ describe("parseModelPickRecord（#4853）", () => {
   });
 
   it("エージェントの候補に無いモデル・知らない経路は記録しない", () => {
-    expect(parseModelPickRecord({ source: "ai", model: "gpt-6-sol" }, "claude")).toBeNull();
+    expect(parseModelPickRecord({ source: "ai", model: "gpt-6.2-sol" }, "claude")).toBeNull();
     expect(parseModelPickRecord({ source: "guess", model: "opus" }, "claude")).toBeNull();
     expect(parseModelPickRecord(null, "claude")).toBeNull();
-    expect(parseModelPickRecord({ source: "ai", model: "gpt-6-sol" }, "codex")).toEqual({
+    expect(parseModelPickRecord({ source: "ai", model: "gpt-6.2-sol" }, "codex")).toEqual({
       source: "ai",
-      model: "gpt-6-sol",
+      model: "gpt-6.2-sol",
       probabilities: null,
     });
   });

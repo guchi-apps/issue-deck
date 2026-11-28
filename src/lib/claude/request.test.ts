@@ -28,8 +28,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("callClaudeMessages", () => {
   beforeEach(() => {
     findUnique.mockResolvedValue({
-      appAiModel: "claude-haiku-4-5",
-      appAiModelReasoning: "claude-haiku-4-5",
+      appAiModel: "claude-haiku-5-5",
+      appAiModelReasoning: "claude-haiku-5-5",
     });
     resetClaudeApiUsage();
     runAppAiOnCodex.mockReset();
@@ -49,7 +49,7 @@ describe("callClaudeMessages", () => {
       "fetch",
       vi.fn().mockResolvedValue(
         jsonResponse({
-          model: "claude-haiku-4-5-20251001",
+          model: "claude-haiku-5-5-20251001",
           content: [{ type: "text", text: "ok" }],
           usage: {
             input_tokens: 120,
@@ -64,7 +64,7 @@ describe("callClaudeMessages", () => {
     const { response, json } = await callClaudeMessages({
       feature: "comment_summary",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 16, messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 16, messages: [] },
     });
 
     expect(response.ok).toBe(true);
@@ -79,7 +79,7 @@ describe("callClaudeMessages", () => {
       cacheCreationTokens: 10,
     });
     // モデルは応答が返した実際の値を使う。
-    expect(summary.features[0].models[0].model).toBe("claude-haiku-4-5-20251001");
+    expect(summary.features[0].models[0].model).toBe("claude-haiku-5-5-20251001");
   });
 
   it("usageが無い応答でも呼び出し回数だけは数える", async () => {
@@ -91,13 +91,13 @@ describe("callClaudeMessages", () => {
     await callClaudeMessages({
       feature: "issue_search",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 16, messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 16, messages: [] },
     });
 
     const summary = getClaudeApiUsageSummary(NOW);
     expect(summary.totalLast24h.calls).toBe(1);
     expect(summary.totalLast24h.inputTokens).toBe(0);
-    expect(summary.features[0].models[0].model).toBe("claude-haiku-4-5");
+    expect(summary.features[0].models[0].model).toBe("claude-haiku-5-5");
   });
 
   it("利用枠不足の429は再試行せず、原因とリクエストIDを返す", async () => {
@@ -114,7 +114,7 @@ describe("callClaudeMessages", () => {
     const { response, json, error } = await callClaudeMessages({
       feature: "plan_usage",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 1, messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 1, messages: [] },
     });
 
     expect(response.status).toBe(429);
@@ -133,20 +133,22 @@ describe("callClaudeMessages", () => {
     await callClaudeMessages({
       feature: "new_app_consult",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 8, system: "sys", messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 8, system: "sys", messages: [] },
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.anthropic.com/v1/messages");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
     expect(JSON.parse(String(init.body))).toEqual({
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-5-5",
       max_tokens: 8,
       system: [
         { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
         { type: "text", text: "sys" },
       ],
       messages: [],
+      // Haiku 5.5は思考が既定で有効なので、短い`max_tokens`を食い潰さないよう切る（#5668）
+      thinking: { type: "disabled" },
     });
   });
 
@@ -186,7 +188,7 @@ describe("callClaudeMessages", () => {
     await callClaudeMessages({
       feature: "comment_summary",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 8, messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 8, messages: [] },
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -203,7 +205,7 @@ describe("callClaudeMessages", () => {
     await callClaudeMessages({
       feature: "comment_summary",
       token: "test-token",
-      body: { model: "claude-haiku-4-5", max_tokens: 8, messages: [] },
+      body: { model: "claude-haiku-5-5", max_tokens: 8, messages: [] },
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -212,7 +214,7 @@ describe("callClaudeMessages", () => {
 
   it("原因診断・新規アプリ相談だけ判断用モデルを使う", async () => {
     findUnique.mockResolvedValue({
-      appAiModel: "claude-haiku-4-5",
+      appAiModel: "claude-haiku-5-5",
       appAiModelReasoning: "claude-sonnet-5-5",
     });
     const fetchMock = vi
@@ -232,11 +234,11 @@ describe("callClaudeMessages", () => {
     });
 
     expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-sonnet-5-5");
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-5-5");
   });
 
   it("GPT系が選ばれた機能はDeskMiniのCodex CLIで実行し、Claude APIにもOpenAI APIにもリクエストしない（#5067）", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra" });
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-6.1-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -259,7 +261,7 @@ describe("callClaudeMessages", () => {
     expect(summary.json?.content?.[0]?.text).toBe("要約です");
     expect(summary.json?.model).toBe("codex-cli/gpt-6-luna");
     expect(runAppAiOnCodex.mock.calls[0][0]).toMatchObject({ feature: "comment_summary", model: "gpt-6-luna" });
-    expect(runAppAiOnCodex.mock.calls[1][0]).toMatchObject({ feature: "new_app_consult", model: "gpt-5.6-terra", timeoutMs: 5_000 });
+    expect(runAppAiOnCodex.mock.calls[1][0]).toMatchObject({ feature: "new_app_consult", model: "gpt-6.1-terra", timeoutMs: 5_000 });
     // Claude系の使用量としては数えない（Codex側の記録は受け口が`codex-cli/<model>`で行う）
     expect(getClaudeApiUsageSummary(NOW).totalLast24h.calls).toBe(0);
   });
@@ -284,7 +286,7 @@ describe("callClaudeMessages", () => {
     await callClaudeMessages({ feature: "plan_usage", token: "anthropic-token", body: { max_tokens: 1, messages: [] } });
 
     expect(runAppAiOnCodex).not.toHaveBeenCalled();
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-haiku-4-5");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-haiku-5-5");
   });
 
   it("Codex経路ではClaudeのOAuthトークンを前提にせず目印を返し、Claude系ではOAuthトークンを返す", async () => {

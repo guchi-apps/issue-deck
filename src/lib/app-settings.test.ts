@@ -73,8 +73,8 @@ describe("主系AIプロバイダー（#3988）", () => {
   });
 
   it("アプリ内AIは主系プロバイダーに追従し、モデル固定は優先する", () => {
-    expect(resolveAppAiModel("inherit", "claude")).toBe("claude-haiku-4-5");
-    expect(resolveAppAiModel("inherit", "codex", true)).toBe("gpt-5.6-terra");
+    expect(resolveAppAiModel("inherit", "claude")).toBe("claude-haiku-5-5");
+    expect(resolveAppAiModel("inherit", "codex", true)).toBe("gpt-6.1-terra");
     expect(resolveAppAiModel("claude-opus-5-5", "codex")).toBe("claude-opus-5-5");
   });
 });
@@ -82,14 +82,19 @@ describe("主系AIプロバイダー（#3988）", () => {
 describe("parseAppAiModel", () => {
   it("旧IDのclaude-sonnet-5はSonnet 5.5へ読み替える（#3612）", () => {
     expect(parseAppAiModel("claude-sonnet-5")).toBe("claude-sonnet-5-5");
+    // 候補から外した旧世代は後継へ読み替える（#5668）
+    expect(parseAppAiModel("claude-haiku-4-5")).toBe("claude-haiku-5-5");
+    expect(parseAppAiModel("claude-fable-5-1")).toBe("claude-fable-5-2");
+    expect(parseAppAiModel("gpt-6-sol")).toBe("gpt-6.2-sol");
+    expect(parseAppAiModel("gpt-5.6-terra")).toBe("gpt-6.1-terra");
   });
 
   it("許可された値はそのまま返す", () => {
-    expect(parseAppAiModel("claude-haiku-4-5")).toBe("claude-haiku-4-5");
+    expect(parseAppAiModel("claude-haiku-5-5")).toBe("claude-haiku-5-5");
     expect(parseAppAiModel("claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
     expect(parseAppAiModel("claude-opus-5-5")).toBe("claude-opus-5-5");
-    expect(parseAppAiModel("gpt-6-sol")).toBe("gpt-6-sol");
-    expect(parseAppAiModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(parseAppAiModel("gpt-6.2-sol")).toBe("gpt-6.2-sol");
+    expect(parseAppAiModel("gpt-6.1-terra")).toBe("gpt-6.1-terra");
     expect(parseAppAiModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
@@ -102,8 +107,8 @@ describe("parseAppAiModel", () => {
 
 describe("appAiProvider", () => {
   it("モデルからAPIプロバイダーを判定する", () => {
-    expect(appAiProvider("claude-haiku-4-5")).toBe("anthropic");
-    expect(appAiProvider("gpt-5.6-terra")).toBe("openai");
+    expect(appAiProvider("claude-haiku-5-5")).toBe("anthropic");
+    expect(appAiProvider("gpt-6.1-terra")).toBe("openai");
   });
 });
 
@@ -198,16 +203,16 @@ describe("parseClaudeLocalModelSetting", () => {
 describe("parseCodexModel", () => {
   it("許可された値はそのまま返す", () => {
     expect(parseCodexModel("auto")).toBe("auto");
-    expect(parseCodexModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(parseCodexModel("gpt-6-sol")).toBe("gpt-6-sol");
-    expect(parseCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(parseCodexModel("gpt-6.2-astra")).toBe("gpt-6.2-astra");
+    expect(parseCodexModel("gpt-6.2-sol")).toBe("gpt-6.2-sol");
+    expect(parseCodexModel("gpt-6.1-terra")).toBe("gpt-6.1-terra");
     expect(parseCodexModel("gpt-6-luna")).toBe("gpt-6-luna");
-    expect(parseCodexModel("gpt-5.5")).toBe("gpt-5.5");
-    expect(parseCodexModel("gpt-5.4")).toBe("gpt-5.4");
   });
 
   it("許可されていない値はnullを返す", () => {
     expect(parseCodexModel("gpt-5-codex")).toBeNull();
+    expect(parseCodexModel("gpt-5.5")).toBeNull();
+    expect(parseCodexModel("gpt-5.4")).toBeNull();
     expect(parseCodexModel(5)).toBeNull();
   });
 });
@@ -215,9 +220,9 @@ describe("parseCodexModel", () => {
 // #3192。ダイアログ・ジョブ・APIの`model`（Codex）。旧世代・`auto`・おまかせは通さない
 describe("parseCodexLocalModel", () => {
   it("Astra・Sol・Terra・Lunaを通す", () => {
-    expect(parseCodexLocalModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(parseCodexLocalModel("gpt-6-sol")).toBe("gpt-6-sol");
-    expect(parseCodexLocalModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(parseCodexLocalModel("gpt-6.2-astra")).toBe("gpt-6.2-astra");
+    expect(parseCodexLocalModel("gpt-6.2-sol")).toBe("gpt-6.2-sol");
+    expect(parseCodexLocalModel("gpt-6.1-terra")).toBe("gpt-6.1-terra");
     expect(parseCodexLocalModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
@@ -233,7 +238,7 @@ describe("parseCodexModelSetting", () => {
   it("おまかせ（pick）と既存の候補を通す", () => {
     expect(parseCodexModelSetting("pick")).toBe("pick");
     expect(parseCodexModelSetting("auto")).toBe("auto");
-    expect(parseCodexModelSetting("gpt-5.5")).toBe("gpt-5.5");
+    expect(parseCodexModelSetting("gpt-6.2-sol")).toBe("gpt-6.2-sol");
   });
 
   it("不正な値はnull", () => {
@@ -250,15 +255,15 @@ describe("parseCodexModelSetting", () => {
 describe("resolveCodexInitialModel", () => {
   it("おまかせと、選べる4つはそのまま", () => {
     expect(resolveCodexInitialModel("pick")).toBe("pick");
-    expect(resolveCodexInitialModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(resolveCodexInitialModel("gpt-6-sol")).toBe("gpt-6-sol");
+    expect(resolveCodexInitialModel("gpt-6.2-astra")).toBe("gpt-6.2-astra");
+    expect(resolveCodexInitialModel("gpt-6.2-sol")).toBe("gpt-6.2-sol");
     expect(resolveCodexInitialModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
   it("旧世代・autoは候補に無いのでTerra", () => {
-    expect(resolveCodexInitialModel("auto")).toBe("gpt-5.6-terra");
-    expect(resolveCodexInitialModel("gpt-5.5")).toBe("gpt-5.6-terra");
-    expect(resolveCodexInitialModel("gpt-5.4")).toBe("gpt-5.6-terra");
+    expect(resolveCodexInitialModel("auto")).toBe("gpt-6.1-terra");
+    expect(resolveCodexInitialModel("gpt-5.5" as never)).toBe("gpt-6.1-terra");
+    expect(resolveCodexInitialModel("gpt-5.4" as never)).toBe("gpt-6.1-terra");
   });
 });
 
@@ -266,9 +271,9 @@ describe("一括予約のモデル選択（#3438）", () => {
   it("<agent>:<model>を往復でき、空文字は設定に従う", () => {
     expect(parseBulkReserveModelChoice("")).toBeNull();
     expect(parseBulkReserveModelChoice("claude:opus")).toEqual({ agent: "claude", model: "opus" });
-    const codex = parseBulkReserveModelChoice("codex:gpt-6-sol");
-    expect(codex).toEqual({ agent: "codex", model: "gpt-6-sol" });
-    expect(encodeBulkReserveModel(codex ?? null)).toBe("codex:gpt-6-sol");
+    const codex = parseBulkReserveModelChoice("codex:gpt-6.2-sol");
+    expect(codex).toEqual({ agent: "codex", model: "gpt-6.2-sol" });
+    expect(encodeBulkReserveModel(codex ?? null)).toBe("codex:gpt-6.2-sol");
     expect(encodeBulkReserveModel(null)).toBe("");
   });
 

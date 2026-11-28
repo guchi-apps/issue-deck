@@ -103,7 +103,7 @@ export function ManualStepSessionPanel({
   // 手作業の内容を見て人が選ぶ入口なので、「設定に従う」は置かない。どのモデルで始まるかを
   // 起動前に明示するため、通常の実装開始と同じ3候補から既定のSonnetを選んだ状態で始める。
   const [claudeModel, setClaudeModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
-  const [codexModel, setCodexModel] = useState<CodexLocalModel>("gpt-5.6-terra");
+  const [codexModel, setCodexModel] = useState<CodexLocalModel>("gpt-6.1-terra");
   const { host, hostName, job, hasActiveJob, aliveSession, isManualStep, rejection, error, start } =
     useManualStepSessionLauncher(issue, dispatch, agent);
 
@@ -290,7 +290,7 @@ export function useManualStepSessionLauncher(
 
   async function start(
     model: ClaudeLocalModel | CodexLocalModel = agent === "codex"
-      ? "gpt-5.6-terra"
+      ? "gpt-6.1-terra"
       : CLAUDE_LOCAL_MODEL_DEFAULT,
   ) {
     if (!host) return false;
