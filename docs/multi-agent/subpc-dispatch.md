@@ -1208,6 +1208,15 @@ tmuxセッション <リポジトリ名>-plan-review-<番号> → 指摘はIssue
 - 失敗したときだけ`remain-on-exit failed`でペインが残る。次に同じIssueのレビューを起こしたとき、
   ランチャーが最後の出力を表示してから畳む。出力は
   `~/apps/issue-deck-worktrees/.plan-reviews/<リポジトリ名>-<番号>.log`にも残る
+- **実行状況のホストカードには、ジョブの状態から行を組んで出す**（#5655。`plan-review-host-rows.ts`）。
+  pollerが申告するtmuxの写し（`DispatchHost.planReviewSessions`・#3924）は約1分45秒おきにしか
+  更新されない。そのため、45秒で終わった解消確認は一度も写しに載らなかった。CPU逼迫で3分待った起動待ちも、ホストのカードには何も出なかった。
+  行は宛先ホスト（`targetHost`）の`PLAN_REVIEW`ジョブから組む。
+  - **起動待ち**は`QUEUED`で選び、経過時間では外さない（10分超の`queued_overdue`も残す）。
+  - **レビュー中**は`resolvePlanReviewJobPhase`が`creating`で、指摘（`reviewPostedAt`）が未着のもの。
+  - 写しは、ジョブが一覧に無いときの補助としてだけ足す。
+  - 起動待ちの理由には`launchHold`だけを出す。計画レビューはセッション上限に数えないので、実装の順番待ちの「上限に達している」は使わない。
+  - 外側の「計画レビュー」節には、宛先ホストが一覧に無いものだけを残す。
 
 ### 開発サーバーの回収も1巡に相乗りさせる（#1223）
 
